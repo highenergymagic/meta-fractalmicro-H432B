@@ -2,10 +2,12 @@
 SUMMARY = "Historical H432B U-Boot port, raw artifact only"
 LICENSE = "GPL-2.0-or-later"
 LIC_FILES_CHKSUM = "file://COPYING;md5=1707d6db1d42237583f50183a5651ecb"
-SRC_URI = "https://codeload.github.com/u-boot/u-boot/tar.gz/6528ff0109d81c1f21d20f9f1370782bccf87bcb;downloadfilename=u-boot-6528ff0109d81c1f21d20f9f1370782bccf87bcb.tar.gz \
+SRC_URI = "git://github.com/u-boot/u-boot.git;protocol=https;nobranch=1 \
     file://0001-hims-u2-rev51.patch file://0002-reproducible-timestamp.patch"
-SRC_URI[sha256sum] = "5a3778054d9e8afa53d4d84ce043c690ccb2072127b22428ba1b518d573da34e"
-S = "${UNPACKDIR}/u-boot-6528ff0109d81c1f21d20f9f1370782bccf87bcb"
+SRCREV = "6528ff0109d81c1f21d20f9f1370782bccf87bcb"
+BB_GIT_SHALLOW = "1"
+BB_GIT_SHALLOW_DEPTH = "1"
+S = "${UNPACKDIR}/git"
 B = "${S}"
 inherit deploy h432b-arm-gnu
 COMPATIBLE_MACHINE = "^h432b$"
