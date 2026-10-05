@@ -1,0 +1,35 @@
+--- a/drivers/mmc/core/sdio_cis.c
++++ b/drivers/mmc/core/sdio_cis.c
+@@ -12,6 +12,7 @@
+ #include <linux/kernel.h>
+ #include <linux/slab.h>
++#include <linux/property.h>
+ 
+ #include <linux/mmc/host.h>
+ #include <linux/mmc/card.h>
+ #include <linux/mmc/sdio.h>
+@@ -363,6 +364,24 @@
+ 		}
+ 
+ 		ptr += tpl_link;
++		/*
++		 * U2 bring-up quirk: this RTL8712 function1 has a valid FUNCE
++		 * at 0x1104 but no END after it. Unmodified enumeration scans
++		 * NULLs to the CMD52 address limit and fails -EINVAL. Require
++		 * the board opt-in AND the exact live-verified identity/layout;
++		 * never hide tuple parse errors or change the common CIS.
++		 */
++		if (!ret && func && func->num == 1 && ptr == 0x1130 &&
++		    tpl_code == 0x22 && tpl_link == 42 &&
++		    func->max_blksize == 512 && card->cis.vendor == 0x024c &&
++		    card->cis.device == 0x8712 &&
++		    device_property_read_bool(card->host->parent,
++					      "hims,rtl8712-cis-end-quirk")) {
++			pr_warn("%s: U2 RTL8712 function1 missing CIS END; "
++				"stop after validated FUNCE at 0x1130\n",
++				mmc_hostname(card->host));
++			break;
++		}
+ 	} while (!ret);
+ 
+ 	/*

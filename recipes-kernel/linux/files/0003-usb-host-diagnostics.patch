@@ -1,0 +1,49 @@
+--- a/drivers/phy/samsung/phy-s5pv210-usb2.c
++++ b/drivers/phy/samsung/phy-s5pv210-usb2.c
+@@ -166,7 +166,18 @@
+ 	s5pv210_isol(inst, 0);
+ 	s5pv210_phy_pwr(inst, 1);
+ 
++	if (inst->cfg->id == S5PV210_HOST) {
++		struct samsung_usb2_phy_driver *drv = inst->drv;
++		u32 isol = 0;
++		regmap_read(drv->reg_pmu, S5PV210_USB_ISOL_OFFSET, &isol);
++		dev_info(drv->dev,
++			 "U2 host snapshot: isolation=%08x pwr=%08x clk=%08x rst=%08x\n",
++			 isol,
++			 readl(drv->reg_phy + S5PV210_UPHYPWR),
++			 readl(drv->reg_phy + S5PV210_UPHYCLK),
++			 readl(drv->reg_phy + S5PV210_UPHYRST));
++	}
+ 	return 0;
+ }
+ 
+ static int s5pv210_power_off(struct samsung_usb2_phy_instance *inst)
+--- a/drivers/usb/host/ehci-exynos.c
++++ b/drivers/usb/host/ehci-exynos.c
+@@ -202,6 +202,11 @@
+ 	/* DMA burst Enable */
+ 	writel(EHCI_INSNREG00_ENABLE_DMA_BURST, EHCI_INSNREG00(hcd->regs));
+ 
++	dev_info(&pdev->dev, "U2 EHCI snapshot: cap=%08x hcs=%08x cmd=%08x sts=%08x\n",
++		 readl(hcd->regs), readl(hcd->regs + 4),
++		 readl(hcd->regs + 0x10), readl(hcd->regs + 0x14));
++	/* Diagnostic only: USB core still owns the normal reset sequence. */
++
+ 	err = usb_add_hcd(hcd, irq, IRQF_SHARED);
+ 	if (err) {
+ 		dev_err(&pdev->dev, "Failed to add USB HCD\n");
+--- a/drivers/usb/host/ohci-exynos.c
++++ b/drivers/usb/host/ohci-exynos.c
+@@ -182,6 +182,11 @@
+ 	if (exynos_ohci->legacy_phy)
+ 		pdev->dev.of_node = NULL;
+ 
++	dev_info(&pdev->dev, "U2 OHCI snapshot: rev=%08x ctl=%08x cmd=%08x frame=%08x\n",
++		 readl(hcd->regs), readl(hcd->regs + 4),
++		 readl(hcd->regs + 8), readl(hcd->regs + 0x34));
++	/* Diagnostic only: no additional controller writes. */
++
+ 	err = usb_add_hcd(hcd, irq, IRQF_SHARED);
+ 	if (err) {
+ 		dev_err(&pdev->dev, "Failed to add USB HCD\n");

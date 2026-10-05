@@ -1,0 +1,144 @@
+diff --git a/drivers/clk/samsung/clk-s5pv210.c b/drivers/clk/samsung/clk-s5pv210.c
+--- a/drivers/clk/samsung/clk-s5pv210.c
++++ b/drivers/clk/samsung/clk-s5pv210.c
+@@ -711,56 +711,67 @@
+ 	ALIAS(MOUT_DMC0, NULL, "sclk_dmc0"),
+ };
+ 
+-/* S5PV210-specific PLLs. */
+-static const struct samsung_pll_clock s5pv210_pll_clks[] __initconst = {
+-	[apll] = PLL(pll_4508, FOUT_APLL, "fout_apll", "fin_pll",
+-						APLL_LOCK, APLL_CON0, NULL),
+-	[mpll] = PLL(pll_4502, FOUT_MPLL, "fout_mpll", "fin_pll",
+-						MPLL_LOCK, MPLL_CON, NULL),
+-	[epll] = PLL(pll_4600, FOUT_EPLL, "fout_epll", "fin_pll",
+-						EPLL_LOCK, EPLL_CON0, NULL),
+-	[vpll] = PLL(pll_4502, FOUT_VPLL, "fout_vpll", "mout_vpllsrc",
+-						VPLL_LOCK, VPLL_CON, NULL),
+-};
+-
+-/* S5P6442-specific PLLs. */
+-static const struct samsung_pll_clock s5p6442_pll_clks[] __initconst = {
+-	[apll] = PLL(pll_4502, FOUT_APLL, "fout_apll", "fin_pll",
+-						APLL_LOCK, APLL_CON0, NULL),
+-	[mpll] = PLL(pll_4502, FOUT_MPLL, "fout_mpll", "fin_pll",
+-						MPLL_LOCK, MPLL_CON, NULL),
+-	[epll] = PLL(pll_4500, FOUT_EPLL, "fout_epll", "fin_pll",
+-						EPLL_LOCK, EPLL_CON0, NULL),
+-	[vpll] = PLL(pll_4500, FOUT_VPLL, "fout_vpll", "fin_pll",
+-						VPLL_LOCK, VPLL_CON, NULL),
+-};
+-
+-static void __init __s5pv210_clk_init(struct device_node *np,
+-				      unsigned long xxti_f,
+-				      unsigned long xusbxti_f,
+-				      bool is_s5p6442)
+-{
+-	struct samsung_clk_provider *ctx;
+-	struct clk_hw **hws;
+-
+-	ctx = samsung_clk_init(NULL, reg_base, NR_CLKS);
+-	hws = ctx->clk_data.hws;
+-
+-	samsung_clk_register_mux(ctx, early_mux_clks,
+-					ARRAY_SIZE(early_mux_clks));
+-
+-	if (is_s5p6442) {
+-		samsung_clk_register_fixed_rate(ctx, s5p6442_frate_clks,
+-			ARRAY_SIZE(s5p6442_frate_clks));
+-		samsung_clk_register_pll(ctx, s5p6442_pll_clks,
+-			ARRAY_SIZE(s5p6442_pll_clks));
+-		samsung_clk_register_mux(ctx, s5p6442_mux_clks,
+-				ARRAY_SIZE(s5p6442_mux_clks));
+-		samsung_clk_register_div(ctx, s5p6442_div_clks,
+-				ARRAY_SIZE(s5p6442_div_clks));
+-		samsung_clk_register_gate(ctx, s5p6442_gate_clks,
+-				ARRAY_SIZE(s5p6442_gate_clks));
+-	} else {
++/* H432B CE audio setting, 24 MHz reference: EPLL_CON0=0x88430303,
++ * EPLL_CON1=0xbcee. Actual output is 67738006 Hz (about +6 ppm
++ * from nominal 67737600). Keep the rate table honest about that value.
++ */
++static const struct samsung_pll_rate_table s5pv210_epll_24m[] __initconst = {
++	PLL_4600_RATE(24000000, 67738006, 67, 3, 3, 48366, 1),
++	{ },
++};
++
++/* S5PV210-specific PLLs. */
++static struct samsung_pll_clock s5pv210_pll_clks[] __initdata = {
++	[apll] = PLL(pll_4508, FOUT_APLL, "fout_apll", "fin_pll",
++						APLL_LOCK, APLL_CON0, NULL),
++	[mpll] = PLL(pll_4502, FOUT_MPLL, "fout_mpll", "fin_pll",
++						MPLL_LOCK, MPLL_CON, NULL),
++	[epll] = PLL(pll_4600, FOUT_EPLL, "fout_epll", "fin_pll",
++						EPLL_LOCK, EPLL_CON0, NULL),
++	[vpll] = PLL(pll_4502, FOUT_VPLL, "fout_vpll", "mout_vpllsrc",
++						VPLL_LOCK, VPLL_CON, NULL),
++};
++
++/* S5P6442-specific PLLs. */
++static const struct samsung_pll_clock s5p6442_pll_clks[] __initconst = {
++	[apll] = PLL(pll_4502, FOUT_APLL, "fout_apll", "fin_pll",
++						APLL_LOCK, APLL_CON0, NULL),
++	[mpll] = PLL(pll_4502, FOUT_MPLL, "fout_mpll", "fin_pll",
++						MPLL_LOCK, MPLL_CON, NULL),
++	[epll] = PLL(pll_4500, FOUT_EPLL, "fout_epll", "fin_pll",
++						EPLL_LOCK, EPLL_CON0, NULL),
++	[vpll] = PLL(pll_4500, FOUT_VPLL, "fout_vpll", "fin_pll",
++						VPLL_LOCK, VPLL_CON, NULL),
++};
++
++static void __init __s5pv210_clk_init(struct device_node *np,
++				      unsigned long xxti_f,
++				      unsigned long xusbxti_f,
++				      bool is_s5p6442)
++{
++	struct samsung_clk_provider *ctx;
++	struct clk_hw **hws;
++
++	ctx = samsung_clk_init(NULL, reg_base, NR_CLKS);
++	hws = ctx->clk_data.hws;
++
++	samsung_clk_register_mux(ctx, early_mux_clks,
++					ARRAY_SIZE(early_mux_clks));
++
++	if (is_s5p6442) {
++		samsung_clk_register_fixed_rate(ctx, s5p6442_frate_clks,
++			ARRAY_SIZE(s5p6442_frate_clks));
++		samsung_clk_register_pll(ctx, s5p6442_pll_clks,
++			ARRAY_SIZE(s5p6442_pll_clks));
++		samsung_clk_register_mux(ctx, s5p6442_mux_clks,
++				ARRAY_SIZE(s5p6442_mux_clks));
++		samsung_clk_register_div(ctx, s5p6442_div_clks,
++				ARRAY_SIZE(s5p6442_div_clks));
++		samsung_clk_register_gate(ctx, s5p6442_gate_clks,
++				ARRAY_SIZE(s5p6442_gate_clks));
++	} else {
++		if (clk_hw_get_rate(hws[FIN_PLL]) == 24000000)
++			s5pv210_pll_clks[epll].rate_table = s5pv210_epll_24m;
+ 		samsung_clk_register_fixed_rate(ctx, s5pv210_frate_clks,
+ 			ARRAY_SIZE(s5pv210_frate_clks));
+ 		samsung_clk_register_pll(ctx, s5pv210_pll_clks,
+diff --git a/sound/soc/codecs/wm8983.c b/sound/soc/codecs/wm8983.c
+--- a/sound/soc/codecs/wm8983.c
++++ b/sound/soc/codecs/wm8983.c
+@@ -1025,9 +1025,16 @@
+ 	return ret;
+ }
+ 
+-static struct spi_driver wm8983_spi_driver = {
+-	.driver = {
+-		.name = "wm8983",
++static const struct of_device_id wm8983_of_match[] = {
++	{ .compatible = "wlf,wm8983" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, wm8983_of_match);
++
++static struct spi_driver wm8983_spi_driver = {
++	.driver = {
++		.name = "wm8983",
++		.of_match_table = wm8983_of_match,
+ 	},
+ 	.probe = wm8983_spi_probe,
+ };

@@ -1,0 +1,226 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * HIMS BrailleSense U2 (H432B)
+ *
+ * Initial evidence-led board description for Linux CIP 6.12.y-rt.
+ *
+ * This is intentionally conservative.  Nodes are enabled only where the
+ * supplied Windows CE image or live read-only inventory establishes the SoC
+ * peripheral and its role.  Board GPIO wiring is *not* inferred from a
+ * similarly named S5PV210 development board.
+ */
+
+/dts-v1/;
+
+#include "s5pv210.dtsi"
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	model = "HIMS BrailleSense U2 (H432B)";
+	compatible = "hims,braillesense-u2", "samsung,s5pv210";
+
+	chosen {
+		bootargs = "console=ttyGS0,115200 rdinit=/init loglevel=8 ignore_loglevel clk_ignore_unused g_serial.iProduct=OpenH432-RAM g_serial.iSerialNumber=H432-RAM-TEST";
+	};
+
+	/* CE ROM header and the product specification both report 256 MiB. */
+	memory@40000000 {
+		device_type = "memory";
+		reg = <0x40000000 0x10000000>;
+	};
+
+	/*
+	 * Bindings for these bespoke devices will be added with their drivers.
+	 * Leaving them disabled makes the safe state explicit: no cell rail, no
+	 * guessed keys, and no guessed LCD or power GPIO is touched at first boot.
+	 */
+	braille {
+		compatible = "hims,braillesense-u2-braille";
+		status = "disabled";
+	};
+
+	keys {
+		compatible = "hims,braillesense-u2-keys";
+		status = "disabled";
+	};
+
+	/* Custom read-only diagnostic binding; no program/erase or guessed ECC. */
+	nand@b0e00000 {
+		compatible = "hims,u2-nand-readonly";
+		reg = <0xb0e00000 0x1000>;
+	};
+};
+
+/* Override upstream labelled oscillators, not a new unreferenced node. */
+&xusbxti { clock-frequency = <24000000>; };
+&xxti { clock-frequency = <24000000>; };
+
+/*
+ * CE's HSC1:/SDMMC_CH1 profile points to the internal flashdisk. This is a
+ * candidate mapping until the live card identity and capacity are checked.
+ */
+&sdhci1 {
+	bus-width = <4>;
+	non-removable;
+	cap-mmc-highspeed;
+	/* Board-scoped block-layer guard in the diagnostic kernel patch. */
+	hims,read-only-probe;
+	max-frequency = <25000000>;
+	no-1-8-v;
+	no-sdio;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sd1_clk &sd1_cmd &sd1_bus1 &sd1_bus4>;
+	status = "okay";
+};
+
+/* CE CH2 configures the external card-detect GPIO; CH3 does not. Probe CH3
+ * for the internally registered RTL8712 SDIO function. No Wi-Fi driver yet. */
+&sdhci3 {
+	/* This is the controller's input selector, NOT its channel number.
+	 * CE writes CONTROL2 baseclk=2; the upstream .3 label stalls its clock. */
+	clock-names = "hsmmc", "mmc_busclk.0", "mmc_busclk.2";
+	bus-width = <4>;
+	non-removable;
+	cap-sdio-irq;
+	no-mmc;
+	no-sd;
+	no-1-8-v;
+	max-frequency = <25000000>;
+	post-power-on-delay-ms = <200>;
+	hims,read-only-probe;
+	/* Live 024c:8712 function1 lacks CIS END after its valid FUNCE. */
+	hims,rtl8712-cis-end-quirk;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sd3_clk &sd3_cmd &sd3_bus1 &sd3_bus4>;
+	status = "okay";
+};
+
+/* Diagnostic fixed-on state, not a final runtime-power binding. Exact CE
+ * house.dll selector7 ON order: GPE0[3] high, then GPH1[0] low. GPIO banks
+ * register in that order. Stock pinmux already configures both as outputs.
+ * Neither line is a braille or PMIC control. */
+&gpe0 {
+	wifi-enable-hog {
+		gpio-hog;
+		gpios = <3 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "u2-wifi-enable-diagnostic";
+	};
+};
+&gph1 {
+	wifi-reset-hog {
+		gpio-hog;
+		gpios = <0 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "u2-wifi-reset-diagnostic";
+	};
+};
+
+/* Normal CE USB Sync proves this controller/PHY as a device-mode function. */
+&hsotg {
+	dr_mode = "peripheral";
+	status = "okay";
+};
+
+&usbphy {
+	status = "okay";
+};
+
+/* Separate host controller/PHY: keep HSOTG's USB console in device mode.
+ * Board hub/VBUS GPIOs are inherited, not guessed or changed here. */
+&ehci { status = "okay"; };
+&ohci { status = "okay"; };
+
+/*
+ * CE's smsc9118.dll registry gives IoBaseAddress=0xA8000000 and
+ * InterruptNumber=9.  On S5PV210 EINT9 is GPH1[1], matching the S5PV210
+ * external-bus wiring convention.  The LAN9118 binding retains LAN9115 as
+ * its fallback compatible.
+ */
+&{/} {
+	ethernet@a8000000 {
+		compatible = "smsc,lan9118", "smsc,lan9115";
+		reg = <0xa8000000 0x10000>;
+		interrupt-parent = <&gph1>;
+		interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
+		status = "disabled";
+	};
+};
+
+/*
+ * The EBOOT menu is UART-only, but no UART has been physically identified.
+ * Keep every UART disabled until a non-invasive pin/path identification pass.
+ */
+&uart0 { status = "disabled"; };
+&uart1 { status = "disabled"; };
+&uart2 { status = "disabled"; };
+&uart3 { status = "disabled"; };
+
+/*
+ * Do not enable external SD, LCD/FIMD, I2C, keypad, Ethernet,
+ * Bluetooth, GPS, backlight, or regulators here.  Their board-level
+ * address, GPIO, supply, interrupt, and/or polarity information is not yet
+ * proven for H432B.
+ */
+
+/* Audio wiring recovered from CE wavedev.dll, not a reference board.
+ * Diagnostic playback only; no PMIC, system-5V, braille or mic controls.
+ */
+&{/} {
+	codec_control: codec-spi {
+		compatible = "spi-gpio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		num-chipselects = <1>;
+		sck-gpios = <&gpb 0 GPIO_ACTIVE_HIGH>;
+		mosi-gpios = <&gpb 3 GPIO_ACTIVE_HIGH>;
+		cs-gpios = <&gpb 1 GPIO_ACTIVE_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&u2_codec_spi_pins>;
+
+		wm8983: codec@0 {
+			compatible = "wlf,wm8983";
+			reg = <0>;
+			spi-max-frequency = <100000>;
+			#sound-dai-cells = <0>;
+		};
+	};
+
+	sound {
+		compatible = "hims,u2-audio-diagnostic";
+		hims,i2s-controller = <&i2s0>;
+		hims,audio-codec = <&wm8983>;
+		unmute-gpios = <&gpd0 1 GPIO_ACTIVE_HIGH>;
+		speaker-gpios = <&gpe0 0 GPIO_ACTIVE_HIGH>;
+		clocks = <&clocks FOUT_EPLL>, <&clk_audss CLK_MOUT_AUDSS>,
+			 <&clk_audss CLK_MOUT_I2S_A>,
+			 <&clk_audss CLK_DOUT_AUD_BUS>, <&clk_audss CLK_I2S>;
+		clock-names = "epll", "audmux", "i2smux", "bus", "i2s";
+	};
+};
+
+&pinctrl0 {
+	u2_codec_spi_pins: u2-codec-spi-pins {
+		samsung,pins = "gpb-0", "gpb-1", "gpb-3";
+		samsung,pin-function = <S5PV210_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <S5PV210_PIN_PULL_NONE>;
+	};
+	u2_i2s_pins: u2-i2s-pins {
+		/* Stock selects only GPI0..4, not the extra multichannel pins. */
+		samsung,pins = "gpi-0", "gpi-1", "gpi-2", "gpi-3", "gpi-4";
+		samsung,pin-function = <S5PV210_PIN_FUNC_2>;
+		samsung,pin-pud = <S5PV210_PIN_PULL_NONE>;
+	};
+};
+
+&i2s0 {
+	/* IISMOD[10]=1 selects the divided functional I2S clock, not AUD_BUS.
+	 * The old reversed mapping made the driver divide by four a second time.
+	 * Selecting opclk1 also enables functional gate6 through CCF.
+	 */
+	clocks = <&clk_audss CLK_HCLK_I2S>, <&clk_audss CLK_DOUT_AUD_BUS>,
+		 <&clk_audss CLK_I2S>;
+	pinctrl-0 = <&u2_i2s_pins>;
+	status = "okay";
+};

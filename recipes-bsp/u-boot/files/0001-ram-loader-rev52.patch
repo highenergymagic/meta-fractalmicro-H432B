@@ -1,0 +1,334 @@
+diff --git a/arch/arm/lib/board.c b/arch/arm/lib/board.c
+index ab7a496..42c415b 100644
+--- a/arch/arm/lib/board.c
++++ b/arch/arm/lib/board.c
+@@ -355,10 +355,9 @@ void board_init_f(ulong bootflag)
+ 
+ 	addr = CONFIG_SYS_SDRAM_BASE + gd->ram_size;
+ #ifdef CONFIG_HIMS_U2
+-	/* Rev41: preserve the real RAM size in gd/boot tags but reserve U-Boot's
+-	 * later bd, gd and stack below 14 MiB. The initial stack is at 15 MiB.
+-	 * This isolates high-DRAM dependence from relocation-copy failures. */
+-	addr = CONFIG_SYS_SDRAM_BASE + 0x00e00000;
++	/* RAM Linux loader: keep its allocation arena above the kernel's
++	 * decompression region, while advertising the full DRAM bank. */
++	addr = CONFIG_U2_ALLOC_TOP;
+ #endif
+ 
+ #ifdef CONFIG_LOGBUFFER
+@@ -544,7 +543,7 @@ void board_init_r(gd_t *id, ulong dest_addr)
+ 
+ 	/* The in-place U2 image has no spare RAM immediately below it. */
+ #ifdef CONFIG_HIMS_U2
+-	malloc_start = CONFIG_SYS_SDRAM_BASE + 0x00800000;
++	malloc_start = CONFIG_U2_MALLOC_BASE;
+ #else
+ 	malloc_start = dest_addr - TOTAL_MALLOC_LEN;
+ #endif
+diff --git a/arch/arm/lib/bootm.c b/arch/arm/lib/bootm.c
+index a9070d5..5f4fe75 100644
+--- a/arch/arm/lib/bootm.c
++++ b/arch/arm/lib/bootm.c
+@@ -94,6 +94,15 @@ static int fixup_memory_node(void *blob)
+ 
+ static void announce_and_cleanup(void)
+ {
++#ifdef CONFIG_HIMS_U2
++	extern int u2probe_stop(void);
++	extern void u2_braille_kernel_start(void);
++	u2_braille_kernel_start();
++	if (u2probe_stop()) {
++		puts("USB teardown failed; kernel handoff halted\n");
++		for (;;) ;
++	}
++#endif
+ 	printf("\nStarting kernel ...\n\n");
+ 	bootstage_mark_name(BOOTSTAGE_ID_BOOTM_HANDOFF, "start_kernel");
+ #ifdef CONFIG_BOOTSTAGE_REPORT
+diff --git a/board/hims/u2/Makefile b/board/hims/u2/Makefile
+index b33f8f9..5b2daba 100644
+--- a/board/hims/u2/Makefile
++++ b/board/hims/u2/Makefile
+@@ -1,9 +1,8 @@
+ #
+ # BrailleSense U2: an EBOOT-launched S5PV210 payload board.
+ #
+-# The EBOOT handoff state is deliberate.  EBOOT maps physical DRAM at
+-# 0x20000000 into the CE-visible 0x80000000 window before the B000FF entry.
+-# Dropping EBOOT's MMU translation would be unsafe on this board.
++# RAM-only second stage entered by the existing rev51 U-Boot shell.
++# Physical DRAM is 0x40000000; the OEM launch left the MMU disabled.
+ #
+ include $(TOPDIR)/config.mk
+ 
+diff --git a/board/hims/u2/config.mk b/board/hims/u2/config.mk
+index 6f787d2..3f9d2c3 100644
+--- a/board/hims/u2/config.mk
++++ b/board/hims/u2/config.mk
+@@ -1,4 +1,4 @@
+ # The CE-compatible carrier begins at CE VA 0x80020000 (PA 0x40020000),
+ # but its U-Boot code begins 0x1000 bytes later, at physical 0x40021000.
+ # The frozen revision 7 direct carrier instead links at 0x40020000.
+-CONFIG_SYS_TEXT_BASE = 0x40021000
++CONFIG_SYS_TEXT_BASE = 0x46000000
+diff --git a/board/hims/u2/u2probe.c b/board/hims/u2/u2probe.c
+index fc3e4c3..7d02aee 100644
+--- a/board/hims/u2/u2probe.c
++++ b/board/hims/u2/u2probe.c
+@@ -6,6 +6,8 @@
+ #include <linux/usb/gadget.h>
+ #include <usb/s3c_udc.h>
+ #include <command.h>
++#include <libfdt.h>
++#include "u2ram.h"
+ 
+ /* USB control-only diagnostic shell.  Commands can change hardware state. */
+ #define U2_USB_OTG      0xec000000UL
+@@ -24,6 +26,19 @@ static unsigned command_state; /* 0 idle, 1 queued, 2 running, 3 complete */
+ static int command_result;
+ static int receiving_command;
+ static int output_truncated;
++static struct u2_ram_slot slots[U2_RAM_SLOTS];
++static unsigned selected;
++static unsigned receiving_ram;
++static unsigned rx_length;
++static u8 ram_rx[60];
++static int active;
++
++static u32 get32(const u8 *p) {
++ return p[0] | (u32)p[1]<<8 | (u32)p[2]<<16 | (u32)p[3]<<24;
++}
++static void put32(u8 *p, u32 n) {
++ p[0]=n; p[1]=n>>8; p[2]=n>>16; p[3]=n>>24;
++}
+ 
+ void u2_console_append(char c)
+ {
+@@ -46,6 +61,23 @@ static const u8 qualifier[] = {10,USB_DT_DEVICE_QUALIFIER,0x00,0x02,
+ static const char *strings[] = {"U2 Open","BrailleSense U2 probe","diagnostic command interface"};
+ static void completed(struct usb_ep *ep, struct usb_request *r) {
+  unsigned n;
++ if (receiving_ram) {
++  unsigned kind=receiving_ram;
++  receiving_ram=0;
++  if (r->status || r->actual!=rx_length) {
++   slots[selected].state=U2_RAM_ERROR;
++   return;
++  }
++  if (kind==1) {
++   u2_ram_begin(&slots[selected],selected,get32(ram_rx),get32(ram_rx+4));
++  } else {
++   u32 offset=get32(ram_rx);
++   n=r->actual-4;
++   if (!u2_ram_accept(&slots[selected],offset,n))
++    memcpy((void *)(u2_ram_address[selected]+offset),ram_rx+4,n);
++  }
++  return;
++ }
+  if (!receiving_command) return;
+  receiving_command=0;
+  if (r->status || !r->actual || r->actual > sizeof(command_rx)) return;
+@@ -80,7 +112,37 @@ static int setup(struct usb_gadget *g,const struct usb_ctrlrequest *r) {
+  if (t==0x81 && r->bRequest==USB_REQ_GET_INTERFACE) {
+   static const u8 alt=0; return send(g,&alt,min((unsigned)wl,1U));
+  }
+- if (t==0xc0 && r->bRequest==0x51) { static const u8 x[]={'U','2','P','R','O','B','E',51,0,2,0,0}; return send(g,x,min((unsigned)wl,(unsigned)sizeof(x))); }
++ if (t==0xc0 && r->bRequest==0x51) { static const u8 x[]={'U','2','P','R','O','B','E',52,1,2,0,0}; return send(g,x,min((unsigned)wl,(unsigned)sizeof(x))); }
++ /* BEGIN(size,CRC), sequential DATA(offset,bytes), FINISH, STATUS, ABORT.
++  * No transfer can select MMIO, NAND, or the running loader's memory. */
++ if (t==0x40 && wv==0x3255 && wi<U2_RAM_SLOTS &&
++     command_state!=1 && command_state!=2) {
++  if (r->bRequest==0x55 && wl==8) {
++   selected=wi; slots[selected].state=U2_RAM_EMPTY;
++   receiving_ram=1;
++  } else if (r->bRequest==0x56 && wl>4 && wl<=60 && wi==selected &&
++             slots[selected].state==U2_RAM_RX) {
++   receiving_ram=2;
++  } else if (r->bRequest==0x58 && wl==0 && wi==selected) {
++   u2_ram_finish(&slots[selected]);
++   return send(g,reply,0);
++  } else if (r->bRequest==0x59 && wl==0) {
++   memset(&slots[wi],0,sizeof(slots[wi]));
++   return send(g,reply,0);
++  } else return -EINVAL;
++  receiving_command=0; rx_length=wl;
++  req->buf=ram_rx; req->length=wl; req->zero=0;
++  return usb_ep_queue(g->ep0,req,0);
++ }
++ if (t==0xc0 && r->bRequest==0x57 && wi<U2_RAM_SLOTS) {
++  u8 status[24]={'U','2','R','M',0};
++  status[4]=slots[wi].state; status[5]=wi;
++  put32(status+8,slots[wi].size);
++  put32(status+12,slots[wi].received);
++  put32(status+16,slots[wi].expected_crc);
++  put32(status+20,slots[wi].actual_crc);
++  return send(g,status,min((unsigned)wl,24U));
++ }
+  /* Diagnostic shell: OUT command, then IN status and output slices.
+   * Magic guards against accidental requests; it is not authentication. */
+  if (t==0x40 && r->bRequest==0x52 && wv==0x3255 && wi==0x4f50 &&
+@@ -107,7 +169,10 @@ static int setup(struct usb_gadget *g,const struct usb_ctrlrequest *r) {
+ }
+ static int bind(struct usb_gadget *g) { req=usb_ep_alloc_request(g->ep0,0); if (!req)return -ENOMEM; req->complete=completed; return 0; }
+ static void unbind(struct usb_gadget *g) { if(req) usb_ep_free_request(g->ep0,req); req=0; }
+-static void gone(struct usb_gadget *g) {}
++static void gone(struct usb_gadget *g) {
++ memset(slots,0,sizeof(slots));
++ receiving_ram=receiving_command=0;
++}
+ static struct usb_gadget_driver driver={.speed=USB_SPEED_HIGH,.bind=bind,.unbind=unbind,.setup=setup,.disconnect=gone};
+ /* EBOOT enables this S5PC110 OTG clock gate first. The U2-specific UDC
+  * path then replays EBOOT's oscillator, PHY and core-reset sequence before
+@@ -130,10 +195,49 @@ int u2probe_start(void) {
+  r=s3c_udc_probe(&pdata); if(r)return r;
+  /* Service EP0 immediately after registration. */
+  r=usb_gadget_register_driver(&driver);
++ active=!r;
+  return r;
+ }
++int u2probe_stop(void) {
++ int r;
++ if (!active) return 0;
++ /* Disconnect and disable core DMA/interrupts before freeing requests.
++  * Leave rails alone; Linux's PHY driver performs the next initialization. */
++ writel(readl(U2_USB_OTG+0x804) | 2, U2_USB_OTG+0x804);
++ writel(0, U2_USB_OTG+0x18);
++ writel(0, U2_USB_OTG+0x08);
++ __asm__ volatile("dsb sy" : : : "memory");
++ r=usb_gadget_unregister_driver(&driver);
++ if (!r) active=0;
++ return r;
++}
++
++static int do_u2linux(cmd_tbl_t *cmdtp,int flag,int argc,char *const argv[]) {
++ unsigned i;
++ char command[96];
++ if (argc!=1) return CMD_RET_USAGE;
++ for (i=0;i<U2_RAM_SLOTS;i++) {
++  if (slots[i].state!=U2_RAM_VALID ||
++      crc32(0,(void *)u2_ram_address[i],slots[i].size)!=slots[i].expected_crc) {
++   puts("Linux refused: all three RAM images must pass CRC verification\n");
++   return CMD_RET_FAILURE;
++  }
++ }
++ if (slots[0].size<48 || readl(0x42000024)!=0x016f2818 ||
++     slots[1].size<40 || fdt_check_header((void *)0x44000000) ||
++     fdt_totalsize((void *)0x44000000)>slots[1].size) {
++  puts("Linux refused: invalid zImage or DTB header\n");
++  return CMD_RET_FAILURE;
++ }
++ snprintf(command,sizeof(command),"bootz 42000000 44400000:%x 44000000",slots[2].size);
++ return run_command(command,0);
++}
++U_BOOT_CMD(u2linux,1,0,do_u2linux,"boot the three verified RAM images","");
++
+ void u2probe_poll(void) {
+  usb_gadget_handle_interrupts();
++ if (slots[selected].state==U2_RAM_VERIFY)
++  u2_ram_checked(&slots[selected],crc32(0,(void *)u2_ram_address[selected],slots[selected].size));
+  if (command_state==1) {
+   command_state=2;
+   output_len=0; output_truncated=0; command_result=0;
+diff --git a/rev52/board/hims/u2/u2ram.h b/board/hims/u2/u2ram.h
+new file mode 100644
+index 0000000..2e2e5ce
+--- /dev/null
++++ b/board/hims/u2/u2ram.h
+@@ -0,0 +1,67 @@
++/* Fixed RAM-only upload slots; no caller-supplied destination addresses. */
++#ifndef U2_RAM_H
++#define U2_RAM_H
++
++#define U2_RAM_SLOTS 3
++#define U2_RAM_EMPTY 0
++#define U2_RAM_RX 1
++#define U2_RAM_VERIFY 2
++#define U2_RAM_VALID 3
++#define U2_RAM_ERROR 4
++
++struct u2_ram_slot {
++ unsigned state, size, received, expected_crc, actual_crc;
++};
++
++static const unsigned u2_ram_address[U2_RAM_SLOTS] = {
++ 0x42000000, 0x44000000, 0x44400000
++};
++static const unsigned u2_ram_limit[U2_RAM_SLOTS] = {
++ 0x02000000, 0x00100000, 0x01000000
++};
++
++static int u2_ram_begin(struct u2_ram_slot *s, unsigned id,
++                        unsigned size, unsigned crc)
++{
++ s->state = U2_RAM_ERROR;
++ s->size = s->received = s->actual_crc = 0;
++ s->expected_crc = crc;
++ if (id >= U2_RAM_SLOTS || !size || size > u2_ram_limit[id]) return -1;
++ s->size = size;
++ s->state = U2_RAM_RX;
++ return 0;
++}
++
++/* Check before copying. Offset is sequential; duplicates are rejected. */
++static int u2_ram_accept(struct u2_ram_slot *s, unsigned offset, unsigned n)
++{
++ if (s->state != U2_RAM_RX || offset != s->received || !n || n > 56 ||
++     s->received > s->size || n > s->size - s->received) {
++  s->state = U2_RAM_ERROR;
++  return -1;
++ }
++ s->received += n;
++ return 0;
++}
++
++static int u2_ram_finish(struct u2_ram_slot *s)
++{
++ if (s->state != U2_RAM_RX || s->received != s->size) {
++  s->state = U2_RAM_ERROR;
++  return -1;
++ }
++ s->state = U2_RAM_VERIFY;
++ return 0;
++}
++
++static int u2_ram_checked(struct u2_ram_slot *s, unsigned crc)
++{
++ s->actual_crc = crc;
++ if (s->state != U2_RAM_VERIFY || crc != s->expected_crc) {
++  s->state = U2_RAM_ERROR;
++  return -1;
++ }
++ s->state = U2_RAM_VALID;
++ return 0;
++}
++#endif
+diff --git a/include/configs/hims_u2.h b/include/configs/hims_u2.h
+index d648d3f..de1c019 100644
+--- a/include/configs/hims_u2.h
++++ b/include/configs/hims_u2.h
+@@ -32,7 +32,15 @@
+ #define CONFIG_SYS_MALLOC_LEN		(1 << 20)
+ #define CONFIG_SYS_MONITOR_BASE		CONFIG_SYS_TEXT_BASE
+ #define CONFIG_SYS_MONITOR_LEN		(256 << 10)
+-#define CONFIG_SYS_INIT_SP_ADDR	(CONFIG_SYS_SDRAM_BASE + 0x00f00000)
++#define CONFIG_SYS_INIT_SP_ADDR	0x46f00000
++#define CONFIG_U2_ALLOC_TOP	0x46e00000
++#define CONFIG_U2_MALLOC_BASE	0x46800000
++#define CONFIG_SYS_BOOTM_LEN	(32 << 20)
++#define CONFIG_OF_LIBFDT
++#define CONFIG_CMD_FDT
++#define CONFIG_CMD_BOOTZ
++#define CONFIG_SUPPORT_RAW_INITRD
++#define CONFIG_EXTRA_ENV_SETTINGS "fdt_high=ffffffff\0initrd_high=ffffffff\0"
+ #define CONFIG_SYS_MEMTEST_START	(CONFIG_SYS_SDRAM_BASE + 0x00100000)
+ #define CONFIG_SYS_MEMTEST_END		(CONFIG_SYS_SDRAM_BASE + 0x08000000)
+ #define CONFIG_SYS_LOAD_ADDR		(CONFIG_SYS_SDRAM_BASE + 0x01000000)
+@@ -63,7 +71,7 @@
+ #define CONFIG_BOOTCOMMAND		"u2 probe"
+ #define CONFIG_SYS_LONGHELP
+ #define CONFIG_SYS_HUSH_PARSER
+-#define CONFIG_SYS_PROMPT		"U2 (recovery payload) # "
++#define CONFIG_SYS_PROMPT		"U2 (RAM Linux loader) # "
+ #define CONFIG_SYS_CBSIZE		256
+ #define CONFIG_SYS_PBSIZE		384
+ #define CONFIG_SYS_MAXARGS		16

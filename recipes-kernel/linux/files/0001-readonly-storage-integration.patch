@@ -1,0 +1,79 @@
+--- a/drivers/mtd/nand/raw/Kconfig
++++ b/drivers/mtd/nand/raw/Kconfig
+@@ -10,6 +10,13 @@
+ 
+ if MTD_RAW_NAND
+ 
++config MTD_NAND_HIMS_U2_RO
++	bool "HIMS U2 inherited NAND read-only diagnostics"
++	depends on ARCH_S5PV210
++	help
++	  Raw, uncorrected reads only. Program, erase and data-out operations
++	  are refused. Preserves inherited controller timing and pinmux.
++
+ comment "Raw/parallel NAND flash controllers"
+ 
+ config MTD_NAND_DENALI
+--- a/drivers/mtd/nand/raw/Makefile
++++ b/drivers/mtd/nand/raw/Makefile
+@@ -1,5 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0
+ 
++obj-$(CONFIG_MTD_NAND_HIMS_U2_RO) += hims-u2-nand-ro.o
+ obj-$(CONFIG_MTD_RAW_NAND)		+= nand.o
+ obj-$(CONFIG_MTD_SM_COMMON) 		+= sm_common.o
+ 
+--- a/drivers/mmc/core/block.c
++++ b/drivers/mmc/core/block.c
+@@ -41,6 +41,7 @@
+ #include <linux/idr.h>
+ #include <linux/debugfs.h>
+ #include <linux/rpmb.h>
++#include <linux/property.h>
+ 
+ #include <linux/mmc/ioctl.h>
+ #include <linux/mmc/card.h>
+@@ -842,6 +843,12 @@
+ 	return 0;
+ }
+ 
++static bool mmc_u2_readonly(struct mmc_card *card)
++{
++	return device_property_read_bool(card->host->parent,
++					 "hims,read-only-probe");
++}
++
+ static int mmc_blk_ioctl(struct block_device *bdev, blk_mode_t mode,
+ 	unsigned int cmd, unsigned long arg)
+ {
+@@ -856,6 +863,10 @@
+ 		md = mmc_blk_get(bdev->bd_disk);
+ 		if (!md)
+ 			return -EINVAL;
++		if (mmc_u2_readonly(md->queue.card)) {
++			mmc_blk_put(md);
++			return -EROFS;
++		}
+ 		ret = mmc_blk_ioctl_cmd(md,
+ 					(struct mmc_ioc_cmd __user *)arg,
+ 					NULL);
+@@ -868,6 +879,10 @@
+ 		md = mmc_blk_get(bdev->bd_disk);
+ 		if (!md)
+ 			return -EINVAL;
++		if (mmc_u2_readonly(md->queue.card)) {
++			mmc_blk_put(md);
++			return -EROFS;
++		}
+ 		ret = mmc_blk_ioctl_multi_cmd(md,
+ 					(struct mmc_ioc_multi_cmd __user *)arg,
+ 					NULL);
+@@ -2522,6 +2537,8 @@
+ static inline int mmc_blk_readonly(struct mmc_card *card)
+ {
++	if (mmc_u2_readonly(card))
++		return 1;
+ 	return mmc_card_readonly(card) ||
+ 	       !(card->csd.cmdclass & CCC_BLOCK_WRITE);
+ }
+ 

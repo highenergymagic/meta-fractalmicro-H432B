@@ -1,0 +1,14 @@
+--- a/drivers/phy/samsung/phy-s5pv210-usb2.c
++++ b/drivers/phy/samsung/phy-s5pv210-usb2.c
+@@ -125,6 +125,11 @@
+ 
+ 		pwr = readl(drv->reg_phy + S5PV210_UPHYPWR);
+ 		pwr &= ~phypwr;
++		/* S5PC110 UM 5.8.2.1: reserved bit 8 must be one. The U2's
++		 * EBOOT device-mode path clears it; without it host registers
++		 * read as zero. Stock CE EHCI initializes UPHYPWR to 0x130. */
++		if (inst->cfg->id == S5PV210_HOST)
++			pwr |= BIT(8);
+ 		writel(pwr, drv->reg_phy + S5PV210_UPHYPWR);
+ 
+ 		rst = readl(drv->reg_phy + S5PV210_UPHYRST);

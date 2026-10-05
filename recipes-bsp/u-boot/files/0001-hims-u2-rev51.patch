@@ -1,0 +1,1470 @@
+diff --git a/arch/arm/config.mk b/arch/arm/config.mk
+index 24b9d7c..c65abbb 100644
+--- a/arch/arm/config.mk
++++ b/arch/arm/config.mk
+@@ -105,3 +105,6 @@ ifeq ($(GAS_BUG_12532),y)
+ PLATFORM_RELFLAGS += -fno-optimize-sibling-calls
+ endif
+ endif
++
++# GCC 5+ uses C99 inline semantics; this tree requires GNU89 extern inline.
++PLATFORM_CPPFLAGS += -fgnu89-inline
+diff --git a/arch/arm/cpu/armv7/s5p-common/cpu_info.c b/arch/arm/cpu/armv7/s5p-common/cpu_info.c
+index 1642733..6090bc5 100644
+--- a/arch/arm/cpu/armv7/s5p-common/cpu_info.c
++++ b/arch/arm/cpu/armv7/s5p-common/cpu_info.c
+@@ -24,6 +24,7 @@
+ #include <asm/io.h>
+ #include <asm/arch/clk.h>
+ 
++
+ /* Default is s5pc100 */
+ unsigned int s5p_cpu_id = 0xC100;
+ /* Default is EVT1 */
+@@ -32,7 +33,13 @@ unsigned int s5p_cpu_rev = 1;
+ #ifdef CONFIG_ARCH_CPU_INIT
+ int arch_cpu_init(void)
+ {
++#ifdef CONFIG_HIMS_U2
++	/* The board is known S5PC110; avoid raw PRO_ID until we know whether
++	 * EBOOT leaves the MMU enabled on the normal NAND handoff. */
++	s5p_cpu_id = 0xC110;
++#else
+ 	s5p_set_cpu_id();
++#endif
+ 
+ 	return 0;
+ }
+diff --git a/arch/arm/cpu/armv7/s5p-common/timer.c b/arch/arm/cpu/armv7/s5p-common/timer.c
+index bb0e795..dde0852 100644
+--- a/arch/arm/cpu/armv7/s5p-common/timer.c
++++ b/arch/arm/cpu/armv7/s5p-common/timer.c
+@@ -29,6 +29,29 @@
+ #include <asm/arch/clk.h>
+ #include <pwm.h>
+ 
++#ifdef CONFIG_HIMS_U2
++/* EBOOT leaves an MMU mapping in place; the stock PWM address is not mapped. */
++static volatile unsigned long u2_soft_ticks;
++
++int timer_init(void) { u2_soft_ticks = 0; return 0; }
++void reset_timer_masked(void) { u2_soft_ticks = 0; }
++unsigned long get_current_tick(void) { return u2_soft_ticks++; }
++unsigned long get_timer_masked(void) { return u2_soft_ticks++; }
++unsigned long get_timer(unsigned long base) { return get_timer_masked() - base; }
++void __udelay(unsigned long usec)
++{
++	/* Conservative software delay until a mapped hardware timer is identified. */
++	while (usec--) {
++		volatile unsigned long count = 200;
++		while (count--)
++			__asm__ __volatile__("nop");
++	}
++}
++unsigned long long get_ticks(void) { return get_timer_masked(); }
++unsigned long get_tbclk(void) { return CONFIG_SYS_HZ; }
++
++#else
++
+ DECLARE_GLOBAL_DATA_PTR;
+ 
+ unsigned long get_current_tick(void);
+@@ -150,3 +173,4 @@ unsigned long get_tbclk(void)
+ {
+ 	return CONFIG_SYS_HZ;
+ }
++#endif
+diff --git a/arch/arm/cpu/armv7/s5pc1xx/reset.S b/arch/arm/cpu/armv7/s5pc1xx/reset.S
+index c7a41d0..98334b6 100644
+--- a/arch/arm/cpu/armv7/s5pc1xx/reset.S
++++ b/arch/arm/cpu/armv7/s5pc1xx/reset.S
+@@ -22,6 +22,7 @@
+  */
+ 
+ #include <asm/arch/cpu.h>
++#include <config.h>
+ #include <linux/linkage.h>
+ 
+ #define S5PC100_SWRESET			0xE0200000
+diff --git a/arch/arm/cpu/armv7/start.S b/arch/arm/cpu/armv7/start.S
+index 7df97c5..d2579cc 100644
+--- a/arch/arm/cpu/armv7/start.S
++++ b/arch/arm/cpu/armv7/start.S
+@@ -132,6 +132,13 @@ reset:
+ 	bic	r0, r0, #0x1f
+ 	orr	r0, r0, #0xd3
+ 	msr	cpsr,r0
++#ifdef CONFIG_HIMS_U2
++	/* EBOOT has cleared SCTLR.M. Keep the watchdog disabled while
++	 * this physical-address payload owns the board. */
++	ldr	r1, =0xe2700000
++	mov	r0, #0
++	str	r0, [r1]
++#endif
+ 
+ /*
+  * Setup vector:
+@@ -161,6 +168,12 @@ call_board_init_f:
+ 	bic	sp, sp, #7 /* 8-byte alignment for ABI compliance */
+ 	ldr	r0,=0x00000000
+ 	bl	board_init_f
++#ifdef CONFIG_HIMS_U2
++	/* board_init_f must not return. Halt silently if it does. */
++u2_board_init_returned:
++	b	u2_board_init_returned
++#endif
++
+ 
+ /*------------------------------------------------------------------------------*/
+ 
+@@ -279,6 +292,13 @@ jump_2_ram:
+ 	mcr     p15, 0, r0, c12, c0, 0  @Set VBAR
+ #endif /* !Tegra20 */
+ 
++#ifdef CONFIG_HIMS_U2
++	/* Rev35: with no relocation, the board_init_r target is within ARM's
++	 * direct branch range. Avoid the cold image's table-derived jump. */
++	mov	r0, r5		/* gd_t */
++	mov	r1, r6		/* dest_addr */
++	b	board_init_r
++#else
+ 	ldr	r0, _board_init_r_ofs
+ 	adr	r1, _start
+ 	add	lr, r0, r1
+@@ -288,6 +308,7 @@ jump_2_ram:
+ 	mov	r1, r6		/* dest_addr */
+ 	/* jump to it ... */
+ 	mov	pc, lr
++#endif
+ 
+ _board_init_r_ofs:
+ 	.word board_init_r - _start
+@@ -491,29 +512,51 @@ ENDPROC(cpu_init_crit)
+ /*
+  * exception handlers
+  */
++#ifdef CONFIG_HIMS_U2
++	/* Keep faults finite and silent rather than entering a reboot loop. */
++	.macro u2_fault_halt
++1:	b	1b
++	.endm
++#endif
+ 	.align	5
+ undefined_instruction:
++#ifdef CONFIG_HIMS_U2
++	u2_fault_halt
++#else
+ 	get_bad_stack
+ 	bad_save_user_regs
+ 	bl	do_undefined_instruction
++#endif
+ 
+ 	.align	5
+ software_interrupt:
++#ifdef CONFIG_HIMS_U2
++	u2_fault_halt
++#else
+ 	get_bad_stack_swi
+ 	bad_save_user_regs
+ 	bl	do_software_interrupt
++#endif
+ 
+ 	.align	5
+ prefetch_abort:
++#ifdef CONFIG_HIMS_U2
++	u2_fault_halt
++#else
+ 	get_bad_stack
+ 	bad_save_user_regs
+ 	bl	do_prefetch_abort
++#endif
+ 
+ 	.align	5
+ data_abort:
++#ifdef CONFIG_HIMS_U2
++	u2_fault_halt
++#else
+ 	get_bad_stack
+ 	bad_save_user_regs
+ 	bl	do_data_abort
++#endif
+ 
+ 	.align	5
+ not_used:
+diff --git a/arch/arm/lib/board.c b/arch/arm/lib/board.c
+index 109a1ac..ab7a496 100644
+--- a/arch/arm/lib/board.c
++++ b/arch/arm/lib/board.c
+@@ -65,6 +65,10 @@
+ #endif
+ 
+ DECLARE_GLOBAL_DATA_PTR;
++#ifdef CONFIG_HIMS_U2
++extern int serial_init_dev(const int dev_index);
++#endif
++
+ 
+ ulong monitor_flash_len;
+ 
+@@ -268,7 +272,9 @@ init_fnc_t *init_sequence[] = {
+ void board_init_f(ulong bootflag)
+ {
+ 	bd_t *bd;
++#ifndef CONFIG_HIMS_U2
+ 	init_fnc_t **init_fnc_ptr;
++#endif
+ 	gd_t *id;
+ 	ulong addr, addr_sp;
+ #ifdef CONFIG_PRAM
+@@ -296,11 +302,29 @@ void board_init_f(ulong bootflag)
+ 	gd->fdt_blob = (void *)getenv_ulong("fdtcontroladdr", 16,
+ 						(uintptr_t)gd->fdt_blob);
+ 
++#ifdef CONFIG_HIMS_U2
++	/* EBOOT's cold NAND handoff fails before the first indirect call through
++	 * init_sequence. Use the same fixed U2 sequence with direct branches. */
++	if (arch_cpu_init()) hang();
++	if (timer_init()) hang();
++	if (env_init()) hang();
++	if (init_baudrate()) hang();
++	/* generic serial_init() dereferences a .data function pointer. Earlier
++	 * cold EBOOT loads failed at indirect calls; the U2 stub has no UART
++	 * hardware to initialize, so call it directly to isolate that hazard. */
++	if (serial_init_dev(2)) hang();
++	if (console_init_f()) hang();
++	if (display_banner()) hang();
++	if (checkboard()) hang();
++	if (dram_init()) hang();
++#else
+ 	for (init_fnc_ptr = init_sequence; *init_fnc_ptr; ++init_fnc_ptr) {
+ 		if ((*init_fnc_ptr)() != 0) {
+ 			hang ();
+ 		}
+ 	}
++#endif
++
+ 
+ #ifdef CONFIG_OF_CONTROL
+ 	/* For now, put this check after the console is ready */
+@@ -330,6 +354,12 @@ void board_init_f(ulong bootflag)
+ #endif
+ 
+ 	addr = CONFIG_SYS_SDRAM_BASE + gd->ram_size;
++#ifdef CONFIG_HIMS_U2
++	/* Rev41: preserve the real RAM size in gd/boot tags but reserve U-Boot's
++	 * later bd, gd and stack below 14 MiB. The initial stack is at 15 MiB.
++	 * This isolates high-DRAM dependence from relocation-copy failures. */
++	addr = CONFIG_SYS_SDRAM_BASE + 0x00e00000;
++#endif
+ 
+ #ifdef CONFIG_LOGBUFFER
+ #ifndef CONFIG_ALT_LB_ADDR
+@@ -437,6 +467,12 @@ void board_init_f(ulong bootflag)
+ 	/* Ram ist board specific, so move it to board code ... */
+ 	dram_init_banksize();
+ 	display_dram_config();	/* and display it */
++#ifdef CONFIG_HIMS_U2
++	/* Rev33: the CE carrier already runs at its physical link address.
++	 * Skip the RAM-to-RAM copy and .rel.dyn fixups; keep the separately
++	 * reserved high-DRAM stack and gd established above. */
++	addr = CONFIG_SYS_TEXT_BASE;
++#endif
+ 
+ 	gd->relocaddr = addr;
+ 	gd->start_addr_sp = addr_sp;
+@@ -444,6 +480,7 @@ void board_init_f(ulong bootflag)
+ 	debug("relocation Offset is: %08lx\n", gd->reloc_off);
+ 	memcpy(id, (void *)gd, sizeof(gd_t));
+ 
++
+ 	relocate_code(addr_sp, id, addr);
+ 
+ 	/* NOTREACHED - relocate_code() does not return */
+@@ -505,8 +542,12 @@ void board_init_r(gd_t *id, ulong dest_addr)
+ 	post_output_backlog();
+ #endif
+ 
+-	/* The Malloc area is immediately below the monitor copy in DRAM */
++	/* The in-place U2 image has no spare RAM immediately below it. */
++#ifdef CONFIG_HIMS_U2
++	malloc_start = CONFIG_SYS_SDRAM_BASE + 0x00800000;
++#else
+ 	malloc_start = dest_addr - TOTAL_MALLOC_LEN;
++#endif
+ 	mem_malloc_init (malloc_start, TOTAL_MALLOC_LEN);
+ 
+ #ifdef CONFIG_ARCH_EARLY_INIT_R
+diff --git a/rev51/board/hims/u2/Makefile b/board/hims/u2/Makefile
+new file mode 100644
+index 0000000..b33f8f9
+--- /dev/null
++++ b/board/hims/u2/Makefile
+@@ -0,0 +1,23 @@
++#
++# BrailleSense U2: an EBOOT-launched S5PV210 payload board.
++#
++# The EBOOT handoff state is deliberate.  EBOOT maps physical DRAM at
++# 0x20000000 into the CE-visible 0x80000000 window before the B000FF entry.
++# Dropping EBOOT's MMU translation would be unsafe on this board.
++#
++include $(TOPDIR)/config.mk
++
++LIB = $(obj)lib$(BOARD).o
++
++COBJS-y := u2.o u2probe.o
++SOBJS := lowlevel_init.o
++
++SRCS := $(SOBJS:.o=.S) $(COBJS-y:.o=.c)
++OBJS := $(addprefix $(obj),$(COBJS-y))
++SOBJS := $(addprefix $(obj),$(SOBJS))
++
++$(LIB): $(obj).depend $(SOBJS) $(OBJS)
++	$(call cmd_link_o_target, $(SOBJS) $(OBJS))
++
++include $(SRCTREE)/rules.mk
++sinclude $(obj).depend
+diff --git a/rev51/board/hims/u2/config.mk b/board/hims/u2/config.mk
+new file mode 100644
+index 0000000..6f787d2
+--- /dev/null
++++ b/board/hims/u2/config.mk
+@@ -0,0 +1,4 @@
++# The CE-compatible carrier begins at CE VA 0x80020000 (PA 0x40020000),
++# but its U-Boot code begins 0x1000 bytes later, at physical 0x40021000.
++# The frozen revision 7 direct carrier instead links at 0x40020000.
++CONFIG_SYS_TEXT_BASE = 0x40021000
+diff --git a/rev51/board/hims/u2/hims_u2.h b/board/hims/u2/hims_u2.h
+new file mode 100644
+index 0000000..43eaf7f
+--- /dev/null
++++ b/board/hims/u2/hims_u2.h
+@@ -0,0 +1,70 @@
++#ifndef __CONFIG_HIMS_U2_H
++#define __CONFIG_HIMS_U2_H
++
++#define CONFIG_SAMSUNG		1
++#define CONFIG_S5P		1
++#define CONFIG_S5PC110		1
++#define CONFIG_USB_GADGET		1
++#define CONFIG_USB_GADGET_S3C_UDC_OTG	1
++#define CONFIG_MACH_SMDKV210	1
++
++#include <asm/arch/cpu.h>
++
++/* EBOOT presents 256 MiB as the CE-visible window 0x80000000..0x8fffffff. */
++#define CONFIG_SYS_SDRAM_BASE		0x80000000
++#define CONFIG_SYS_SDRAM_SIZE		(256 << 20)
++#define CONFIG_NR_DRAM_BANKS		1
++
++#define CONFIG_ARCH_CPU_INIT
++#define CONFIG_PWM		1
++#define CONFIG_DISPLAY_BOARDINFO
++#define CONFIG_SYS_CLK_FREQ_C110	24000000
++
++/* Keep EBOOT's CE virtual mapping; generic ARMv7 entry normally drops it. */
++#define CONFIG_SKIP_LOWLEVEL_INIT	1
++
++/* No raw NAND, OneNAND, PWM, USB PHY, PMIC, or board GPIO is enabled here. */
++#define CONFIG_SYS_NO_FLASH		1
++#define CONFIG_ENV_IS_NOWHERE		1
++#define CONFIG_ENV_SIZE		(4 << 10)
++
++#define CONFIG_SYS_MALLOC_LEN		(1 << 20)
++#define CONFIG_SYS_MONITOR_BASE		CONFIG_SYS_TEXT_BASE
++#define CONFIG_SYS_MONITOR_LEN		(256 << 10)
++#define CONFIG_SYS_INIT_SP_ADDR	(CONFIG_SYS_SDRAM_BASE + 0x00f00000)
++#define CONFIG_SYS_MEMTEST_START	(CONFIG_SYS_SDRAM_BASE + 0x00100000)
++#define CONFIG_SYS_MEMTEST_END		(CONFIG_SYS_SDRAM_BASE + 0x08000000)
++#define CONFIG_SYS_LOAD_ADDR		(CONFIG_SYS_SDRAM_BASE + 0x01000000)
++#define CONFIG_SYS_HZ			1000
++#define CONFIG_SYS_CACHELINE_SIZE	64
++
++#define CONFIG_SETUP_MEMORY_TAGS
++#define CONFIG_CMDLINE_TAG
++#define CONFIG_INITRD_TAG
++#define CONFIG_CMDLINE_EDITING
++
++/* UART is a developer-only fallback; no U2 UART connector is assumed. */
++#define CONFIG_SERIAL2			1
++#define CONFIG_SERIAL_MULTI		1
++#define CONFIG_BAUDRATE			115200
++
++#include <config_cmd_default.h>
++#undef CONFIG_CMD_FPGA
++#undef CONFIG_CMD_NET
++#undef CONFIG_CMD_NFS
++#undef CONFIG_CMD_MMC
++#undef CONFIG_CMD_ONENAND
++#undef CONFIG_CMD_MTDPARTS
++#undef CONFIG_CMD_NAND
++#undef CONFIG_CMD_USB
++
++#define CONFIG_BOOTDELAY		-1
++#define CONFIG_SYS_LONGHELP
++#define CONFIG_SYS_HUSH_PARSER
++#define CONFIG_SYS_PROMPT		"U2 (recovery payload) # "
++#define CONFIG_SYS_CBSIZE		256
++#define CONFIG_SYS_PBSIZE		384
++#define CONFIG_SYS_MAXARGS		16
++#define CONFIG_SYS_BARGSIZE		CONFIG_SYS_CBSIZE
++
++#endif
+diff --git a/rev51/board/hims/u2/lowlevel_init.S b/board/hims/u2/lowlevel_init.S
+new file mode 100644
+index 0000000..d2fbca6
+--- /dev/null
++++ b/board/hims/u2/lowlevel_init.S
+@@ -0,0 +1,8 @@
++/*
++ * EBOOT has already initialized S5PV210 clocks and 256 MiB DDR before the
++ * B000FF launch entry.  Do not replay another Samsung board's reset-time DMC
++ * or PMIC sequence from an NK payload.
++ */
++	.globl lowlevel_init
++lowlevel_init:
++	mov	pc, lr
+diff --git a/rev51/board/hims/u2/u2.c b/board/hims/u2/u2.c
+new file mode 100644
+index 0000000..bef8319
+--- /dev/null
++++ b/board/hims/u2/u2.c
+@@ -0,0 +1,240 @@
++/*
++ * HIMS BrailleSense U2 board support.
++ *
++ * OEMLaunch disables the MMU and enters the physical DRAM address selected
++ * by the B000FF trailer. Keep the first boot probe in physical address space.
++ */
++#include <common.h>
++#include <command.h>
++#include <asm/io.h>
++#include <asm/mach-types.h>
++#include "u2_braille.h"
++extern int u2probe_start(void);
++extern void u2probe_poll(void);
++
++
++#define U2_NAND_BASE 0xb0e00000UL
++#define U2_NFCONT (U2_NAND_BASE + 0x04)
++#define U2_NFCMD  (U2_NAND_BASE + 0x08)
++#define U2_NFADDR (U2_NAND_BASE + 0x0c)
++#define U2_NFDATA (U2_NAND_BASE + 0x10)
++#define U2_NFSTAT (U2_NAND_BASE + 0x28)
++
++DECLARE_GLOBAL_DATA_PTR;
++
++int board_init(void)
++{
++	/* Inherited, already-powered display. A refused update must not
++	 * prevent boot or the USB shell from starting. No rail changes. */
++	(void)u2_braille_brf(U2_BRAILLE_BRAND_BRF);
++	/* Legacy tag only; production Linux boots with the U2 device tree. */
++	gd->bd->bi_arch_number = MACH_TYPE_SMDKV210;
++	gd->bd->bi_boot_params = CONFIG_SYS_SDRAM_BASE + 0x100;
++	return 0;
++}
++
++/* Called only when bootm is about to load a validated Linux OS image.
++ * Exposed through `u2 braille kernel` for display-only verification. */
++void u2_braille_kernel_start(void)
++{
++	(void)u2_braille_brf(U2_BRAILLE_KERNEL_BRF);
++}
++
++int dram_init(void)
++{
++	gd->ram_size = CONFIG_SYS_SDRAM_SIZE;
++	return 0;
++}
++
++void dram_init_banksize(void)
++{
++	gd->bd->bi_dram[0].start = CONFIG_SYS_SDRAM_BASE;
++	gd->bd->bi_dram[0].size = CONFIG_SYS_SDRAM_SIZE;
++}
++
++int checkboard(void)
++{
++	puts("Board: HIMS BrailleSense U2 (EBOOT payload)\\n");
++	return 0;
++}
++
++/* Only the three proven USB register addresses are exposed to the probe. */
++int u2_eboot_phys_to_virt(u32 phys, u32 *virt)
++{
++	if (phys != 0xec000000 && phys != 0xec100000 &&
++	    phys != 0xe010e80c)
++		return -1;
++	*virt = phys;
++	return 0;
++}
++
++/* Read only the first eight bytes of a physical NAND page. This intentionally
++ * has no program, erase, ECC, or bad-block-table operations. */
++static int u2_nand_page_head(u32 page, u8 head[8])
++{
++	unsigned i;
++
++	writeb(0x00, U2_NFCMD);
++	writeb(0x00, U2_NFADDR);
++	writeb(0x00, U2_NFADDR);
++	writeb(page & 0xff, U2_NFADDR);
++	writeb((page >> 8) & 0xff, U2_NFADDR);
++	writeb((page >> 16) & 0xff, U2_NFADDR);
++	writeb(0x30, U2_NFCMD);
++	for (i = 0; i < 100000; i++) {
++		if (readl(U2_NFSTAT) & 1)
++			break;
++		udelay(1);
++	}
++	if (i == 100000)
++		return -1;
++	for (i = 0; i < 8; i++)
++		head[i] = readb(U2_NFDATA);
++	return 0;
++}
++
++static int u2_nand_scan(unsigned first, unsigned count)
++{
++	u32 original = readl(U2_NFCONT);
++	unsigned block;
++	u8 head[8];
++	int result = 0;
++
++	if (!(original & 1) || first >= 4096 || !count || count > 4096 - first) {
++		printf("NAND scan rejected: NFCONT=%08x first=%u count=%u\n",
++		       original, first, count);
++		return CMD_RET_FAILURE;
++	}
++	writel(original & ~2, U2_NFCONT); /* select NAND chip; preserve all else */
++	for (block = first; block < first + count; block++) {
++		if (u2_nand_page_head(block * 64, head)) {
++			printf("NAND read timeout at physical block %u\n", block);
++			result = CMD_RET_FAILURE;
++			break;
++		}
++		if (!memcmp(head, "B000FF\n", 7) ||
++		    !memcmp(head, "\x14\x00\x00\xea\x14\xf0\x9f\xe5", 8))
++			printf("candidate block %u page %u: %02x %02x %02x %02x "
++			       "%02x %02x %02x %02x\n", block, block * 64,
++			       head[0], head[1], head[2], head[3],
++			       head[4], head[5], head[6], head[7]);
++	}
++	writel(original, U2_NFCONT);
++	printf("NAND first-page scan: %u blocks examined; NFCONT restored %08x\n",
++	       block - first, original);
++	return result;
++}
++
++static int u2_nand_pages(unsigned first, unsigned count)
++{
++	u32 original = readl(U2_NFCONT);
++	unsigned page;
++	u8 head[8];
++	int result = 0;
++
++	if (!(original & 1) || first >= 262144 || !count ||
++	    count > 262144 - first) {
++		printf("NAND page scan rejected: NFCONT=%08x first=%u count=%u\n",
++		       original, first, count);
++		return CMD_RET_FAILURE;
++	}
++	writel(original & ~2, U2_NFCONT);
++	for (page = first; page < first + count; page++) {
++		if (u2_nand_page_head(page, head)) {
++			printf("NAND read timeout at physical page %u\n", page);
++			result = CMD_RET_FAILURE;
++			break;
++		}
++		if (!memcmp(head, "B000FF\n", 7) ||
++		    !memcmp(head, "\x14\x00\x00\xea\x14\xf0\x9f\xe5", 8))
++			printf("candidate page %u block %u: %02x %02x %02x %02x "
++			       "%02x %02x %02x %02x\n", page, page / 64,
++			       head[0], head[1], head[2], head[3],
++			       head[4], head[5], head[6], head[7]);
++	}
++	writel(original, U2_NFCONT);
++	printf("NAND page scan: %u pages examined; NFCONT restored %08x\n",
++	       page - first, original);
++	return result;
++}
++
++static int u2_nand_head(unsigned page)
++{
++	u32 original = readl(U2_NFCONT);
++	u8 head[8];
++	int result;
++
++	if (!(original & 1) || page >= 262144)
++		return CMD_RET_FAILURE;
++	writel(original & ~2, U2_NFCONT);
++	result = u2_nand_page_head(page, head);
++	writel(original, U2_NFCONT);
++	if (result)
++		return CMD_RET_FAILURE;
++	printf("physical NAND page %u block %u: %02x %02x %02x %02x "
++	       "%02x %02x %02x %02x\n", page, page / 64,
++	       head[0], head[1], head[2], head[3],
++	       head[4], head[5], head[6], head[7]);
++	return 0;
++}
++
++static int do_u2(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
++{
++	if (argc == 3 && !strcmp(argv[1], "braille")) {
++		int result;
++
++		if (!strcmp(argv[2], "brand"))
++			result = u2_braille_brf(U2_BRAILLE_BRAND_BRF);
++		else if (!strcmp(argv[2], "kernel"))
++			result = u2_braille_brf(U2_BRAILLE_KERNEL_BRF);
++		else
++			return CMD_RET_USAGE;
++		printf("Braille %s frame: %s (status %d)\n", argv[2],
++		       result ? "not sent" : "sent", result);
++		return result ? CMD_RET_FAILURE : 0;
++	}
++	if (argc == 3 && !strcmp(argv[1], "map")) {
++		u32 phys = simple_strtoul(argv[2], NULL, 16);
++		u32 virt;
++
++		if (u2_eboot_phys_to_virt(phys, &virt)) {
++			printf("U2 has no whitelisted physical register %08x\\n", phys);
++			return CMD_RET_FAILURE;
++		}
++		printf("U2 physical register: %08x\\n", virt);
++		return 0;
++	}
++
++	if (argc == 2 && !strcmp(argv[1], "probe")) {
++		if (u2probe_start())
++			/* Do not retry a failed USB initialization endlessly. */
++			for (;;)
++				;
++		while (1)
++			u2probe_poll();
++	}
++	if (argc == 4 && !strcmp(argv[1], "nand-scan")) {
++		unsigned first = simple_strtoul(argv[2], NULL, 0);
++		unsigned count = simple_strtoul(argv[3], NULL, 0);
++		return u2_nand_scan(first, count);
++	}
++	if (argc == 4 && !strcmp(argv[1], "nand-pages")) {
++		unsigned first = simple_strtoul(argv[2], NULL, 0);
++		unsigned count = simple_strtoul(argv[3], NULL, 0);
++		return u2_nand_pages(first, count);
++	}
++	if (argc == 3 && !strcmp(argv[1], "nand-head")) {
++		unsigned page = simple_strtoul(argv[2], NULL, 0);
++		return u2_nand_head(page);
++	}
++	return CMD_RET_USAGE;
++}
++
++U_BOOT_CMD(u2, 4, 0, do_u2,
++	"U2 board diagnostics",
++	"map <physical-hex> - show a whitelisted physical USB register\n"
++	"u2 braille brand|kernel - display the fixed Grade 2 status (no boot/power change)\n"
++	"u2 probe - start the USB control command interface\n"
++	"u2 nand-scan <first-block> <count> - scan NAND block first pages read-only\n"
++	"u2 nand-pages <first-page> <count> - scan all selected page heads read-only\n"
++	"u2 nand-head <page> - show eight bytes of one physical page");
+diff --git a/rev51/board/hims/u2/u2_braille.h b/board/hims/u2/u2_braille.h
+new file mode 100644
+index 0000000..7b86861
+--- /dev/null
++++ b/board/hims/u2/u2_braille.h
+@@ -0,0 +1,141 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef U2_BRAILLE_H
++#define U2_BRAILLE_H
++
++/* Recovered from CE brlcell.dll, C0E320F8. Transport only: no mux,
++ * regulator, Cell_On, PMIC, NAND or clock-controller writes. */
++#define U2_GPJ0CON 0xe0200240UL
++#define U2_GPJ0DAT 0xe0200244UL
++#define U2_GPJ1CON 0xe0200260UL
++#define U2_GPJ1DAT 0xe0200264UL
++#define U2_GPJ4CON 0xe02002c0UL
++#define U2_GPJ4DAT 0xe02002c4UL
++#define U2_BRL_DATA  0x20U
++#define U2_BRL_CLOCK 0x10U
++#define U2_BRL_LATCH 0x02U
++
++#ifndef U2_BRL_READ
++#define U2_BRL_READ(addr) (*(volatile unsigned int *)(addr))
++#define U2_BRL_WRITE(addr, value) do { \
++    *(volatile unsigned int *)(addr) = (value); \
++    __asm__ volatile("dsb sy" : : : "memory"); \
++    (void)U2_BRL_READ(addr); \
++} while (0)
++#endif
++
++/* Exact contracted Braille ASCII supplied by the user. These strings
++ * already contain the translation: do NOT run a text translator on them.
++ * Letter case is folded only when decoding six-dot Braille ASCII. */
++#define U2_BRAILLE_BRAND_BRF ",Fractal ,Microsy/ems"
++#define U2_BRAILLE_KERNEL_BRF ",/>t+ ,open;,h#dcb444"
++
++/* North American Braille ASCII, characters 0x20..0x5f -> standard dots.
++ * Dot-number mapping checked against the primary liblouis display table:
++ * https://github.com/liblouis/liblouis/blob/master/tables/en-us-brf.dis
++ * This is a display-code decoder, NOT a Grade 2 translator. */
++static const unsigned char u2_brf_dots[64] = {
++    0x00, 0x2e, 0x10, 0x3c, 0x2b, 0x29, 0x2f, 0x04,
++    0x37, 0x3e, 0x21, 0x2c, 0x20, 0x24, 0x28, 0x0c,
++    0x34, 0x02, 0x06, 0x12, 0x32, 0x22, 0x16, 0x36,
++    0x26, 0x14, 0x31, 0x30, 0x23, 0x3f, 0x1c, 0x39,
++    0x08, 0x01, 0x03, 0x09, 0x19, 0x11, 0x0b, 0x1b,
++    0x13, 0x0a, 0x1a, 0x05, 0x07, 0x0d, 0x1d, 0x15,
++    0x0f, 0x1f, 0x17, 0x0e, 0x1e, 0x25, 0x27, 0x3a,
++    0x2d, 0x3d, 0x35, 0x2a, 0x33, 0x3b, 0x18, 0x38
++};
++
++/* StepLoader bootimage.nb0 +0x7c0 emits the readable HIMS greeting using
++ * these CE-format bytes: H=4c I=84 M=8a S=86 a=08 l=0e cap=20.
++ * Together they determine dots 1..6 = 08 04 02 80 40 20. All remaining
++ * greeting symbols agree. Dot 7/8 mapping is NOT yet established. */
++static unsigned char u2_braille_sixdot_cell(unsigned char dots)
++{
++    return ((dots & 0x01U) << 3) | ((dots & 0x02U) << 1) |
++           ((dots & 0x04U) >> 1) | ((dots & 0x08U) << 4) |
++           ((dots & 0x10U) << 2) | (dots & 0x20U);
++}
++
++/* Internal transport accepts CE-format bytes, NOT standard dot masks. */
++static int u2_braille_ce_frame(const unsigned char frame[32])
++{
++    int cell, bit;
++    unsigned int value, wire;
++
++    /* Only reuse a live EBOOT-configured display; do not enable one. */
++    if ((U2_BRL_READ(U2_GPJ0CON) & 0xf000U) != 0x1000U ||
++        (U2_BRL_READ(U2_GPJ1CON) & 0xff0000U) != 0x110000U ||
++        (U2_BRL_READ(U2_GPJ4CON) & 0xf0U) != 0x10U)
++        return 1;
++    if (!(U2_BRL_READ(U2_GPJ0DAT) & 8U))
++        return 2;
++    if (U2_BRL_READ(U2_GPJ1DAT) & U2_BRL_CLOCK)
++        return 3;
++
++    value = U2_BRL_READ(U2_GPJ4DAT) & ~U2_BRL_LATCH;
++    U2_BRL_WRITE(U2_GPJ4DAT, value);
++    for (cell = 31; cell >= 0; --cell) {
++        /* CE reverses the polarity at odd MSB-first bit indices. */
++        wire = frame[cell] ^ 0x55U;
++        for (bit = 7; bit >= 0; --bit) {
++            value = U2_BRL_READ(U2_GPJ1DAT) & ~U2_BRL_DATA;
++            if (wire & (1U << bit))
++                value |= U2_BRL_DATA;
++            U2_BRL_WRITE(U2_GPJ1DAT, value);
++            value = U2_BRL_READ(U2_GPJ1DAT) | U2_BRL_CLOCK;
++            U2_BRL_WRITE(U2_GPJ1DAT, value);
++            value = U2_BRL_READ(U2_GPJ1DAT) & ~U2_BRL_CLOCK;
++            U2_BRL_WRITE(U2_GPJ1DAT, value);
++        }
++    }
++    value = U2_BRL_READ(U2_GPJ4DAT) | U2_BRL_LATCH;
++    U2_BRL_WRITE(U2_GPJ4DAT, value);
++    value = U2_BRL_READ(U2_GPJ4DAT) & ~U2_BRL_LATCH;
++    U2_BRL_WRITE(U2_GPJ4DAT, value);
++    return 0;
++}
++
++static int u2_braille_sixdot_frame(const unsigned char dots[32])
++{
++    unsigned char frame[32];
++    unsigned int cell;
++
++    for (cell = 0; cell < 32; ++cell) {
++        if (dots[cell] & 0xc0U)
++            return 5; /* No guessed dot-7/dot-8 mapping; no GPIO writes. */
++        frame[cell] = u2_braille_sixdot_cell(dots[cell]);
++    }
++    return u2_braille_ce_frame(frame);
++}
++
++/* Reject unsupported/overlength input before any GPIO writes. Blank-pad
++ * all unused cells so a shorter status replaces the previous full line. */
++static int u2_braille_brf_decode(const char *brf, unsigned char dots[32])
++{
++    unsigned int cell = 0;
++    unsigned char ch;
++
++    while (*brf) {
++        if (cell == 32)
++            return 7;
++        ch = (unsigned char)*brf++;
++        if (ch >= 'a' && ch <= 'z')
++            ch -= 'a' - 'A';
++        if (ch < 0x20 || ch > 0x5f)
++            return 6;
++        dots[cell++] = u2_brf_dots[ch - 0x20];
++    }
++    while (cell < 32)
++        dots[cell++] = 0;
++    return 0;
++}
++
++static int u2_braille_brf(const char *brf)
++{
++    unsigned char dots[32];
++    int result = u2_braille_brf_decode(brf, dots);
++
++    if (result)
++        return result;
++    return u2_braille_sixdot_frame(dots);
++}
++#endif
+diff --git a/rev51/board/hims/u2/u2probe.c b/board/hims/u2/u2probe.c
+new file mode 100644
+index 0000000..fc3e4c3
+--- /dev/null
++++ b/board/hims/u2/u2probe.c
+@@ -0,0 +1,143 @@
++#include <common.h>
++#include <asm/io.h>
++#include <asm/errno.h>
++#include <linux/usb/ch9.h>
++#include <usbdescriptors.h>
++#include <linux/usb/gadget.h>
++#include <usb/s3c_udc.h>
++#include <command.h>
++
++/* USB control-only diagnostic shell.  Commands can change hardware state. */
++#define U2_USB_OTG      0xec000000UL
++#define U2_USB_PHY      0xec100000UL
++#define U2_USB_CTRL     0xe010e80cUL
++#define U2_USB_CLK_GATE 0xe0100464UL
++extern int u2_eboot_phys_to_virt(u32 phys, u32 *virt);
++static struct usb_request *req;
++static u8 reply[64];
++static u8 configured;
++static u8 command_rx[64];
++static char command_text[64];
++static char command_output[4096];
++static unsigned output_len;
++static unsigned command_state; /* 0 idle, 1 queued, 2 running, 3 complete */
++static int command_result;
++static int receiving_command;
++static int output_truncated;
++
++void u2_console_append(char c)
++{
++ if (output_len < sizeof(command_output))
++  command_output[output_len++] = c;
++ else
++  output_truncated = 1;
++}
++static struct usb_device_descriptor dev = {
++ .bLength=18,.bDescriptorType=USB_DT_DEVICE,.bcdUSB=cpu_to_le16(0x0200),
++ .bDeviceClass=USB_CLASS_VENDOR_SPEC,.bMaxPacketSize0=64,
++ .idVendor=cpu_to_le16(0x1d50),.idProduct=cpu_to_le16(0x6152),
++ .bcdDevice=cpu_to_le16(1),.iManufacturer=1,.iProduct=2,.bNumConfigurations=1,
++};
++static const u8 cfg[] = {9,USB_DT_CONFIG,18,0,1,1,0,0x80,50,
++ 9,USB_DT_INTERFACE,0,0,0,USB_CLASS_VENDOR_SPEC,0,0,3};
++static const u8 lang[] = {4,USB_DT_STRING,0x09,0x04};
++static const u8 qualifier[] = {10,USB_DT_DEVICE_QUALIFIER,0x00,0x02,
++ USB_CLASS_VENDOR_SPEC,0,0,64,1,0};
++static const char *strings[] = {"U2 Open","BrailleSense U2 probe","diagnostic command interface"};
++static void completed(struct usb_ep *ep, struct usb_request *r) {
++ unsigned n;
++ if (!receiving_command) return;
++ receiving_command=0;
++ if (r->status || !r->actual || r->actual > sizeof(command_rx)) return;
++ n=r->actual;
++ memcpy(command_text,command_rx,n);
++ if (command_text[n-1] == 0) n--;
++ command_text[n]=0;
++ if (n) command_state=1;
++}
++static int send(struct usb_gadget *g, const void *p, unsigned n) {
++ /* Avoid an exact EP0 max-packet data stage: this UDC expects an extra ZLP. */
++ if (n > 63) n=63;
++ if (n && p != reply) memcpy(reply,p,n);
++ req->buf=reply; req->length=n; req->zero=0;
++ return usb_ep_queue(g->ep0,req,0);
++}
++static int setup(struct usb_gadget *g,const struct usb_ctrlrequest *r) {
++ u16 wv=le16_to_cpu(r->wValue), wi=le16_to_cpu(r->wIndex), wl=le16_to_cpu(r->wLength); u8 t=r->bRequestType;
++ if (t==0x80 && r->bRequest==USB_REQ_GET_DESCRIPTOR) {
++  if ((wv>>8)==USB_DT_DEVICE) return send(g,&dev,min((unsigned)wl,(unsigned)sizeof(dev)));
++  if ((wv>>8)==USB_DT_CONFIG) return send(g,cfg,min((unsigned)wl,(unsigned)sizeof(cfg)));
++  if ((wv>>8)==USB_DT_DEVICE_QUALIFIER) return send(g,qualifier,min((unsigned)wl,(unsigned)sizeof(qualifier)));
++  if ((wv>>8)==USB_DT_STRING) { unsigned i=wv&255,j,n; if(!i) return send(g,lang,min((unsigned)wl,4U)); if(i>3)return -EINVAL; n=2+2*strlen(strings[i-1]); reply[0]=n;reply[1]=USB_DT_STRING; for(j=0;j<n-2;j+=2){reply[2+j]=strings[i-1][j/2];reply[3+j]=0;} return send(g,reply,min((unsigned)wl,n)); }
++ }
++ if (t==0x00 && r->bRequest==USB_REQ_SET_CONFIGURATION && wv<=1) {
++  configured=wv; return send(g,reply,0);
++ }
++ if (t==0x80 && r->bRequest==USB_REQ_GET_CONFIGURATION) {
++  return send(g,&configured,min((unsigned)wl,1U));
++ }
++ if (t==0x01 && r->bRequest==USB_REQ_SET_INTERFACE && wv==0) return send(g,reply,0);
++ if (t==0x81 && r->bRequest==USB_REQ_GET_INTERFACE) {
++  static const u8 alt=0; return send(g,&alt,min((unsigned)wl,1U));
++ }
++ if (t==0xc0 && r->bRequest==0x51) { static const u8 x[]={'U','2','P','R','O','B','E',51,0,2,0,0}; return send(g,x,min((unsigned)wl,(unsigned)sizeof(x))); }
++ /* Diagnostic shell: OUT command, then IN status and output slices.
++  * Magic guards against accidental requests; it is not authentication. */
++ if (t==0x40 && r->bRequest==0x52 && wv==0x3255 && wi==0x4f50 &&
++     wl>0 && wl<sizeof(command_rx) && command_state!=1 && command_state!=2) {
++  command_state=0; receiving_command=1;
++  req->buf=command_rx; req->length=wl; req->zero=0;
++  return usb_ep_queue(g->ep0,req,0);
++ }
++ if (t==0xc0 && r->bRequest==0x53) {
++  u8 status[12]={'U','2','C','S',0,0,0,0,0,0,0,0};
++  status[4]=command_state;
++  status[5]=output_truncated;
++  status[6]=command_result & 255;
++  status[7]=(command_result >> 8) & 255;
++  status[8]=output_len & 255;
++  status[9]=(output_len >> 8) & 255;
++  return send(g,status,min((unsigned)wl,(unsigned)sizeof(status)));
++ }
++ if (t==0xc0 && r->bRequest==0x54 && command_state==3) {
++  if (wv>=output_len) return send(g,reply,0);
++  return send(g,command_output+wv,min((unsigned)wl,output_len-wv));
++ }
++ return -EINVAL;
++}
++static int bind(struct usb_gadget *g) { req=usb_ep_alloc_request(g->ep0,0); if (!req)return -ENOMEM; req->complete=completed; return 0; }
++static void unbind(struct usb_gadget *g) { if(req) usb_ep_free_request(g->ep0,req); req=0; }
++static void gone(struct usb_gadget *g) {}
++static struct usb_gadget_driver driver={.speed=USB_SPEED_HIGH,.bind=bind,.unbind=unbind,.setup=setup,.disconnect=gone};
++/* EBOOT enables this S5PC110 OTG clock gate first. The U2-specific UDC
++ * path then replays EBOOT's oscillator, PHY and core-reset sequence before
++ * configuring the U-Boot gadget endpoints. */
++static int phy(int on) {
++ if (on) {
++  writel(readl(U2_USB_CLK_GATE) | (1U << 16), U2_USB_CLK_GATE);
++  udelay(1000);
++ }
++ return 0;
++}
++static struct s3c_plat_otg_data pdata={.phy_control=phy};
++int u2probe_start(void) {
++ u32 phy_va,otg_va,ctrl_va;
++ int r;
++ if (u2_eboot_phys_to_virt(U2_USB_PHY,&phy_va) ||
++     u2_eboot_phys_to_virt(U2_USB_OTG,&otg_va) ||
++     u2_eboot_phys_to_virt(U2_USB_CTRL,&ctrl_va)) return -ENODEV;
++ pdata.regs_phy=phy_va; pdata.regs_otg=otg_va; pdata.usb_phy_ctrl=ctrl_va;
++ r=s3c_udc_probe(&pdata); if(r)return r;
++ /* Service EP0 immediately after registration. */
++ r=usb_gadget_register_driver(&driver);
++ return r;
++}
++void u2probe_poll(void) {
++ usb_gadget_handle_interrupts();
++ if (command_state==1) {
++  command_state=2;
++  output_len=0; output_truncated=0; command_result=0;
++  command_result=run_command(command_text,0);
++  command_state=3;
++ }
++}
+diff --git a/boards.cfg b/boards.cfg
+index 7c1fc74..565396a 100644
+--- a/boards.cfg
++++ b/boards.cfg
+@@ -265,6 +265,7 @@ twister                      arm         armv7       twister             technex
+ omap4_panda                  arm         armv7       panda               ti             omap4
+ omap4_sdp4430                arm         armv7       sdp4430             ti             omap4
+ omap5_evm                    arm         armv7       omap5_evm           ti		omap5
++hims_u2                       arm         armv7       u2                  hims           s5pc1xx
+ s5p_goni                     arm         armv7       goni                samsung        s5pc1xx
+ smdkc100                     arm         armv7       smdkc100            samsung        s5pc1xx
+ origen			     arm	 armv7	     origen		 samsung	exynos
+diff --git a/common/cmd_bootm.c b/common/cmd_bootm.c
+index 83fa5d7..b1c6acf 100644
+--- a/common/cmd_bootm.c
++++ b/common/cmd_bootm.c
+@@ -64,6 +64,10 @@
+ 
+ DECLARE_GLOBAL_DATA_PTR;
+ 
++#ifdef CONFIG_HIMS_U2
++extern void u2_braille_kernel_start(void);
++#endif
++
+ #ifndef CONFIG_SYS_BOOTM_LEN
+ #define CONFIG_SYS_BOOTM_LEN	0x800000	/* use 8MByte as default max gunzip size */
+ #endif
+@@ -330,6 +334,16 @@ static int bootm_load_os(image_info_t os, ulong *load_end, int boot_progress)
+ 
+ 	const char *type_name = genimg_get_type_name(os.type);
+ 
++#ifdef CONFIG_HIMS_U2
++	/* After image validation, immediately before Linux copy/decompression.
++	 * Shared by full bootm and `bootm loados`; never label a standalone
++	 * application as the OpenH432 kernel. No kernel is booted by this hook. */
++	if (os.os == IH_OS_LINUX &&
++	    (os.type == IH_TYPE_KERNEL || os.type == IH_TYPE_KERNEL_NOLOAD ||
++	     os.type == IH_TYPE_MULTI))
++		u2_braille_kernel_start();
++#endif
++
+ 	switch (comp) {
+ 	case IH_COMP_NONE:
+ 		if (load == blob_start || load == image_start) {
+diff --git a/common/serial.c b/common/serial.c
+index 4f2bc7f..28a98d3 100644
+--- a/common/serial.c
++++ b/common/serial.c
+@@ -29,6 +29,11 @@
+ 
+ DECLARE_GLOBAL_DATA_PTR;
+ 
++#ifdef CONFIG_HIMS_U2
++extern void serial_putc_dev(const char c, const int dev_index);
++extern void serial_puts_dev(const char *s, const int dev_index);
++#endif
++
+ static struct serial_device *serial_devices;
+ static struct serial_device *serial_current;
+ 
+@@ -216,12 +221,21 @@ int serial_tstc(void)
+ 
+ void serial_putc(const char c)
+ {
++#ifdef CONFIG_HIMS_U2
++	/* The cold EBOOT handoff cannot yet use the .data console vtable. */
++	serial_putc_dev(c, 2);
++#else
+ 	get_current()->putc(c);
++#endif
+ }
+ 
+ void serial_puts(const char *s)
+ {
++#ifdef CONFIG_HIMS_U2
++	serial_puts_dev(s, 2);
++#else
+ 	get_current()->puts(s);
++#endif
+ }
+ 
+ #if CONFIG_POST & CONFIG_SYS_POST_UART
+diff --git a/drivers/serial/serial_s5p.c b/drivers/serial/serial_s5p.c
+index 6819bb0..d9ed199 100644
+--- a/drivers/serial/serial_s5p.c
++++ b/drivers/serial/serial_s5p.c
+@@ -64,6 +64,9 @@ static const int udivslot[] = {
+ 
+ void serial_setbrg_dev(const int dev_index)
+ {
++#ifdef CONFIG_HIMS_U2
++	(void)dev_index;
++#else
+ 	struct s5p_uart *const uart = s5p_get_base_uart(dev_index);
+ 	u32 uclk = get_uart_clk(dev_index);
+ 	u32 baudrate = gd->baudrate;
+@@ -77,6 +80,7 @@ void serial_setbrg_dev(const int dev_index)
+ 		writew(udivslot[val % 16], &uart->rest.slot);
+ 	else
+ 		writeb(val % 16, &uart->rest.value);
++#endif
+ }
+ 
+ /*
+@@ -85,6 +89,10 @@ void serial_setbrg_dev(const int dev_index)
+  */
+ int serial_init_dev(const int dev_index)
+ {
++#ifdef CONFIG_HIMS_U2
++	(void)dev_index;
++	return 0;
++#else
+ 	struct s5p_uart *const uart = s5p_get_base_uart(dev_index);
+ 
+ 	/* reset and enable FIFOs, set triggers to the maximum */
+@@ -98,6 +106,7 @@ int serial_init_dev(const int dev_index)
+ 	serial_setbrg_dev(dev_index);
+ 
+ 	return 0;
++#endif
+ }
+ 
+ static int serial_err_check(const int dev_index, int op)
+@@ -127,6 +136,10 @@ static int serial_err_check(const int dev_index, int op)
+  */
+ int serial_getc_dev(const int dev_index)
+ {
++#ifdef CONFIG_HIMS_U2
++	(void)dev_index;
++	return 0;
++#else
+ 	struct s5p_uart *const uart = s5p_get_base_uart(dev_index);
+ 
+ 	/* wait for character to arrive */
+@@ -136,6 +149,7 @@ int serial_getc_dev(const int dev_index)
+ 	}
+ 
+ 	return (int)(readb(&uart->urxh) & 0xff);
++#endif
+ }
+ 
+ /*
+@@ -143,6 +157,11 @@ int serial_getc_dev(const int dev_index)
+  */
+ void serial_putc_dev(const char c, const int dev_index)
+ {
++#ifdef CONFIG_HIMS_U2
++	extern void u2_console_append(char c);
++	u2_console_append(c);
++	(void)dev_index;
++#else
+ 	struct s5p_uart *const uart = s5p_get_base_uart(dev_index);
+ 
+ 	/* wait for room in the tx FIFO */
+@@ -156,6 +175,7 @@ void serial_putc_dev(const char c, const int dev_index)
+ 	/* If \n, also do \r */
+ 	if (c == '\n')
+ 		serial_putc('\r');
++#endif
+ }
+ 
+ /*
+@@ -163,9 +183,14 @@ void serial_putc_dev(const char c, const int dev_index)
+  */
+ int serial_tstc_dev(const int dev_index)
+ {
++#ifdef CONFIG_HIMS_U2
++	(void)dev_index;
++	return 0;
++#else
+ 	struct s5p_uart *const uart = s5p_get_base_uart(dev_index);
+ 
+ 	return (int)(readl(&uart->utrstat) & 0x1);
++#endif
+ }
+ 
+ void serial_puts_dev(const char *s, const int dev_index)
+diff --git a/drivers/usb/gadget/s3c_udc_otg.c b/drivers/usb/gadget/s3c_udc_otg.c
+index 3fdfdf7..d1c2461 100644
+--- a/drivers/usb/gadget/s3c_udc_otg.c
++++ b/drivers/usb/gadget/s3c_udc_otg.c
+@@ -119,7 +119,7 @@ static void stop_activity(struct s3c_udc *dev,
+ 			  struct usb_gadget_driver *driver);
+ static int udc_enable(struct s3c_udc *dev);
+ static void udc_set_address(struct s3c_udc *dev, unsigned char address);
+-static void reconfig_usbd(void);
++static int reconfig_usbd(void);
+ static void set_max_pktsize(struct s3c_udc *dev, enum usb_device_speed speed);
+ static void nuke(struct s3c_ep *ep, int status);
+ static int s3c_udc_set_halt(struct usb_ep *_ep, int value);
+@@ -170,6 +170,20 @@ void otg_phy_init(struct s3c_udc *dev)
+ 	/*USB PHY0 Enable */
+ 	printf("USB PHY0 Enable\n");
+ 
++#ifdef CONFIG_HIMS_U2
++	/* EBOOT.nb0: FUN_8771829c -> FUN_877182ec -> FUN_8771329c.
++	 * phy_control() has already enabled E0100464[16]. Replay its cold
++	 * recovery bring-up order before configuring U-Boot's endpoints. */
++	writel(readl(&reg->dctl) | SOFT_DISCONNECT, &reg->dctl);
++	writel(readl(0xe0108000UL) | 2, 0xe0108000UL); /* OSC_CON */
++	writel((readl(usb_phy_ctrl) & ~3U) | 3U, usb_phy_ctrl);
++	writel(0x30, &phy->phypwr);
++	writel(0x03, &phy->phyclk);
++	writel(0x01, &phy->rstcon);
++	udelay(10);
++	writel(0x00, &phy->rstcon);
++	udelay(10);
++#else
+ 	/* Enable PHY */
+ 	writel(readl(usb_phy_ctrl) | USB_PHY_CTRL_EN0, usb_phy_ctrl);
+ 
+@@ -190,6 +204,7 @@ void otg_phy_init(struct s3c_udc *dev)
+ 	writel(readl(&phy->rstcon)
+ 	       &~(PHY_SW_RST0 | LINK_SW_RST | PHYLNK_SW_RST), &phy->rstcon);
+ 	udelay(10);
++#endif
+ }
+ 
+ void otg_phy_off(struct s3c_udc *dev)
+@@ -271,10 +286,14 @@ static void udc_reinit(struct s3c_udc *dev)
+  */
+ static int udc_enable(struct s3c_udc *dev)
+ {
++	int ret;
++
+ 	debug_cond(DEBUG_SETUP != 0, "%s: %p\n", __func__, dev);
+ 
+ 	otg_phy_init(dev);
+-	reconfig_usbd();
++	ret = reconfig_usbd();
++	if (ret)
++		return ret;
+ 
+ 	debug_cond(DEBUG_SETUP != 0,
+ 		   "S3C USB 2.0 OTG Controller Core Initialized : 0x%x\n",
+@@ -329,7 +348,11 @@ int usb_gadget_register_driver(struct usb_gadget_driver *driver)
+ 
+ 	debug_cond(DEBUG_SETUP != 0,
+ 		   "Registered gadget driver %s\n", dev->gadget.name);
+-	udc_enable(dev);
++	retval = udc_enable(dev);
++	if (retval) {
++		dev->driver = 0;
++		return retval;
++	}
+ 
+ 	return 0;
+ }
+@@ -455,11 +478,35 @@ static void stop_activity(struct s3c_udc *dev,
+ 	udc_reinit(dev);
+ }
+ 
+-static void reconfig_usbd(void)
++static int reconfig_usbd(void)
+ {
+ 	/* 2. Soft-reset OTG Core and then unreset again. */
+ 	int i;
+-	unsigned int uTemp = writel(CORE_SOFT_RESET, &reg->grstctl);
++	unsigned int uTemp;
++
++	/* EBOOT waits for GRSTCTL.AHBIDLE. On a cold U2 controller, do not
++	 * configure the link until its self-clearing core reset completes. */
++	writel(CORE_SOFT_RESET, &reg->grstctl);
++#ifdef CONFIG_HIMS_U2
++	for (i = 0; i < 10000; i++) {
++		if (!(readl(&reg->grstctl) & CORE_SOFT_RESET))
++			break;
++		udelay(1);
++	}
++	if (i == 10000) {
++		puts("U2 USB core reset timed out\n");
++		return -ETIMEDOUT;
++	}
++	for (i = 0; i < 10000; i++) {
++		if (readl(&reg->grstctl) & (1U << 31))
++			break;
++		udelay(1);
++	}
++	if (i == 10000) {
++		puts("U2 USB AHB idle timed out\n");
++		return -ETIMEDOUT;
++	}
++#endif
+ 
+ 	debug("Reseting OTG controller\n");
+ 
+@@ -494,7 +541,13 @@ static void reconfig_usbd(void)
+ 	mdelay(1);
+ 
+ 	/* 6. Unmask the core interrupts*/
++	/* EBOOT's recovery path uses 0x800c3810: the same core interrupt
++	 * sources as this driver, plus the RX FIFO nonempty interrupt bit. */
++#ifdef CONFIG_HIMS_U2
++	writel(GINTMSK_INIT | (1U << 4), &reg->gintmsk);
++#else
+ 	writel(GINTMSK_INIT, &reg->gintmsk);
++#endif
+ 
+ 	/* 7. Set NAK bit of EP0, EP1, EP2*/
+ 	writel(DEPCTL_EPDIS|DEPCTL_SNAK, &reg->out_endp[EP0_CON].doepctl);
+@@ -547,6 +600,7 @@ static void reconfig_usbd(void)
+ 
+ 	/* 14. Initialize OTG Link Core.*/
+ 	writel(GAHBCFG_INIT, &reg->gahbcfg);
++	return 0;
+ }
+ 
+ static void set_max_pktsize(struct s3c_udc *dev, enum usb_device_speed speed)
+@@ -876,7 +930,12 @@ int s3c_udc_probe(struct s3c_plat_otg_data *pdata)
+ 	for (i = 0; i < S3C_MAX_ENDPOINTS+1; i++) {
+ 		dev->dma_buf[i] = memalign(CONFIG_SYS_CACHELINE_SIZE,
+ 					   DMA_BUFFER_SIZE);
++#ifdef CONFIG_HIMS_U2
++		/* OEMLaunch disabled the MMU; U-Boot pointers are DMA bus addresses. */
+ 		dev->dma_addr[i] = (dma_addr_t) dev->dma_buf[i];
++#else
++		dev->dma_addr[i] = (dma_addr_t) dev->dma_buf[i];
++#endif
+ 		invalidate_dcache_range((unsigned long) dev->dma_buf[i],
+ 					(unsigned long) (dev->dma_buf[i]
+ 							 + DMA_BUFFER_SIZE));
+diff --git a/drivers/usb/gadget/s3c_udc_otg_xfer_dma.c b/drivers/usb/gadget/s3c_udc_otg_xfer_dma.c
+index 4be6037..5e87970 100644
+--- a/drivers/usb/gadget/s3c_udc_otg_xfer_dma.c
++++ b/drivers/usb/gadget/s3c_udc_otg_xfer_dma.c
+@@ -42,8 +42,8 @@ static inline void s3c_udc_ep0_zlp(struct s3c_udc *dev)
+ {
+ 	u32 ep_ctrl;
+ 
+-	flush_dcache_range((unsigned long) usb_ctrl_dma_addr,
+-			   (unsigned long) usb_ctrl_dma_addr
++	flush_dcache_range((unsigned long) usb_ctrl,
++			   (unsigned long) usb_ctrl
+ 			   + DMA_BUFFER_SIZE);
+ 
+ 	writel(usb_ctrl_dma_addr, &reg->in_endp[EP0_CON].diepdma);
+@@ -65,8 +65,8 @@ void s3c_udc_pre_setup(void)
+ 	debug_cond(DEBUG_IN_EP,
+ 		   "%s : Prepare Setup packets.\n", __func__);
+ 
+-	invalidate_dcache_range((unsigned long) usb_ctrl_dma_addr,
+-				(unsigned long) usb_ctrl_dma_addr
++	invalidate_dcache_range((unsigned long) usb_ctrl,
++				(unsigned long) usb_ctrl
+ 				+ DMA_BUFFER_SIZE);
+ 
+ 	writel(DOEPT_SIZ_PKT_CNT(1) | sizeof(struct usb_ctrlrequest),
+@@ -95,8 +95,8 @@ static inline void s3c_ep0_complete_out(void)
+ 	debug_cond(DEBUG_IN_EP,
+ 		"%s : Prepare Complete Out packet.\n", __func__);
+ 
+-	invalidate_dcache_range((unsigned long) usb_ctrl_dma_addr,
+-				(unsigned long) usb_ctrl_dma_addr
++	invalidate_dcache_range((unsigned long) usb_ctrl,
++				(unsigned long) usb_ctrl
+ 				+ DMA_BUFFER_SIZE);
+ 
+ 	writel(DOEPT_SIZ_PKT_CNT(1) | sizeof(struct usb_ctrlrequest),
+diff --git a/rev51/include/configs/hims_u2.h b/include/configs/hims_u2.h
+new file mode 100644
+index 0000000..d648d3f
+--- /dev/null
++++ b/include/configs/hims_u2.h
+@@ -0,0 +1,72 @@
++#ifndef __CONFIG_HIMS_U2_H
++#define __CONFIG_HIMS_U2_H
++
++#define CONFIG_SAMSUNG		1
++#define CONFIG_S5P		1
++#define CONFIG_S5PC110		1
++#define CONFIG_HIMS_U2		1
++#define CONFIG_USB_GADGET		1
++#define CONFIG_USB_GADGET_S3C_UDC_OTG	1
++#define CONFIG_MACH_SMDKV210	1
++
++#include <asm/arch/cpu.h>
++
++/* OEMLaunch turns off the MMU; CE VA 0x80000000 maps to DRAM PA 0x40000000. */
++#define CONFIG_SYS_SDRAM_BASE		0x40000000
++#define CONFIG_SYS_SDRAM_SIZE		(256 << 20)
++#define CONFIG_NR_DRAM_BANKS		1
++
++#define CONFIG_ARCH_CPU_INIT
++#define CONFIG_PWM		1
++#define CONFIG_DISPLAY_BOARDINFO
++#define CONFIG_SYS_CLK_FREQ_C110	24000000
++
++/* OEMLaunch has already switched to physical addressing and set up clocks. */
++#define CONFIG_SKIP_LOWLEVEL_INIT	1
++
++/* No raw NAND, OneNAND, PMIC, or board power controls are enabled here. */
++#define CONFIG_SYS_NO_FLASH		1
++#define CONFIG_ENV_IS_NOWHERE		1
++#define CONFIG_ENV_SIZE		(4 << 10)
++
++#define CONFIG_SYS_MALLOC_LEN		(1 << 20)
++#define CONFIG_SYS_MONITOR_BASE		CONFIG_SYS_TEXT_BASE
++#define CONFIG_SYS_MONITOR_LEN		(256 << 10)
++#define CONFIG_SYS_INIT_SP_ADDR	(CONFIG_SYS_SDRAM_BASE + 0x00f00000)
++#define CONFIG_SYS_MEMTEST_START	(CONFIG_SYS_SDRAM_BASE + 0x00100000)
++#define CONFIG_SYS_MEMTEST_END		(CONFIG_SYS_SDRAM_BASE + 0x08000000)
++#define CONFIG_SYS_LOAD_ADDR		(CONFIG_SYS_SDRAM_BASE + 0x01000000)
++#define CONFIG_SYS_HZ			1000
++#define CONFIG_SYS_CACHELINE_SIZE	64
++
++#define CONFIG_SETUP_MEMORY_TAGS
++#define CONFIG_CMDLINE_TAG
++#define CONFIG_INITRD_TAG
++#define CONFIG_CMDLINE_EDITING
++
++/* UART is a developer-only fallback; no U2 UART connector is assumed. */
++#define CONFIG_SERIAL2			1
++#define CONFIG_SERIAL_MULTI		1
++#define CONFIG_BAUDRATE			115200
++
++#include <config_cmd_default.h>
++#undef CONFIG_CMD_FPGA
++#undef CONFIG_CMD_NET
++#undef CONFIG_CMD_NFS
++#undef CONFIG_CMD_MMC
++#undef CONFIG_CMD_ONENAND
++#undef CONFIG_CMD_MTDPARTS
++#undef CONFIG_CMD_NAND
++#undef CONFIG_CMD_USB
++
++#define CONFIG_BOOTDELAY		0
++#define CONFIG_BOOTCOMMAND		"u2 probe"
++#define CONFIG_SYS_LONGHELP
++#define CONFIG_SYS_HUSH_PARSER
++#define CONFIG_SYS_PROMPT		"U2 (recovery payload) # "
++#define CONFIG_SYS_CBSIZE		256
++#define CONFIG_SYS_PBSIZE		384
++#define CONFIG_SYS_MAXARGS		16
++#define CONFIG_SYS_BARGSIZE		CONFIG_SYS_CBSIZE
++
++#endif
+diff --git a/rev51/include/linux/compiler-gcc14.h b/include/linux/compiler-gcc14.h
+new file mode 100644
+index 0000000..94dea3f
+--- /dev/null
++++ b/include/linux/compiler-gcc14.h
+@@ -0,0 +1,61 @@
++#ifndef __LINUX_COMPILER_H
++#error "Please don't include <linux/compiler-gcc4.h> directly, include <linux/compiler.h> instead."
++#endif
++
++/* GCC 4.1.[01] miscompiles __weak */
++#ifdef __KERNEL__
++# if __GNUC_MINOR__ == 1 && __GNUC_PATCHLEVEL__ <= 1
++#  error Your version of gcc miscompiles the __weak directive
++# endif
++#endif
++
++#define __used			__attribute__((__used__))
++#define __must_check 		__attribute__((warn_unused_result))
++#define __compiler_offsetof(a,b) __builtin_offsetof(a,b)
++#define __always_inline		inline __attribute__((always_inline))
++
++/*
++ * A trick to suppress uninitialized variable warning without generating any
++ * code
++ */
++#define uninitialized_var(x) x = x
++
++#if __GNUC_MINOR__ >= 3
++/* Mark functions as cold. gcc will assume any path leading to a call
++   to them will be unlikely.  This means a lot of manual unlikely()s
++   are unnecessary now for any paths leading to the usual suspects
++   like BUG(), printk(), panic() etc. [but let's keep them for now for
++   older compilers]
++
++   Early snapshots of gcc 4.3 don't support this and we can't detect this
++   in the preprocessor, but we can live with this because they're unreleased.
++   Maketime probing would be overkill here.
++
++   gcc also has a __attribute__((__hot__)) to move hot functions into
++   a special section, but I don't see any sense in this right now in
++   the kernel context */
++#define __cold			__attribute__((__cold__))
++
++
++#if __GNUC_MINOR__ >= 5
++/*
++ * Mark a position in code as unreachable.  This can be used to
++ * suppress control flow warnings after asm blocks that transfer
++ * control elsewhere.
++ *
++ * Early snapshots of gcc 4.5 don't support this and we can't detect
++ * this in the preprocessor, but we can live with this because they're
++ * unreleased.  Really, we need to have autoconf for the kernel.
++ */
++#define unreachable() __builtin_unreachable()
++#endif
++
++#endif
++
++#if __GNUC_MINOR__ > 0
++#define __compiletime_object_size(obj) __builtin_object_size(obj, 0)
++#endif
++#if __GNUC_MINOR__ >= 4
++#define __compiletime_warning(message) __attribute__((warning(message)))
++#define __compiletime_error(message) __attribute__((error(message)))
++#endif
