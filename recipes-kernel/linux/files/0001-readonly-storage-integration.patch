@@ -1,3 +1,7 @@
+Subject: [PATCH] readonly storage integration
+
+Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
+
 --- a/drivers/mtd/nand/raw/Kconfig
 +++ b/drivers/mtd/nand/raw/Kconfig
 @@ -10,6 +10,13 @@

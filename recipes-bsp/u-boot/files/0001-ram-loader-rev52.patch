@@ -1,3 +1,7 @@
+Subject: [PATCH] ram loader rev52
+
+Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
+
 diff --git a/arch/arm/lib/board.c b/arch/arm/lib/board.c
 index ab7a496..42c415b 100644
 --- a/arch/arm/lib/board.c

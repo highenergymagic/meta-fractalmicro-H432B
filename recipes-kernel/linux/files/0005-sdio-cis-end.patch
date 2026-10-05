@@ -1,3 +1,7 @@
+Subject: [PATCH] sdio cis end
+
+Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
+
 --- a/drivers/mmc/core/sdio_cis.c
 +++ b/drivers/mmc/core/sdio_cis.c
 @@ -12,6 +12,7 @@

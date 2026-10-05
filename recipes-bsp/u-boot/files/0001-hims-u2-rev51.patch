@@ -1,3 +1,7 @@
+Subject: [PATCH] hims u2 rev51
+
+Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
+
 diff --git a/arch/arm/config.mk b/arch/arm/config.mk
 index 24b9d7c..c65abbb 100644
 --- a/arch/arm/config.mk

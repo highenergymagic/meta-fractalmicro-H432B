@@ -1,3 +1,7 @@
+Subject: [PATCH] usb host diagnostics
+
+Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
+
 --- a/drivers/phy/samsung/phy-s5pv210-usb2.c
 +++ b/drivers/phy/samsung/phy-s5pv210-usb2.c
 @@ -166,7 +166,18 @@

@@ -1,3 +1,7 @@
+Subject: [PATCH] reproducible timestamp
+
+Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
+
 --- a/Makefile
 +++ b/Makefile
 @@ -687,8 +687,8 @@

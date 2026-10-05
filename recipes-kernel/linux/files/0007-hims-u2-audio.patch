@@ -1,3 +1,7 @@
+Subject: [PATCH] hims u2 audio
+
+Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
+
 diff --git a/sound/soc/samsung/Kconfig b/sound/soc/samsung/Kconfig
 --- a/sound/soc/samsung/Kconfig
 +++ b/sound/soc/samsung/Kconfig

@@ -1,3 +1,7 @@
+Subject: [PATCH] usb host required power bit
+
+Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
+
 --- a/drivers/phy/samsung/phy-s5pv210-usb2.c
 +++ b/drivers/phy/samsung/phy-s5pv210-usb2.c
 @@ -125,6 +125,11 @@

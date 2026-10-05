@@ -1,3 +1,7 @@
+Subject: [PATCH] nand reader
+
+Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
+
 --- /dev/null
 +++ b/drivers/mtd/nand/raw/hims-u2-nand-ro.c
 @@ -0,0 +1,153 @@

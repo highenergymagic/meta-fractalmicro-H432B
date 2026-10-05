@@ -1,3 +1,7 @@
+Subject: [PATCH] audio clock codec
+
+Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
+
 diff --git a/drivers/clk/samsung/clk-s5pv210.c b/drivers/clk/samsung/clk-s5pv210.c
 --- a/drivers/clk/samsung/clk-s5pv210.c
 +++ b/drivers/clk/samsung/clk-s5pv210.c
