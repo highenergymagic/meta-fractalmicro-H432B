@@ -34,7 +34,8 @@ with a separate experimental DTB and isolated kernel source/deploy paths.
 It does not provide virtual/kernel or change the default image selection.
 Its intended userspace interface is `systemctl reboot --reboot-argument=bootloader`
 (or the equivalent `fastboot` argument), not a /dev/mem userspace writer.
-That interface and the new loader still require an end-to-end hardware test.
+The Linux writer and RAM consumer have passed the split hardware test below;
+an installed automatic handoff is not yet qualified.
 
 One hardware experiment confirmed that the retention-test marker survived
 a software reboot through the existing factory boot chain and installed Linux.
@@ -76,8 +77,8 @@ contains the matching mode values and offset.
 
 The kernel deploys beneath `kernel-reboot-test/`; the loader beneath
 `ram-reboot-test/`. These are not installation images or CE update carriers.
-No cross-host byte comparison or hardware boot of these new artifacts has
-been performed. The deployed device still runs the previous NAND images.
+No cross-host byte comparison has been performed for these artifacts.
+The new consumer has not been installed in the persistent boot chain.
 
 With this layer as a sibling of the pinned build repository, the development
 build entry point is:
@@ -87,3 +88,21 @@ python3 scripts/bsp.py build --local-layers h432b-reboot-probe u-boot-h432b-rebo
 ```
 
 The build does not open USB or deploy to hardware.
+
+## Split hardware qualification
+
+The test kernel booted from a fastboot RAM envelope with the reboot-mode driver
+bound, zero failed systemd services and kernel taint zero. A normal privileged
+`systemctl reboot --reboot-argument=bootloader` performed an orderly shutdown.
+The existing USB bootstrap then exposed the expected 0x48344642 in INFORM7.
+
+Without rewriting the register or pressing physical Reset, the experimental
+consumer was staged into RAM and launched. Standard fastboot `getvar version`
+responded with 0.4; INFORM7 read zero. A subsequent fastboot reboot returned to
+the known bootstrap with no stale request.
+
+This demonstrates the Linux notifier, retention through the factory chain,
+and consume-before-fastboot behavior. It is deliberately a split test:
+a host still stages the RAM consumer. It does not establish an installed,
+unattended Linux-to-fastboot path, NAND flashing support, power-loss persistence,
+or support for untested hardware units.
