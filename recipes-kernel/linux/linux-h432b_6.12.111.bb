@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-SUMMARY = "H432B read-only bring-up kernel: CIP 6.12 plus separate RT patch"
+SUMMARY = "H432B bounded NAND qualification kernel: CIP 6.12 plus separate RT patch"
 LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=6bc538ed5bd9a7fc9398086aedcd7e46"
 LINUX_VERSION = "6.12.111"
@@ -12,6 +12,7 @@ SRC_URI = "https://www.kernel.org/pub/linux/kernel/projects/cip/6.12/linux-cip-6
     file://0005-sdio-cis-end.patch \
     file://0006-audio-clock-codec.patch \
     file://0007-hims-u2-audio.patch \
+    file://0008-nand-bch-window.patch file://test-nand-guard.c file://nand-profile.py \
     file://s5pv210-hims-u2.dts \
     file://u2-ram.config file://u2-storage.config file://u2-sdio.config \
     file://u2-audio.config file://u2-systemd.config \
@@ -36,8 +37,12 @@ KERNEL_EXTRA_ARGS += "AR=${KERNEL_AR}"
 SOURCE_DATE_EPOCH = "1791158400"
 IMAGE_VERSION_SUFFIX = "-${SOURCE_DATE_EPOCH}"
 
+H432B_NAND_PROFILE ?= "readonly"
+
 do_configure:prepend() {
     install -m 0644 ${UNPACKDIR}/s5pv210-hims-u2.dts ${S}/arch/arm/boot/dts/samsung/
+    python3 ${UNPACKDIR}/nand-profile.py --profile ${H432B_NAND_PROFILE} \
+        ${S}/arch/arm/boot/dts/samsung/s5pv210-hims-u2.dts
     oe_runmake -C ${S} O=${B} allnoconfig
     KCONFIG_CONFIG=${B}/.config ${S}/scripts/kconfig/merge_config.sh -m -O ${B} \
         ${B}/.config ${UNPACKDIR}/u2-ram.config ${UNPACKDIR}/u2-storage.config \
@@ -45,7 +50,7 @@ do_configure:prepend() {
         ${UNPACKDIR}/u2-systemd.config
 }
 do_configure:append() {
-    for option in PREEMPT_RT RD_XZ MTD_NAND_HIMS_U2_RO MMC_SDHCI_S3C USB_G_SERIAL \
+    for option in PREEMPT_RT RD_XZ MTD_NAND_HIMS_U2 MTD_NAND_ECC_SW_BCH MTD_UBI_BLOCK SQUASHFS SQUASHFS_XZ UBIFS_FS MMC_SDHCI_S3C USB_G_SERIAL \
                   SND_SOC_HIMS_U2 CGROUPS MEMCG CGROUP_PIDS SECCOMP_FILTER FHANDLE; do
         grep -qx "CONFIG_$option=y" ${B}/.config ||
             bbfatal "Missing required board/guard option: $option"
@@ -68,4 +73,11 @@ python do_patch:prepend() {
     body = patch.read_bytes()
     if not body.startswith(header):
         patch.write_bytes(header + body)
+}
+
+do_compile:prepend() {
+    ${BUILD_CC} -std=c99 -Wall -Wextra -Werror \
+        -I${S}/drivers/mtd/nand/raw ${UNPACKDIR}/test-nand-guard.c \
+        -o ${B}/test-nand-guard
+    ${B}/test-nand-guard
 }

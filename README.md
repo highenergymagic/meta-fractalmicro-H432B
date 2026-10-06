@@ -17,7 +17,11 @@ internal SD reads, raw NAND reads and PREEMPT_RT. Both U-Boot roles compile;
 the device test retained the proven installed bootloader and RAM loader.
 WM8983 mixer controls and the 50/63 volume ceiling passed muted checks;
 audible playback was qualified in the earlier bring-up baseline, not retested
-in this Yocto run. NAND and SD writes remain blocked in the kernel.
+in this Yocto run. Default kernel NAND and SD writes remain blocked.
+Explicit NAND-only write-window profiles have now passed BCH erase/program,
+UBI provisioning and full readback. A RAM-staged U-Boot has loaded the kernel
+and debug initramfs from NAND; the base SquashFS volume mounts read-only.
+The NAND56 bootstrap candidate is under installation/normal-boot qualification. See [NAND status](docs/nand.md).
 Wi-Fi enumerates over SDIO but has no working function driver. Linux braille, keyboard, suspend and battery management
 remain incomplete. This is not a complete, secure replacement firmware.
 

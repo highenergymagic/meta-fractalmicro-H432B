@@ -1,0 +1,28 @@
+Subject: [PATCH] H432B CE-address bootstrap for a separate high-RAM NAND stage
+
+Upstream-Status: Inappropriate [board bring-up]
+
+--- a/board/hims/u2/Makefile
++++ b/board/hims/u2/Makefile
+@@ -10,8 +10,8 @@
+ 
+ LIB = $(obj)lib$(BOARD).o
+ 
+-COBJS-y := u2.o u2probe.o
+-SOBJS := lowlevel_init.o
++COBJS-y := u2.o u2probe.o u2chain.o
++SOBJS := lowlevel_init.o u2stage.o
+ 
+ SRCS := $(SOBJS:.o=.S) $(COBJS-y:.o=.c)
+ OBJS := $(addprefix $(obj),$(COBJS-y))
+--- a/include/configs/hims_u2.h
++++ b/include/configs/hims_u2.h
+@@ -67,7 +67,7 @@
+ #undef CONFIG_CMD_USB
+ 
+ #define CONFIG_BOOTDELAY		0
+-#define CONFIG_BOOTCOMMAND		"u2 probe"
++#define CONFIG_BOOTCOMMAND		"u2chain; u2 probe"
+ #define CONFIG_SYS_LONGHELP
+ #define CONFIG_SYS_HUSH_PARSER
+ #define CONFIG_SYS_PROMPT		"U2 (recovery payload) # "

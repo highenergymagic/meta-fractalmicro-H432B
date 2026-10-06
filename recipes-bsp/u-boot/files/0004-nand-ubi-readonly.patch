@@ -1,0 +1,135 @@
+Subject: [PATCH] H432B read-only Linux BCH NAND and bounded UBI boot
+
+Upstream-Status: Inappropriate [board bring-up]
+
+diff --git a/include/configs/hims_u2.h b/include/configs/hims_u2.h
+--- a/include/configs/hims_u2.h
++++ b/include/configs/hims_u2.h
+@@ -24,17 +24,17 @@
+ /* OEMLaunch has already switched to physical addressing and set up clocks. */
+ #define CONFIG_SKIP_LOWLEVEL_INIT	1
+ 
++/* Read-only Linux BCH NAND; no PMIC/board power changes. */
+-/* No raw NAND, OneNAND, PMIC, or board power controls are enabled here. */
+ #define CONFIG_SYS_NO_FLASH		1
+ #define CONFIG_ENV_IS_NOWHERE		1
+ #define CONFIG_ENV_SIZE		(4 << 10)
+ 
++#define CONFIG_SYS_MALLOC_LEN		(4 << 20)
+-#define CONFIG_SYS_MALLOC_LEN		(1 << 20)
+ #define CONFIG_SYS_MONITOR_BASE		CONFIG_SYS_TEXT_BASE
++#define CONFIG_SYS_MONITOR_LEN		(512 << 10)
+-#define CONFIG_SYS_MONITOR_LEN		(256 << 10)
+ #define CONFIG_SYS_INIT_SP_ADDR	0x46f00000
+ #define CONFIG_U2_ALLOC_TOP	0x46e00000
++#define CONFIG_U2_MALLOC_BASE	0x46400000
+-#define CONFIG_U2_MALLOC_BASE	0x46800000
+ #define CONFIG_SYS_BOOTM_LEN	(32 << 20)
+ #define CONFIG_OF_LIBFDT
+ #define CONFIG_CMD_FDT
+@@ -63,10 +63,21 @@
+ #undef CONFIG_CMD_NFS
+ #undef CONFIG_CMD_MMC
+ #undef CONFIG_CMD_ONENAND
++#define CONFIG_CMD_MTDPARTS
++#define CONFIG_CMD_NAND
+-#undef CONFIG_CMD_MTDPARTS
+-#undef CONFIG_CMD_NAND
+ #undef CONFIG_CMD_USB
+ 
++#define CONFIG_SYS_NAND_SELF_INIT
++#define CONFIG_SYS_MAX_NAND_DEVICE 1
++#define CONFIG_NAND_ECC_BCH
++#define CONFIG_BCH
++#define CONFIG_MTD_DEVICE
++#define CONFIG_MTD_PARTITIONS
++#define CONFIG_CMD_UBI
++#define CONFIG_RBTREE
++#define MTDIDS_DEFAULT "nand0=nand0"
++#define MTDPARTS_DEFAULT "mtdparts=nand0:4m(factory-boot)ro,507m(linux)ro,1m(bbt-reserved)ro"
++
+ #define CONFIG_BOOTDELAY		0
+ #define CONFIG_BOOTCOMMAND		"u2 probe"
+ #define CONFIG_SYS_LONGHELP
+diff --git a/board/hims/u2/Makefile b/board/hims/u2/Makefile
+--- a/board/hims/u2/Makefile
++++ b/board/hims/u2/Makefile
+@@ -8,7 +8,7 @@
+ 
+ LIB = $(obj)lib$(BOARD).o
+ 
++COBJS-y := u2.o u2probe.o u2fastboot.o u2nand.o
+-COBJS-y := u2.o u2probe.o u2fastboot.o
+ SOBJS := lowlevel_init.o
+ 
+ SRCS := $(SOBJS:.o=.S) $(COBJS-y:.o=.c)
+diff --git a/common/cmd_ubi.c b/common/cmd_ubi.c
+--- a/common/cmd_ubi.c
++++ b/common/cmd_ubi.c
+@@ -313,7 +313,7 @@
+ 	return 0;
+ }
+ 
++static int ubi_volume_read(char *volume, char *buf, size_t size, int verify)
+-static int ubi_volume_read(char *volume, char *buf, size_t size)
+ {
+ 	int err, lnum, off, len, tbuf_size;
+ 	void *tbuf;
+@@ -365,7 +365,7 @@
+ 		if (off + len >= vol->usable_leb_size)
+ 			len = vol->usable_leb_size - off;
+ 
++		err = ubi_eba_read_leb(ubi, vol, lnum, tbuf, off, len, verify);
+-		err = ubi_eba_read_leb(ubi, vol, lnum, tbuf, off, len, 0);
+ 		if (err) {
+ 			printf("read err %x\n", err);
+ 			err = -err;
+@@ -390,6 +390,19 @@
+ 	return err;
+ }
+ 
++/* Read the complete static image and verify each LEB data CRC. */
++int ubi_volume_read_bounded(char *name, void *buf, size_t limit, size_t *actual)
++{
++ struct ubi_volume *vol=ubi_find_volume(name);
++ int ret;
++ if(!vol || vol->vol_type!=UBI_STATIC_VOLUME || vol->updating ||
++    vol->upd_marker || vol->corrupted || vol->used_bytes<=0 ||
++    vol->used_bytes>limit) return -EINVAL;
++ ret=ubi_volume_read(name,buf,vol->used_bytes,1);
++ if(!ret) *actual=vol->used_bytes;
++ return ret;
++}
++
+ static int ubi_dev_scan(struct mtd_info *info, char *ubidev,
+ 		const char *vid_header_offset)
+ {
+@@ -598,7 +611,7 @@
+ 		}
+ 
+ 		if (argc == 3)
++			return ubi_volume_read(argv[3], (char *)addr, size, 0);
+-			return ubi_volume_read(argv[3], (char *)addr, size);
+ 	}
+ 
+ 	printf("Please see usage\n");
+diff --git a/board/hims/u2/u2probe.c b/board/hims/u2/u2probe.c
+--- a/board/hims/u2/u2probe.c
++++ b/board/hims/u2/u2probe.c
+@@ -38,6 +38,7 @@
+ static unsigned rx_length;
+ static u8 ram_rx[60];
+ static int active;
++int u2probe_is_active(void) { return active; }
+ 
+ static u32 get32(const u8 *p) {
+  return p[0] | (u32)p[1]<<8 | (u32)p[2]<<16 | (u32)p[3]<<24;
+@@ -213,6 +214,8 @@
+ int u2probe_start(void) {
+  u32 phy_va,otg_va,ctrl_va;
+  int r;
++ /* NAND autoboot may already own the gadget when it falls back to USB. */
++ if (active) return 0;
+  if (u2_eboot_phys_to_virt(U2_USB_PHY,&phy_va) ||
+      u2_eboot_phys_to_virt(U2_USB_OTG,&otg_va) ||
+      u2_eboot_phys_to_virt(U2_USB_CTRL,&ctrl_va)) return -ENODEV;

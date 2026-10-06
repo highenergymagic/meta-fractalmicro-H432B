@@ -47,7 +47,7 @@
 
 	/* Custom read-only diagnostic binding; no program/erase or guessed ECC. */
 	nand@b0e00000 {
-		compatible = "hims,u2-nand-readonly";
+		compatible = "hims,u2-nand-bch";
 		reg = <0xb0e00000 0x1000>;
 	};
 };

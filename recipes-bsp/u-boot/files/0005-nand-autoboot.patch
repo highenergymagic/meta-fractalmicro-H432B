@@ -1,0 +1,15 @@
+Subject: [PATCH] H432B automatic read-only NAND kernel-A boot, USB fallback
+
+Upstream-Status: Inappropriate [board bring-up]
+
+--- a/include/configs/hims_u2.h
++++ b/include/configs/hims_u2.h
+@@ -78,7 +78,7 @@
+ #define MTDPARTS_DEFAULT "mtdparts=nand0:4m(factory-boot)ro,507m(linux)ro,1m(bbt-reserved)ro"
+ 
+ #define CONFIG_BOOTDELAY		0
+-#define CONFIG_BOOTCOMMAND		"u2 probe"
++#define CONFIG_BOOTCOMMAND "u2nandinit ident && u2nandinit ecc && u2nandboot a; u2 probe"
+ #define CONFIG_SYS_LONGHELP
+ #define CONFIG_SYS_HUSH_PARSER
+ #define CONFIG_SYS_PROMPT		"U2 (RAM Linux loader) # "
