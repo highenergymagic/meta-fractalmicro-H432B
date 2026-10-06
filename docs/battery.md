@@ -37,6 +37,41 @@ The diagnostic has no EEPROM programming, charger control, generic register
 write interface. Pack serial numbers are not exposed.
 It reports GPIO levels and transport errors even when battery readings fail.
 
+## Raw measurement snapshot
+
+The opt-in diagnostic also provides
+`/sys/devices/platform/battery-inventory/registers`, readable only by root.
+Each explicit read verifies the single-drop ROM twice and accepts family
+0x32 before selecting that device. It reads two passes of fixed windows
+0x01–0x1b (status/capacity/measurements) and 0x60–0x7c (parameters).
+It does not export the unique ROM, read the user-identity area, or accept
+an arbitrary address from userspace.
+
+The parameter bytes are the current EEPROM **shadow RAM**: no Recall, Copy,
+Write Data or charger-control command is issued. `parameters_equal` reports
+agreement between passes. Register data has no transport CRC; two passes
+are evidence for comparison, not proof of error-free data. Measurements may
+change between passes. Each two-byte measurement is read in one transaction.
+
+These bytes are for model/scaling qualification, not calibrated engineering
+units. Raw reads are explicit and do not expand the five-second background
+poll. No new standard power_supply properties are enabled by this experiment.
+
+For the documented DS2780/2784/2788-compatible interpretation, register
+pairs are big-endian. Temperature at 0x0a is signed, shifted right five,
+then multiplied by 0.125 degrees C. Voltage at 0x0c uses the same bit
+alignment and approximately 4.88 mV per count. Current at 0x0e and average
+current at 0x08 are signed 16-bit counts at 1.5625 microvolts across the
+sense resistor per count. Parameter 0x69 stores conductance in inverse ohms:
+current in microamps is therefore raw current times 1.5625 times conductance.
+A zero conductance is invalid, not a zero-current measurement. Calibration
+gain is already applied by the gauge and must not be multiplied in twice.
+
+Positive current denotes charging, negative current discharging. Small
+readings must be interpreted against sensor offset accuracy. These formulas
+do not independently establish the fitted model, divider wiring, calibration
+accuracy or pack health; retain the raw capture alongside any interpretation.
+
 ## Linux power_supply interface
 
 The opt-in driver registers `/sys/class/power_supply/h432b-battery` with type
@@ -71,6 +106,27 @@ default-image isolation.
 
 ## Validation
 
+The fixed-window register diagnostic also passed a RAM boot. Four snapshots
+(eight read passes) had matching parameter blocks and valid ROM CRCs.
+The documented conversion gave approximately 4.18 V and 26.9 degrees C,
+with programmed conductance 50 inverse ohms (20 milliohms). Instantaneous
+current was approximately +0.3 to +0.4 mA, below the significance of the
+specified offset accuracy. Average current briefly indicated about -8.8 mA
+after boot, so it must not be confused with the instantaneous sample.
+
+The gauge's latched charge-termination flag was set. Together with 100
+percent and near-zero current this is consistent with a charged battery on
+external power, not proof of a complete observed charging cycle. A historical
+undervoltage flag was also set; it is sticky until explicitly cleared and
+does not indicate that the measured cell voltage is currently low. No flags
+were cleared. Exact model, external voltage scaling and independent physical
+calibration remain unverified.
+
+The register revision passed 87 hardware-layer tests and all 2,003 build
+tasks. Live systemd had no failed units; kernel taint was zero and UBI was
+read-only. This is still opt-in RAM qualification, not a NAND deployment.
+
+
 The power_supply revision built successfully with the pinned toolchain.
 The 86 hardware-layer and 24 OS-layer tests passed, and the container executed
 2,424 C status-policy matrix cases plus range/error checks. A RAM launch
@@ -99,6 +155,8 @@ settings were changed, and the image was not written to NAND.
 ## References
 
 - [DS2780 data sheet](https://www.analog.com/media/en/technical-documentation/data-sheets/DS2780.pdf)
+- [DS2784 data sheet](https://www.analog.com/media/en/technical-documentation/data-sheets/ds2784.pdf)
+- [DS2788 data sheet](https://www.analog.com/media/en/technical-documentation/data-sheets/ds2788.pdf)
 - [DS2781 data sheet](https://www.analog.com/media/en/technical-documentation/data-sheets/DS2781.pdf)
 
 These describe compatible command/register layouts, not proof that a

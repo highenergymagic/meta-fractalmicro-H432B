@@ -37,9 +37,20 @@ class BatteryInventoryTests(unittest.TestCase):
 
     def test_command_allowlist(self):
         literals = re.findall(r"battery_write_byte\(b, (0x[0-9a-f]+)\)", SOURCE)
-        self.assertEqual(literals, ["0x33", "0x55", "0x69", "0x06"])
+        self.assertEqual(literals, ["0x33", "0x55", "0x69", "0x06", "0x55", "0x69"])
         self.assertNotIn("0xcc", SOURCE.lower())
         self.assertNotIn("0x6c", SOURCE.lower())
+
+    def test_register_snapshot_bounds(self):
+        self.assertIn("DEVICE_ATTR(registers, 0400, registers_show, NULL)", SOURCE)
+        self.assertIn("address == 0x01 && len == 27", SOURCE)
+        self.assertIn("address == 0x60 && len == 29", SOURCE)
+        self.assertIn("rom[0] != 0x32", SOURCE)
+        self.assertIn("pass < 2", SOURCE)
+        self.assertIn("parameters_equal=%u", SOURCE)
+        poll = SOURCE.split("static void battery_poll(", 1)[1].split("static void battery_stop_poll", 1)[0]
+        self.assertNotIn("battery_read_window", poll)
+        self.assertNotIn("registers_show", poll)
 
     def test_validation(self):
         self.assertIn("battery_crc(rom, 8)", SOURCE)

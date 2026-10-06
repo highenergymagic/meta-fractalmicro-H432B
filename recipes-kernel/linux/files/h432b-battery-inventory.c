@@ -270,7 +270,81 @@ static ssize_t snapshot_show(struct device *dev,
 		sample.family, sample.capacity, sample.ac, sample.secondary, sample.charge);
 }
 static DEVICE_ATTR(snapshot, 0400, snapshot_show, NULL);
-static struct attribute *battery_attrs[] = { &dev_attr_snapshot.attr, NULL };
+/*
+ * Fixed read-only windows, not an arbitrary register interface. Parameter
+ * reads return shadow RAM; deliberately never issue Recall/Copy/Write Data.
+ * Raw bytes have no data CRC: expose two passes, do not claim atomicity
+ * across registers, and leave conversion/model selection to offline analysis.
+ */
+static int battery_read_window(struct h432b_battery_inventory *b,
+			       const u8 rom[8], u8 address, u8 *data, size_t len)
+{
+	int ret, i;
+
+	if (!((address == 0x01 && len == 27) ||
+	      (address == 0x60 && len == 29)))
+		return -EINVAL;
+	ret = battery_reset(b);
+	if (ret)
+		return ret;
+	battery_write_byte(b, 0x55);
+	for (i = 0; i < 8; i++)
+		battery_write_byte(b, rom[i]);
+	battery_write_byte(b, 0x69);
+	battery_write_byte(b, address);
+	for (i = 0; i < len; i++)
+		data[i] = battery_read_byte(b);
+	return 0;
+}
+
+static ssize_t registers_show(struct device *dev,
+			      struct device_attribute *attr, char *buf)
+{
+	struct h432b_battery_inventory *b = dev_get_drvdata(dev);
+	u8 rom[8], again[8], measurements[2][27], parameters[2][29];
+	int ret, pass, i, ac, secondary, charge;
+	ssize_t n = 0;
+
+	if (mutex_lock_interruptible(&b->transaction))
+		return -ERESTARTSYS;
+	ac = gpiod_get_value(b->ac);
+	secondary = gpiod_get_value(b->usb);
+	charge = gpiod_get_value(b->charge);
+	ret = battery_read_rom(b, rom);
+	if (!ret)
+		ret = battery_read_rom(b, again);
+	if (!ret && memcmp(rom, again, sizeof(rom)))
+		ret = -EBADMSG;
+	if (!ret && rom[0] != 0x32)
+		ret = -EOPNOTSUPP;
+	for (pass = 0; !ret && pass < 2; pass++) {
+		ret = battery_read_window(b, rom, 0x01, measurements[pass], 27);
+		if (!ret)
+			ret = battery_read_window(b, rom, 0x60, parameters[pass], 29);
+	}
+	gpiod_set_value(b->pull_low, 0);
+	mutex_unlock(&b->transaction);
+	if (ret)
+		return ret;
+	n += sysfs_emit_at(buf, n,
+		"family=0x%02x rom_crc=ok ac_input=%d secondary_input=%d charging_input=%d parameters_equal=%u\n",
+		rom[0], ac, secondary, charge,
+		!memcmp(parameters[0], parameters[1], sizeof(parameters[0])));
+	for (pass = 0; pass < 2; pass++) {
+		n += sysfs_emit_at(buf, n, "pass=%d registers_01_1b=", pass);
+		for (i = 0; i < 27; i++)
+			n += sysfs_emit_at(buf, n, "%02x", measurements[pass][i]);
+		n += sysfs_emit_at(buf, n, "\npass=%d shadow_60_7c=", pass);
+		for (i = 0; i < 29; i++)
+			n += sysfs_emit_at(buf, n, "%02x", parameters[pass][i]);
+		n += sysfs_emit_at(buf, n, "\n");
+	}
+	return n;
+}
+static DEVICE_ATTR(registers, 0400, registers_show, NULL);
+static struct attribute *battery_attrs[] = {
+	&dev_attr_snapshot.attr, &dev_attr_registers.attr, NULL
+};
 ATTRIBUTE_GROUPS(battery);
 
 static int battery_inventory_probe(struct platform_device *pdev)
