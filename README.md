@@ -64,6 +64,7 @@ The loader firmware itself remains in this BSP layer.
 - [Fastboot support](docs/fastboot.md): RAM download and boot workflow.
 - [Boot performance](docs/boot-performance.md): measured bottlenecks and profiling limits.
 - [Input support](docs/input.md): power-key qualification and remaining controls.
+- [Battery interface](docs/battery.md): recovered wiring and read-only qualification status.
 - [Source provenance](docs/provenance.md): origins and licensing of board support.
 
 Read the boot contract before attempting deployment. RAM loaders and
