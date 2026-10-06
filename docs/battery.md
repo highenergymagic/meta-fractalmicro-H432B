@@ -34,15 +34,53 @@ Transactions use the identified ROM, not broadcast register access.
 A family code is not necessarily an exact model identifier.
 
 The diagnostic has no EEPROM programming, charger control, generic register
-write interface or automatic polling. Pack serial numbers are not exposed.
+write interface. Pack serial numbers are not exposed.
 It reports GPIO levels and transport errors even when battery readings fail.
 
-This is a transport qualification tool, not a production power_supply driver.
-Voltage/current scaling, charge-source semantics, low-battery policy and
-device-specific power_supply integration remain unqualified. The default
-power-button policy remains unchanged.
+## Linux power_supply interface
+
+The opt-in driver registers `/sys/class/power_supply/h432b-battery` with type
+`Battery` and two read-only properties:
+
+- `capacity`: verified remaining capacity, from 0 to 100 percent.
+- `status`: Charging, Discharging, Not charging, or Unknown.
+
+Telemetry is sampled every five seconds and cached, so ordinary sysfs/uevent
+reads do not trigger extra bus transactions. Changes generate standard
+power_supply notifications. A failed sample invalidates capacity immediately;
+samples older than 15 seconds are also unavailable. Status becomes Unknown.
+A transport failure is not reported as an absent battery or zero percent.
+
+Charging requires an asserted charging indication plus external-source
+presence. With external power but no charging indication, status is Not
+charging, even at 100 percent: the driver does not invent a charge-complete
+signal. No exact chip model, voltage, current, temperature, health, presence,
+serial number or estimated runtime is advertised without validation.
+
+The driver has no writable power_supply properties. Device removal cancels
+polling before unregistering the supply and releasing GPIOs.
+Voltage/current scaling, source-transition qualification, low-battery policy
+and suspend remain separate work. The normal image and power-button policy
+are unchanged.
+
+The shared status/range policy is compiled and tested inside the pinned build
+container. It covers all valid capacities and GPIO combinations, error and
+stale-data handling, negative GPIO errors and out-of-range capacity. Static
+tests separately check the read-only property list, polling, cleanup and
+default-image isolation.
 
 ## Validation
+
+The power_supply revision built successfully with the pinned toolchain.
+The 86 hardware-layer and 24 OS-layer tests passed, and the container executed
+2,424 C status-policy matrix cases plus range/error checks. A RAM launch
+exposed type Battery, capacity 100 and status Not charging through standard
+sysfs and uevent properties. Three readings six seconds apart agreed.
+Capacity/status attributes were read-only; unverified measurement and identity
+attributes were absent. UBI stayed read-only and the kernel untainted.
+This is a RAM qualification, not a NAND installation or a source-transition test.
+
+Initial transport qualification:
 
 The opt-in image built with the pinned OE toolchain in Docker. The hardware
 and OS layer suites passed 105 tests, including six static scope checks.

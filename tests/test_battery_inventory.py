@@ -24,7 +24,12 @@ class BatteryInventoryTests(unittest.TestCase):
         self.assertIn("DEVICE_ATTR(snapshot, 0400, snapshot_show, NULL)", SOURCE)
         self.assertNotIn("DEVICE_ATTR_RW", SOURCE)
         self.assertNotIn("ioremap", SOURCE)
-        self.assertNotIn("power_supply_register", SOURCE)
+        self.assertIn("devm_power_supply_register", SOURCE)
+        self.assertNotIn(".set_property", SOURCE)
+        self.assertNotIn("POWER_SUPPLY_PROP_VOLTAGE", SOURCE)
+        self.assertNotIn("POWER_SUPPLY_PROP_CURRENT", SOURCE)
+        self.assertNotIn("POWER_SUPPLY_PROP_PRESENT", SOURCE)
+        self.assertNotIn("POWER_SUPPLY_PROP_MODEL_NAME", SOURCE)
         probe = SOURCE.split("static int battery_inventory_probe", 1)[1]
         self.assertNotIn("battery_read_rom(", probe)
         self.assertNotIn("battery_write_byte(", probe)
