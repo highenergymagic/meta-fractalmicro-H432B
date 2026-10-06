@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: GPL-2.0
+/* RAM-only resume layout experiment. No PMIC setting changes. */
+#include "s5pv210-hims-u2-power-test.dts"
+
+/ {
+    hims,factory-resume-test;
+    chosen {
+        /* Old U-Boot rewrites /memory to the full physical bank.
+         * Both the ARM decompressor and OF memory scan honor this limit.
+         * The kernel then decompresses at 0x40208000.
+         */
+        linux,usable-memory-range = <0x40200000 0x0fe00000>;
+    };
+    reserved-memory {
+        #address-cells = <1>;
+        #size-cells = <1>;
+        ranges;
+        factory_resume: factory-resume@40020000 {
+            reg = <0x40020000 0x1000>;
+            no-map;
+        };
+    };
+};
+
+&{/power-keys/power-button} {
+    wakeup-source;
+};
