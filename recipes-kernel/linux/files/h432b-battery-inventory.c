@@ -21,6 +21,8 @@
 
 struct battery_sample {
 	int error, ac, secondary, charge;
+	int measurement_error;
+	struct h432b_measurements measurements;
 	u8 family, capacity;
 };
 
@@ -141,6 +143,39 @@ static int battery_read_capacity(struct h432b_battery_inventory *b,
 	return *capacity <= 100 ? 0 : -ERANGE;
 }
 
+static int battery_read_window(struct h432b_battery_inventory *b,
+			       const u8 rom[8], u8 address, u8 *data, size_t len);
+
+static int battery_signed16(const u8 *p)
+{
+	unsigned int value = ((unsigned int)p[0] << 8) | p[1];
+
+	return value >= 32768 ? (int)value - 65536 : (int)value;
+}
+
+static int battery_read_measurements(struct h432b_battery_inventory *b,
+		const u8 rom[8], struct h432b_measurements *m)
+{
+	u8 raw[8], sense, confirm;
+	int ret;
+
+	if (rom[0] != 0x32)
+		return -EOPNOTSUPP;
+	ret = battery_read_window(b, rom, 0x69, &sense, 1);
+	if (!ret)
+		ret = battery_read_window(b, rom, 0x69, &confirm, 1);
+	if (ret)
+		return ret;
+	if (!sense || sense != confirm)
+		return -EBADMSG;
+	ret = battery_read_window(b, rom, 0x08, raw, sizeof(raw));
+	if (ret)
+		return ret;
+	return h432b_decode_measurements(battery_signed16(raw + 4),
+		battery_signed16(raw + 2), battery_signed16(raw + 6),
+		battery_signed16(raw), sense, m) ? 0 : -ERANGE;
+}
+
 /* Caller holds transaction. No stored capacity is substituted on errors. */
 static void battery_sample_read(struct h432b_battery_inventory *b,
 				struct battery_sample *sample)
@@ -171,6 +206,9 @@ static void battery_sample_read(struct h432b_battery_inventory *b,
 	gpiod_set_value(b->pull_low, 0);
 	sample->error = ret;
 	sample->capacity = capacity;
+	sample->measurement_error = ret ? ret :
+		battery_read_measurements(b, rom, &sample->measurements);
+	gpiod_set_value(b->pull_low, 0);
 }
 
 static void battery_poll(struct work_struct *work)
@@ -185,7 +223,10 @@ static void battery_poll(struct work_struct *work)
 	changed = !b->have_sample || next.error != b->cached.error ||
 		  next.capacity != b->cached.capacity || next.family != b->cached.family ||
 		  next.ac != b->cached.ac || next.secondary != b->cached.secondary ||
-		  next.charge != b->cached.charge;
+		  next.charge != b->cached.charge ||
+		  next.measurement_error != b->cached.measurement_error ||
+		  memcmp(&next.measurements, &b->cached.measurements,
+			 sizeof(next.measurements));
 	b->cached = next;
 	b->sampled = jiffies;
 	b->have_sample = true;
@@ -206,6 +247,10 @@ static void battery_stop_poll(void *data)
 static enum power_supply_property battery_properties[] = {
 	POWER_SUPPLY_PROP_CAPACITY,
 	POWER_SUPPLY_PROP_STATUS,
+	POWER_SUPPLY_PROP_VOLTAGE_NOW,
+	POWER_SUPPLY_PROP_TEMP,
+	POWER_SUPPLY_PROP_CURRENT_NOW,
+	POWER_SUPPLY_PROP_CURRENT_AVG,
 };
 
 static int battery_get_property(struct power_supply *psy,
@@ -226,6 +271,21 @@ static int battery_get_property(struct power_supply *psy,
 		if (!h432b_capacity_usable(sample.error, sample.capacity, fresh))
 			return -ENODATA;
 		value->intval = sample.capacity;
+		return 0;
+	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+	case POWER_SUPPLY_PROP_TEMP:
+	case POWER_SUPPLY_PROP_CURRENT_NOW:
+	case POWER_SUPPLY_PROP_CURRENT_AVG:
+		if (!fresh || sample.measurement_error)
+			return -ENODATA;
+		if (property == POWER_SUPPLY_PROP_VOLTAGE_NOW)
+			value->intval = sample.measurements.voltage_uv;
+		else if (property == POWER_SUPPLY_PROP_TEMP)
+			value->intval = sample.measurements.temp_decic;
+		else if (property == POWER_SUPPLY_PROP_CURRENT_NOW)
+			value->intval = sample.measurements.current_ua;
+		else
+			value->intval = sample.measurements.current_avg_ua;
 		return 0;
 	case POWER_SUPPLY_PROP_STATUS:
 		state = h432b_charge_state(sample.error, sample.capacity, fresh,
@@ -282,7 +342,9 @@ static int battery_read_window(struct h432b_battery_inventory *b,
 	int ret, i;
 
 	if (!((address == 0x01 && len == 27) ||
-	      (address == 0x60 && len == 29)))
+	      (address == 0x60 && len == 29) ||
+	      (address == 0x08 && len == 8) ||
+	      (address == 0x69 && len == 1)))
 		return -EINVAL;
 	ret = battery_reset(b);
 	if (ret)

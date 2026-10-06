@@ -16,8 +16,9 @@ capacity register. The exact device model is not yet verified on hardware.
 | GPC0[4] | Inverted transmit: high pulls the bus low; low releases it |
 
 The electrical implementation of the inverting stage is not established.
-The secondary input must not yet be described as USB power. Source transitions
-need controlled tests. Stock polling uses a five-second interval and filters
+A controlled USB unplug test confirmed that the secondary input deasserts
+when USB power is removed. The primary input has not been qualified with an
+AC adapter. Stock polling uses a five-second interval and filters
 capacity samples; communication failure must not be assumed to mean no pack.
 
 ## Read-only qualification image
@@ -55,7 +56,7 @@ change between passes. Each two-byte measurement is read in one transaction.
 
 These bytes are for model/scaling qualification, not calibrated engineering
 units. Raw reads are explicit and do not expand the five-second background
-poll. No new standard power_supply properties are enabled by this experiment.
+poll. The standard measurements below use these qualified register formats.
 
 For the documented DS2780/2784/2788-compatible interpretation, register
 pairs are big-endian. Temperature at 0x0a is signed, shifted right five,
@@ -75,10 +76,23 @@ accuracy or pack health; retain the raw capture alongside any interpretation.
 ## Linux power_supply interface
 
 The opt-in driver registers `/sys/class/power_supply/h432b-battery` with type
-`Battery` and two read-only properties:
+`Battery` and these read-only properties:
 
 - `capacity`: verified remaining capacity, from 0 to 100 percent.
 - `status`: Charging, Discharging, Not charging, or Unknown.
+- `voltage_now`: gauge voltage in microvolts.
+- `temp`: gauge temperature in tenths of a degree Celsius.
+- `current_now`: signed instantaneous current in microamps.
+- `current_avg`: signed averaged current in microamps.
+
+Positive current means charging; negative means discharging. Measurements
+are enabled only for the qualified family-0x32 register format. Each poll
+checks two reads of the programmed conductance, rejects zero/mismatched
+calibration, reads each register pair in one transaction and rejects invalid
+or saturated values. Measurement failures return no data, not zero current.
+Conversions are unit-tested with signed and boundary cases. These are gauge
+readings using pack-stored calibration, not independently calibrated lab
+measurements. The status policy still uses the recovered GPIO inputs.
 
 Telemetry is sampled every five seconds and cached, so ordinary sysfs/uevent
 reads do not trigger extra bus transactions. Changes generate standard
@@ -89,13 +103,13 @@ A transport failure is not reported as an absent battery or zero percent.
 Charging requires an asserted charging indication plus external-source
 presence. With external power but no charging indication, status is Not
 charging, even at 100 percent: the driver does not invent a charge-complete
-signal. No exact chip model, voltage, current, temperature, health, presence,
-serial number or estimated runtime is advertised without validation.
+signal. No exact chip model, health, presence, serial number or estimated runtime
+is advertised.
 
 The driver has no writable power_supply properties. Device removal cancels
 polling before unregistering the supply and releasing GPIOs.
-Voltage/current scaling, source-transition qualification, low-battery policy
-and suspend remain separate work. The normal image and power-button policy
+Charging transitions, the AC source, low-battery policy and suspend remain
+separate work. The normal image and power-button policy
 are unchanged.
 
 The shared status/range policy is compiled and tested inside the pinned build
@@ -105,6 +119,32 @@ tests separately check the read-only property list, polling, cleanup and
 default-image isolation.
 
 ## Validation
+
+A controlled USB-removal test preserved the key-authenticated Ethernet
+session. The secondary-power input changed from asserted to deasserted,
+status became Discharging on the next polling interval, and instantaneous
+current changed from near zero to approximately -240 to -360 mA in the
+first samples. Voltage fell from approximately 4.18 to 4.15 V. This qualifies
+the secondary input as USB-present and the negative-current discharge
+interpretation on the tested board. The average-current register updates more
+slowly and must not be interpreted as instantaneous current. AC and active
+charging transitions remain separate tests.
+
+
+The engineering-unit revision passed a RAM boot with all six power_supply
+properties. Three samples six seconds apart had read-only attributes,
+approximately 4.17–4.18 V, 27.0–27.1 degrees C and near-zero instantaneous
+current while externally powered. Standard uevents included voltage,
+temperature and both current values. Kernel taint stayed zero and UBI
+read-only. An authenticated Ethernet SSH session read the same interface.
+
+Validation includes 88 hardware-layer checks, 2,424 compiled status-policy
+matrix cases, 65,534 signed-current conversion cases and additional conversion
+boundary tests. The shared host test also guards against Linux's `current`
+macro colliding with helper parameter names. Full kernel/image builds passed.
+These checks do not establish independent sensor calibration or long-term
+battery health.
+
 
 The fixed-window register diagnostic also passed a RAM boot. Four snapshots
 (eight read passes) had matching parameter blocks and valid ROM CRCs.

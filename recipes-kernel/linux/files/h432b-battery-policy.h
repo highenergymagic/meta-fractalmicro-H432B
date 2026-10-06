@@ -26,4 +26,26 @@ h432b_charge_state(int error, int capacity, int fresh,
 	/* 100% plus an inactive charging pin does not prove charge termination. */
 	return (primary || secondary) ? H432B_NOT_CHARGING : H432B_DISCHARGING;
 }
+
+struct h432b_measurements {
+	int voltage_uv, temp_decic, current_ua, current_avg_ua;
+};
+
+/* DS2780/2784/2788 register units; calibration is applied inside the gauge. */
+static inline int h432b_decode_measurements(int voltage, int temp,
+		int current_raw, int average, int conductance,
+		struct h432b_measurements *m)
+{
+	if (conductance <= 0 || conductance > 255 ||
+	    voltage <= 0 || voltage > 32767 ||
+	    temp < -10240 || temp > 21760 ||
+	    current_raw <= -32768 || current_raw >= 32767 ||
+	    average <= -32768 || average >= 32767)
+		return 0;
+	m->voltage_uv = (voltage / 32) * 4880;
+	m->temp_decic = (temp / 32) * 125 / 100;
+	m->current_ua = current_raw * 25 * conductance / 16;
+	m->current_avg_ua = average * 25 * conductance / 16;
+	return m->voltage_uv > 0;
+}
 #endif

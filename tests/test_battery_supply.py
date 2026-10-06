@@ -13,10 +13,19 @@ class BatterySupplyTests(unittest.TestCase):
         props = SOURCE.split("static enum power_supply_property battery_properties[]", 1)[1].split("};", 1)[0]
         self.assertIn("POWER_SUPPLY_PROP_CAPACITY", props)
         self.assertIn("POWER_SUPPLY_PROP_STATUS", props)
-        self.assertEqual(props.count("POWER_SUPPLY_PROP_"), 2)
+        self.assertEqual(props.count("POWER_SUPPLY_PROP_"), 6)
         self.assertIn('.name = "h432b-battery"', SOURCE)
         self.assertIn("POWER_SUPPLY_TYPE_BATTERY", SOURCE)
         self.assertNotIn(".set_property", SOURCE)
+
+    def test_measurements(self):
+        for name in ("VOLTAGE_NOW", "TEMP", "CURRENT_NOW", "CURRENT_AVG"):
+            self.assertIn("POWER_SUPPLY_PROP_" + name, SOURCE)
+        self.assertIn("!fresh || sample.measurement_error", SOURCE)
+        self.assertIn("sense != confirm", SOURCE)
+        self.assertIn("rom[0] != 0x32", SOURCE)
+        self.assertIn("conductance <= 0", POLICY)
+        self.assertIn("current_raw * 25 * conductance / 16", POLICY)
 
     def test_no_fabricated_values(self):
         self.assertNotIn("POWER_SUPPLY_STATUS_FULL", SOURCE)

@@ -26,8 +26,6 @@ class BatteryInventoryTests(unittest.TestCase):
         self.assertNotIn("ioremap", SOURCE)
         self.assertIn("devm_power_supply_register", SOURCE)
         self.assertNotIn(".set_property", SOURCE)
-        self.assertNotIn("POWER_SUPPLY_PROP_VOLTAGE", SOURCE)
-        self.assertNotIn("POWER_SUPPLY_PROP_CURRENT", SOURCE)
         self.assertNotIn("POWER_SUPPLY_PROP_PRESENT", SOURCE)
         self.assertNotIn("POWER_SUPPLY_PROP_MODEL_NAME", SOURCE)
         probe = SOURCE.split("static int battery_inventory_probe", 1)[1]
