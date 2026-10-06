@@ -21,7 +21,8 @@ in this Yocto run. Default kernel NAND and SD writes remain blocked.
 Explicit NAND-only write-window profiles have now passed BCH erase/program,
 UBI provisioning and full readback. A RAM-staged U-Boot has loaded the kernel
 and debug initramfs from NAND; the base SquashFS volume mounts read-only.
-The NAND56 bootstrap candidate is under installation/normal-boot qualification. See [NAND status](docs/nand.md).
+NAND56 is installed and a plain Reset has booted Linux from NAND without
+host uploads; factory StepLoader/EBOOT are verified unchanged. See [NAND status](docs/nand.md).
 Wi-Fi enumerates over SDIO but has no working function driver. Linux braille, keyboard, suspend and battery management
 remain incomplete. This is not a complete, secure replacement firmware.
 

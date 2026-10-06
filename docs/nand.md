@@ -82,17 +82,23 @@ launched Linux; independent full SHA256 readbacks, SquashFS mount, RT,
 zero-taint and systemd-health checks passed. The corrected RAM55 automatic
 reader also passed those checks without a host kernel upload. Host-observed
 time from its launch to the Linux shell was 136.261 seconds, of which
-Linux/systemd startup was 28.696 seconds. The uncached reader is not yet
+Linux/systemd startup was 28.696 seconds. The unoptimized reader is not yet
 optimized. The first automatic attempt exposed two integration bugs:
 mtdparts defaults were not applied to the volatile environment, and the
 USB error fallback attempted double registration. Both are fixed.
 
-The separate NAND56 CE-carried two-stage bootstrap builds, including
-image/heap/stack overlap checks, and its first factory-assisted installation
-is under qualification. Normal-reset boot has not yet been tested. Its packager
-reproduces the qualified legacy carrier byte-for-byte, but this does not establish normal-reset reliability of the larger image. The kernel
-bundle still contains a DEBUG initramfs, not production root-switch logic.
-No A/B rollback policy is implemented.
+NAND56's CE-carried two-stage bootstrap is installed. Its full 392,060-byte
+NAND payload readback matches the built carrier at physical 0x000c0800.
+StepLoader/EBOOT through 0x000a0000, including OOB, stayed byte-identical.
+Both the factory-assisted launch and a subsequent plain Reset booted kernel_a
+and passed the same full hash/mount/health checks, without host image uploads
+on Reset. The normal-reset test took about 138 seconds to the Linux shell;
+Linux/systemd accounted for 28.731 seconds. Reader optimization remains work.
+
+Image/heap/stack checks run in the build, and the CE packager also reproduces
+the legacy carrier byte-for-byte. Those static checks complement, not replace,
+hardware tests. The kernel bundle still contains a DEBUG initramfs, not
+production root-switch logic. No A/B rollback policy is implemented.
 
 U-Boot NAND writes are disabled at both MTD callbacks and the controller
 command interface. The immutable EBOOT/NAND51 rollback artifacts are retained
