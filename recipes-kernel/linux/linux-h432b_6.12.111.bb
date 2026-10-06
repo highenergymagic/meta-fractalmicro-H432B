@@ -15,7 +15,7 @@ SRC_URI = "https://www.kernel.org/pub/linux/kernel/projects/cip/6.12/linux-cip-6
     file://0008-nand-bch-window.patch file://test-nand-guard.c file://nand-profile.py \
     file://s5pv210-hims-u2.dts \
     file://u2-ram.config file://u2-storage.config file://u2-sdio.config \
-    file://u2-audio.config file://u2-systemd.config file://u2-input.config \
+    file://u2-audio.config file://u2-systemd.config file://u2-input.config file://u2-ethernet.config \
 "
 SRC_URI[kernel.sha256sum] = "879b45f18c1bd8322b2026f72642faedcb77242418cb10a5aa56f5404f647059"
 SRC_URI[rt.sha256sum] = "8b9b7b59f0372e1e70b5fd99729765d335928ef0a0196fb1e869afc45fc69b55"
@@ -39,11 +39,11 @@ do_configure:prepend() {
     KCONFIG_CONFIG=${B}/.config ${S}/scripts/kconfig/merge_config.sh -m -O ${B} \
         ${B}/.config ${UNPACKDIR}/u2-ram.config ${UNPACKDIR}/u2-storage.config \
         ${UNPACKDIR}/u2-sdio.config ${UNPACKDIR}/u2-audio.config \
-        ${UNPACKDIR}/u2-systemd.config ${UNPACKDIR}/u2-input.config
+        ${UNPACKDIR}/u2-systemd.config ${UNPACKDIR}/u2-input.config ${UNPACKDIR}/u2-ethernet.config
 }
 do_configure:append() {
     for option in PREEMPT_RT RD_XZ MTD_NAND_HIMS_U2 MTD_NAND_ECC_SW_BCH MTD_UBI_BLOCK SQUASHFS SQUASHFS_XZ UBIFS_FS MMC_SDHCI_S3C USB_G_SERIAL \
-                  INPUT_EVDEV KEYBOARD_GPIO SND_SOC_HIMS_U2 CGROUPS MEMCG CGROUP_PIDS SECCOMP_FILTER FHANDLE; do
+                  INPUT_EVDEV KEYBOARD_GPIO SMSC911X SMSC_PHY SND_SOC_HIMS_U2 CGROUPS MEMCG CGROUP_PIDS SECCOMP_FILTER FHANDLE; do
         grep -qx "CONFIG_$option=y" ${B}/.config ||
             bbfatal "Missing required board/guard option: $option"
     done

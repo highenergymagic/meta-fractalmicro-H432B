@@ -149,18 +149,40 @@
 &ohci { status = "okay"; };
 
 /*
- * CE's smsc9118.dll registry gives IoBaseAddress=0xA8000000 and
- * InterruptNumber=9.  On S5PV210 EINT9 is GPH1[1], matching the S5PV210
- * external-bus wiring convention.  The LAN9118 binding retains LAN9115 as
- * its fallback compatible.
+ * Live BYTE_TEST=0x87654321 and ID_REV=0x92200000 identify LAN9220.
+ * CE initializes SROM bank5 as 16-bit, EINT9 active-low and GPH1[2] reset.
+ * Bank timing 0x040e1460 is currently inherited from the factory boot path.
  */
+&pinctrl0 {
+	ethernet_bus: ethernet-bus-pins {
+		samsung,pins = "mp01-5", "mp01-6", "mp01-7";
+		samsung,pin-function = <2>;
+	};
+	ethernet_irq: ethernet-irq-pin {
+		samsung,pins = "gph1-1";
+		samsung,pin-function = <0xf>;
+		samsung,pin-pud = <2>;
+	};
+};
+
 &{/} {
-	ethernet@a8000000 {
-		compatible = "smsc,lan9118", "smsc,lan9115";
+	aliases {
+		ethernet0 = &ethernet;
+	};
+	ethernet: ethernet@a8000000 {
+		compatible = "smsc,lan9220", "smsc,lan9115";
 		reg = <0xa8000000 0x10000>;
+		reg-io-width = <2>;
+		phy-mode = "mii";
+		pinctrl-names = "default";
+		pinctrl-0 = <&ethernet_bus &ethernet_irq>;
+		clocks = <&clocks CLK_SROMC>;
 		interrupt-parent = <&gph1>;
-		interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
-		status = "disabled";
+		interrupts = <1 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&gph1 2 GPIO_ACTIVE_LOW>;
+		smsc,force-internal-phy;
+		smsc,save-mac-address;
+		status = "okay";
 	};
 };
 
@@ -174,7 +196,7 @@
 &uart3 { status = "disabled"; };
 
 /*
- * Do not enable external SD, LCD/FIMD, I2C, keypad, Ethernet,
+ * Do not enable external SD, LCD/FIMD, I2C, keypad,
  * Bluetooth, GPS, backlight, or regulators here.  Their board-level
  * address, GPIO, supply, interrupt, and/or polarity information is not yet
  * proven for H432B.
