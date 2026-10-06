@@ -1,0 +1,18 @@
+Subject: [PATCH] H432B opt-in one-shot reboot mode before NAND loading
+
+Upstream-Status: Inappropriate [experimental board integration]
+
+--- a/board/hims/u2/Makefile
++++ b/board/hims/u2/Makefile
+@@ -11,2 +11,3 @@
+ COBJS-y := u2.o u2probe.o u2fastboot.o u2nand.o
++COBJS-y += u2bootmode.o
+ SOBJS := lowlevel_init.o
+--- a/include/configs/hims_u2.h
++++ b/include/configs/hims_u2.h
+@@ -81,4 +81,4 @@
+ #define CONFIG_BOOTDELAY		0
+-#define CONFIG_BOOTCOMMAND "u2nandinit ident && u2nandinit ecc && u2nandboot a; u2 probe"
++#define CONFIG_BOOTCOMMAND "u2bootmode && u2nandinit ident && u2nandinit ecc && u2nandboot a; u2 probe"
+ #define CONFIG_SYS_LONGHELP
+ #define CONFIG_SYS_HUSH_PARSER

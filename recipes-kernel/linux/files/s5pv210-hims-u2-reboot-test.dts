@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0
+/* Opt-in warm-reboot experiment, not the default board device tree. */
+#include "s5pv210-hims-u2.dts"
+
+&pmu_syscon {
+    compatible = "samsung-s5pv210-pmu", "syscon", "simple-mfd";
+    reboot-mode {
+        compatible = "syscon-reboot-mode";
+        /* PMU starts at e0108000: INFORM7 is e010f01c. */
+        offset = <0x701c>;
+        mode-normal = <0x48344e4d>;
+        mode-bootloader = <0x48344642>;
+        mode-fastboot = <0x48344642>;
+    };
+};
