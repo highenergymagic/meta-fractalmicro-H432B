@@ -31,6 +31,10 @@ and the high-RAM RAM52 loader are different artifacts, neither a factory
 update image. The RAM52 loader must never be put in a NAND carrier.
 Read docs/boot-contract.md before discussing deployment.
 
+A third, separate role, `u-boot-h432b-fastboot`, adds standard fastboot to the
+RAM loader. It has booted the Yocto RAM image using an unmodified fastboot
+host. It does not flash NAND. See [fastboot contract](docs/fastboot.md).
+
 ## Licensing
 
 New recipe/build metadata is MIT. Linux/DTS and U-Boot patches retain their

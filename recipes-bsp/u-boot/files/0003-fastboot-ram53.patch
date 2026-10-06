@@ -1,0 +1,167 @@
+From: Fractal Microsystems
+Subject: [PATCH] H432B: add RAM53 fastboot bulk interface
+
+Upstream-Status: Inappropriate [H432B legacy board integration]
+
+Keep EP0 diagnostics, add the standard ff/42/03 interface and stop both
+interfaces before Linux handoff. Correct the S3C RX bounce-buffer cache
+index and copy only received bytes. No storage write commands are added.
+
+diff --git a/board/hims/u2/u2probe.c b/board/hims/u2/u2probe.c
+--- a/board/hims/u2/u2probe.c
++++ b/board/hims/u2/u2probe.c
+@@ -8,6 +8,12 @@
+ #include <command.h>
+ #include <libfdt.h>
+ #include "u2ram.h"
++#include "u2fastboot.h"
++extern int u2fastboot_bind(struct usb_gadget *);
++extern void u2fastboot_unbind(void);
++extern int u2fastboot_configure(struct usb_gadget *, unsigned);
++extern void u2fastboot_disable(void);
++extern void u2fastboot_poll(void);
+ 
+ /* USB control-only diagnostic shell.  Commands can change hardware state. */
+ #define U2_USB_OTG      0xec000000UL
+@@ -51,14 +57,17 @@
+  .bLength=18,.bDescriptorType=USB_DT_DEVICE,.bcdUSB=cpu_to_le16(0x0200),
+  .bDeviceClass=USB_CLASS_VENDOR_SPEC,.bMaxPacketSize0=64,
+  .idVendor=cpu_to_le16(0x1d50),.idProduct=cpu_to_le16(0x6152),
++ .bcdDevice=cpu_to_le16(53),.iManufacturer=1,.iProduct=2,.iSerialNumber=4,.bNumConfigurations=1,
+- .bcdDevice=cpu_to_le16(1),.iManufacturer=1,.iProduct=2,.bNumConfigurations=1,
+ };
++static u8 cfg[] = {9,USB_DT_CONFIG,41,0,2,1,0,0x80,50,
++ 9,USB_DT_INTERFACE,0,0,0,USB_CLASS_VENDOR_SPEC,0,0,3,
++ 9,USB_DT_INTERFACE,1,0,2,0xff,0x42,0x03,5,
++ 7,USB_DT_ENDPOINT,0x81,USB_ENDPOINT_XFER_BULK,0,2,0,
++ 7,USB_DT_ENDPOINT,0x02,USB_ENDPOINT_XFER_BULK,0,2,0};
+-static const u8 cfg[] = {9,USB_DT_CONFIG,18,0,1,1,0,0x80,50,
+- 9,USB_DT_INTERFACE,0,0,0,USB_CLASS_VENDOR_SPEC,0,0,3};
+ static const u8 lang[] = {4,USB_DT_STRING,0x09,0x04};
+ static const u8 qualifier[] = {10,USB_DT_DEVICE_QUALIFIER,0x00,0x02,
+  USB_CLASS_VENDOR_SPEC,0,0,64,1,0};
++static const char *strings[] = {"U2 Open","BrailleSense U2 probe","diagnostic command interface","OPENH432-FASTBOOT","H432B fastboot"};
+-static const char *strings[] = {"U2 Open","BrailleSense U2 probe","diagnostic command interface"};
+ static void completed(struct usb_ep *ep, struct usb_request *r) {
+  unsigned n;
+  if (receiving_ram) {
+@@ -98,11 +107,18 @@
+  u16 wv=le16_to_cpu(r->wValue), wi=le16_to_cpu(r->wIndex), wl=le16_to_cpu(r->wLength); u8 t=r->bRequestType;
+  if (t==0x80 && r->bRequest==USB_REQ_GET_DESCRIPTOR) {
+   if ((wv>>8)==USB_DT_DEVICE) return send(g,&dev,min((unsigned)wl,(unsigned)sizeof(dev)));
++  if ((wv>>8)==USB_DT_CONFIG || (wv>>8)==USB_DT_OTHER_SPEED_CONFIG) {
++   unsigned high=g->speed==USB_SPEED_HIGH;
++   if ((wv>>8)==USB_DT_OTHER_SPEED_CONFIG) high=!high;
++   cfg[1]=wv>>8; cfg[31]=cfg[38]=high?0:64;
++   cfg[32]=cfg[39]=high?2:0;
++   return send(g,cfg,min((unsigned)wl,(unsigned)sizeof(cfg)));
++  }
+-  if ((wv>>8)==USB_DT_CONFIG) return send(g,cfg,min((unsigned)wl,(unsigned)sizeof(cfg)));
+   if ((wv>>8)==USB_DT_DEVICE_QUALIFIER) return send(g,qualifier,min((unsigned)wl,(unsigned)sizeof(qualifier)));
++  if ((wv>>8)==USB_DT_STRING) { unsigned i=wv&255,j,n; if(!i) return send(g,lang,min((unsigned)wl,4U)); if(i>5)return -EINVAL; n=2+2*strlen(strings[i-1]); reply[0]=n;reply[1]=USB_DT_STRING; for(j=0;j<n-2;j+=2){reply[2+j]=strings[i-1][j/2];reply[3+j]=0;} return send(g,reply,min((unsigned)wl,n)); }
+-  if ((wv>>8)==USB_DT_STRING) { unsigned i=wv&255,j,n; if(!i) return send(g,lang,min((unsigned)wl,4U)); if(i>3)return -EINVAL; n=2+2*strlen(strings[i-1]); reply[0]=n;reply[1]=USB_DT_STRING; for(j=0;j<n-2;j+=2){reply[2+j]=strings[i-1][j/2];reply[3+j]=0;} return send(g,reply,min((unsigned)wl,n)); }
+  }
+  if (t==0x00 && r->bRequest==USB_REQ_SET_CONFIGURATION && wv<=1) {
++  int rc=u2fastboot_configure(g,wv); if(rc)return rc;
+   configured=wv; return send(g,reply,0);
+  }
+  if (t==0x80 && r->bRequest==USB_REQ_GET_CONFIGURATION) {
+@@ -112,7 +128,7 @@
+  if (t==0x81 && r->bRequest==USB_REQ_GET_INTERFACE) {
+   static const u8 alt=0; return send(g,&alt,min((unsigned)wl,1U));
+  }
++ if (t==0xc0 && r->bRequest==0x51) { static const u8 x[]={'U','2','P','R','O','B','E',53,1,2,0,0}; return send(g,x,min((unsigned)wl,(unsigned)sizeof(x))); }
+- if (t==0xc0 && r->bRequest==0x51) { static const u8 x[]={'U','2','P','R','O','B','E',52,1,2,0,0}; return send(g,x,min((unsigned)wl,(unsigned)sizeof(x))); }
+  /* BEGIN(size,CRC), sequential DATA(offset,bytes), FINISH, STATUS, ABORT.
+   * No transfer can select MMIO, NAND, or the running loader's memory. */
+  if (t==0x40 && wv==0x3255 && wi<U2_RAM_SLOTS &&
+@@ -167,9 +183,18 @@
+  }
+  return -EINVAL;
+ }
++static int bind(struct usb_gadget *g) {
++ int rc;
++ req=usb_ep_alloc_request(g->ep0,0);
++ if (!req)return -ENOMEM;
++ req->complete=completed;
++ rc=u2fastboot_bind(g);
++ if(rc) {usb_ep_free_request(g->ep0,req); req=NULL;}
++ return rc;
++}
++static void unbind(struct usb_gadget *g) { u2fastboot_unbind(); if(req) usb_ep_free_request(g->ep0,req); req=0; }
+-static int bind(struct usb_gadget *g) { req=usb_ep_alloc_request(g->ep0,0); if (!req)return -ENOMEM; req->complete=completed; return 0; }
+-static void unbind(struct usb_gadget *g) { if(req) usb_ep_free_request(g->ep0,req); req=0; }
+ static void gone(struct usb_gadget *g) {
++ u2fastboot_disable(); configured=0;
+  memset(slots,0,sizeof(slots));
+  receiving_ram=receiving_command=0;
+ }
+@@ -207,6 +232,7 @@
+  writel(0, U2_USB_OTG+0x18);
+  writel(0, U2_USB_OTG+0x08);
+  __asm__ volatile("dsb sy" : : : "memory");
++ u2fastboot_disable();
+  r=usb_gadget_unregister_driver(&driver);
+  if (!r) active=0;
+  return r;
+@@ -234,8 +260,25 @@
+ }
+ U_BOOT_CMD(u2linux,1,0,do_u2linux,"boot the three verified RAM images","");
+ 
++int u2_fastboot_linux(const struct u2_fb_image *image)
++{
++ const u8 *p=(const u8 *)U2_FB_ADDRESS;
++ unsigned i;
++ unsigned offsets[3]={image->kernel,image->dtb,image->ramdisk};
++ unsigned sizes[3]={image->kernel_size,image->dtb_size,image->ramdisk_size};
++ for(i=0;i<3;i++) {
++  memcpy((void *)u2_ram_address[i],p+offsets[i],sizes[i]);
++  slots[i].size=slots[i].received=sizes[i];
++  slots[i].actual_crc=slots[i].expected_crc=
++   crc32(0,(void *)u2_ram_address[i],sizes[i]);
++  slots[i].state=U2_RAM_VALID;
++ }
++ return do_u2linux(NULL,0,1,NULL);
++}
++
+ void u2probe_poll(void) {
+  usb_gadget_handle_interrupts();
++ u2fastboot_poll();
+  if (slots[selected].state==U2_RAM_VERIFY)
+   u2_ram_checked(&slots[selected],crc32(0,(void *)u2_ram_address[selected],slots[selected].size));
+  if (command_state==1) {
+diff --git a/board/hims/u2/Makefile b/board/hims/u2/Makefile
+--- a/board/hims/u2/Makefile
++++ b/board/hims/u2/Makefile
+@@ -8,7 +8,7 @@
+ 
+ LIB = $(obj)lib$(BOARD).o
+ 
++COBJS-y := u2.o u2probe.o u2fastboot.o
+-COBJS-y := u2.o u2probe.o
+ SOBJS := lowlevel_init.o
+ 
+ SRCS := $(SOBJS:.o=.S) $(COBJS-y:.o=.c)
+diff --git a/drivers/usb/gadget/s3c_udc_otg_xfer_dma.c b/drivers/usb/gadget/s3c_udc_otg_xfer_dma.c
+--- a/drivers/usb/gadget/s3c_udc_otg_xfer_dma.c
++++ b/drivers/usb/gadget/s3c_udc_otg_xfer_dma.c
+@@ -128,8 +128,8 @@
+ 	ep->len = length;
+ 	ep->dma_buf = buf;
+ 
++	invalidate_dcache_range((unsigned long) ep->dev->dma_buf[ep_num+1],
++				(unsigned long) ep->dev->dma_buf[ep_num+1]
+-	invalidate_dcache_range((unsigned long) ep->dev->dma_buf[ep_num],
+-				(unsigned long) ep->dev->dma_buf[ep_num]
+ 				+ DMA_BUFFER_SIZE);
+ 
+ 	if (length == 0)
+@@ -247,7 +247,7 @@
+ 	invalidate_dcache_range((unsigned long) p,
+ 				(unsigned long) p + DMA_BUFFER_SIZE);
+ 
++	memcpy(ep->dma_buf, p, min(xfer_size, req->req.length - req->req.actual));
+-	memcpy(ep->dma_buf, p, ep->len);
+ 
+ 	req->req.actual += min(xfer_size, req->req.length - req->req.actual);
+ 	is_short = (xfer_size < ep->ep.maxpacket);
