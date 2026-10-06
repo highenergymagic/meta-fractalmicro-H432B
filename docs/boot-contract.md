@@ -1,33 +1,60 @@
 # Boot and image contract
 
-- Factory first-stage loader and EBOOT are retained.
-- NAND51 and NAND56 bootstrap code link at physical 0x40021000. A factory
-  NK carrier loads at CE address 0x80020000: ECEC at +0x40, ROMHDR pointer
-  0x80020100 at +0x44 and relative offset 0x100 at +0x48. Both pointers are
-  required; omitting the relative offset caused recovery-only boots.
-- RAM52/53/54/55 link at 0x46000000. Never flash one directly or disguise it
-  as low-address code.
-- NAND56 is a separate low-address bootstrap that embeds a checked RAM55
-  image, copies it to 0x46000000 and uses the existing go handoff. Its CE
-  carrier is explicitly bounded. The packager reproduces the historical
-  NAND51 carrier byte-for-byte; that does not qualify NAND56 on hardware.
-- Physical DRAM starts at 0x40000000 and totals 256 MiB. Image/heap/stack
-  overlap checks run during the NAND-reader and bootstrap builds.
-- Linux uses zImage, DTB and compressed initramfs. The fastboot and NAND
-  loader use a bounded Android-v2 envelope; the compressed root slot is
-  limited to 16 MiB. NAND kernel volumes have a 132 x 124 KiB capacity.
-- NAND boot currently means a NAND-resident kernel + DEBUG initramfs.
-  It does not yet switch the production root to SquashFS or implement A/B
-  selection/rollback. Base SquashFS is separately mount-tested on ubiblock.
-- Build targets do not access USB, install, erase or flash anything.
-  No end-user installer is supplied. Source build and device qualification
-  are separate, and a new artifact never inherits old qualification.
+OpenH432 retains the factory first-stage loader and EBOOT. EBOOT loads a
+CE-format carrier containing a U-Boot bootstrap; Linux does not run under CE.
 
-The corrected NAND format and bounded UBI layout are described in
-[nand.md](nand.md). The factory prefix uses a different ECC format and must
-not be rewritten using the Linux data driver. The installed EBOOT may differ
-from vendor download images; preserve the actual raw+OOB backup privately.
-Internal SD remains read-only and has not been repartitioned.
+## Artifact roles
 
-USB diagnostic interfaces provide privileged local access and are NOT
-production authentication boundaries. Do not expose them through a network.
+Numeric prefixes are stable build-output identifiers inherited from development,
+not hardware revisions or a request to install successive versions.
+
+| Recipe | Deploy directory | Role and link address |
+| --- | --- | --- |
+| `u-boot-h432b` | `nand51-raw` | USB-shell bootstrap at 0x40021000; raw binary requires CE packaging. |
+| `u-boot-h432b-ram` | `ram52-only` | Diagnostic second stage at 0x46000000. |
+| `u-boot-h432b-fastboot` | `ram53-fastboot-only` | Fastboot RAM loader at 0x46000000. |
+| `u-boot-h432b-nand` | `ram54-nand-reader` | Interactive read-only NAND loader at 0x46000000. |
+| `u-boot-h432b-nand-auto` | `ram55-nand-autoboot` | Automatic NAND reader at 0x46000000. |
+| `u-boot-h432b-chain` | `nand56-chain-raw` and `nand56-ce-carrier` | Low-address bootstrap carrying the automatic reader. |
+| `u-boot-h432b-nand-profile` | `ram57-nand-profile` | RAM-only NAND timing and instruction-cache experiment. |
+| `u-boot-h432b-nand-timer` | `ram-nand-timer` | RAM-only PWM4 clock and NAND timing tests. |
+| `u-boot-h432b-nand-subpage` | `ram-nand-subpage` | RAM-only BCH partial-page read experiment. |
+
+Verify the deployed `ROLE.txt` before using any artifact. High-RAM images must
+never be flashed directly or disguised as low-address code. Building a recipe
+does not stage, execute, install or qualify its output.
+
+## Factory handoff
+
+Low-address bootstrap code links at physical 0x40021000. The factory NK carrier
+loads at CE address 0x80020000: ECEC at +0x40, ROMHDR pointer 0x80020100 at +0x44,
+and relative offset 0x100 at +0x48. Both pointer fields are required for normal
+NAND boot as well as recovery-assisted launch.
+
+The two-stage bootstrap embeds a checked high-RAM automatic reader, copies it
+to 0x46000000 and transfers control. The carrier is explicitly bounded.
+The packager's byte-for-byte regression against a historical carrier is a
+format check, separate from device qualification.
+
+Physical DRAM starts at 0x40000000 and totals 256 MiB. Image/heap/stack overlap
+checks run during NAND-reader and bootstrap builds.
+
+## Linux payload
+
+Linux uses zImage, DTB and compressed initramfs. Fastboot and NAND readers
+use a bounded Android-v2 envelope; the compressed root slot is limited to
+16 MiB. NAND kernel volumes have a 132 x 124 KiB capacity.
+
+Qualified NAND boot loads a kernel and development initramfs. It does not
+switch the production root to SquashFS or implement A/B selection/rollback.
+Base SquashFS has separately passed mount tests on ubiblock.
+
+The [NAND documentation](nand.md) describes ECC and bounded UBI layout.
+The factory prefix uses a different ECC format and must not be rewritten by
+the Linux data driver. Installed EBOOT may differ from vendor download images:
+preserve each device's actual raw+OOB backup privately. Internal SD has not
+been repartitioned in qualification.
+
+USB diagnostic interfaces provide privileged physical access, not a production
+authentication boundary. Do not expose them through a network. There is no
+end-user installer, and new artifacts do not inherit earlier test results.

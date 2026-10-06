@@ -8,8 +8,10 @@ power-cutoff mechanism or wake-from-off sequence.
 The device tree uses the standard gpio-keys driver and KEY_POWER, with 20 ms
 software debounce and no autorepeat or unqualified wakeup declaration.
 It retains the inherited pull configuration. Interrupt-driven evdev delivery
-still requires qualification on hardware. The matching development OS policy
-ignores power-key actions until that test is complete.
+was qualified with three physical press/release pairs, each KEY_POWER event
+followed by SYN_REPORT, with no unwanted repeats or missing releases.
+The development OS deliberately ignores short and long power-key actions:
+electrical poweroff and wake behavior have not yet been qualified.
 
 The input-only discovery tool is in tools/power-input/read-power-input.c.
 It maps one GPIO register page read-only, checks the pin mux, and reports
@@ -32,5 +34,9 @@ Final power cutoff is a separate task from recognizing KEY_POWER.
 
 ## Build validation
 
-Pinned Yocto build and package QA passed. This source has not yet been
-deployed for live event/sound qualification. Offline layer tests also pass.
+Pinned Yocto build, package QA and offline layer tests passed. The power-key
+driver was then tested in a RAM-booted Linux image as described above. This
+does not qualify the remaining keys or a complete power-management policy.
+
+The bounded read-power-events.c tool identifies the expected input device,
+reads events without grabbing it, and never invokes a power-management action.

@@ -12,7 +12,7 @@ The measured device is Samsung EC/DC, 512 MiB SLC: 4096 eraseblocks of
 | Reserved tail/possible future flash BBT | 511 MiB | 1 MiB | Protected |
 
 The factory prefix includes StepLoader, EBOOT, its boot table, and the
-currently working CE-carried U-Boot. Do not replace this with a guessed flat
+CE-carried U-Boot bootstrap on a converted device. Do not replace this with a guessed flat
 1 MiB EBOOT partition. Factory normal pages use a different ECC layout.
 
 The Linux driver uses standard software BCH8 per 512 bytes: 52 ECC bytes in
@@ -51,7 +51,7 @@ capacity must also pass before creating volumes. No autoresize volume may
 consume this headroom.
 
 The base-image class rejects images exceeding either the volume capacity or
-the user's hard 200 MiB cap, even if a configuration override raises the
+the platform's hard 200 MiB cap, even if a configuration override raises the
 declared maximum. The current SquashFS image is DEBUG userland, including a
 physical USB root shell; it is not a secured production release.
 
@@ -79,15 +79,15 @@ check; the corrected kernel has been written and verified.
 
 Interactive NAND boot passed: U-Boot read the static kernel volume and
 launched Linux; independent full SHA256 readbacks, SquashFS mount, RT,
-zero-taint and systemd-health checks passed. The corrected RAM55 automatic
+zero-taint and systemd-health checks passed. The automatic high-RAM NAND
 reader also passed those checks without a host kernel upload. Host-observed
 time from its launch to the Linux shell was 136.261 seconds, of which
-Linux/systemd startup was 28.696 seconds. The unoptimized reader is not yet
-optimized. The first automatic attempt exposed two integration bugs:
+Linux/systemd startup was 28.696 seconds. The reader remains a development implementation. The first automatic attempt exposed two integration bugs:
 mtdparts defaults were not applied to the volatile environment, and the
 USB error fallback attempted double registration. Both are fixed.
 
-NAND56's CE-carried two-stage bootstrap is installed. Its full 392,060-byte
+The CE-carried two-stage NAND bootstrap (artifact prefix `nand56`)
+was installed on the qualification device. Its full 392,060-byte
 NAND payload readback matches the built carrier at physical 0x000c0800.
 StepLoader/EBOOT through 0x000a0000, including OOB, stayed byte-identical.
 Both the factory-assisted launch and a subsequent plain Reset booted kernel_a
@@ -101,6 +101,6 @@ hardware tests. The kernel bundle still contains a DEBUG initramfs, not
 production root-switch logic. No A/B rollback policy is implemented.
 
 U-Boot NAND writes are disabled at both MTD callbacks and the controller
-command interface. The immutable EBOOT/NAND51 rollback artifacts are retained
-privately. Never substitute a vendor EBOOT download for the actual device's
+command interface. Factory bootloader backups and the prior USB-shell bootstrap were retained
+privately for the qualification device; they are not public recovery downloads. Never substitute a vendor EBOOT download for the actual device's
 backup; they are not necessarily identical.

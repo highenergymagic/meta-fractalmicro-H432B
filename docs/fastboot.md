@@ -1,9 +1,10 @@
-# RAM53 fastboot
+# Fastboot RAM loader
 
 This is a separate high-RAM development loader, not a NAND-flashable image.
 Build `u-boot-h432b-fastboot` through openh432-build's pinned Docker launcher.
 The resulting role is `ram53-fastboot-only/u-boot.bin`, linked at 0x46000000.
-The unchanged NAND51 and RAM52 recipes remain available.
+The numeric prefix is a retained artifact identifier, not a device revision.
+See the [boot contract](boot-contract.md) for all image roles.
 
 The board adapter implements the standard Android fastboot USB protocol on
 U-Boot 2012.10's S3C UDC. It is not a wholesale backport of a later U-Boot
@@ -23,8 +24,8 @@ Useful variables: product, version, version-bootloader, serialno,
 max-download-size, download-size, download-crc32, is-userspace, secure,
 unlocked, has-slot:boot. Unknown commands/variables return FAIL.
 There is no storage backend: `flash` and `erase` return FAIL.
-Reboot resets to the installed bootloader, currently NAND51, not automatically
-back into RAM53. Reboot-bootloader, continue, OEM and flashing-unlock commands
+Reboot returns to the device's installed boot path; it does not automatically
+reload this RAM-only loader. Reboot-bootloader, continue, OEM and flashing-unlock commands
 are not implemented.
 
 A standard host `fastboot stage FILE` exercises download without executing
@@ -51,7 +52,8 @@ The boot path copies into the existing RAM slots and uses the qualified
 bootz/USB teardown sequence. Action happens after the final USB OKAY completes.
 Image format checks do not authenticate the publisher.
 
-Once RAM53 is explicitly staged/launched using the existing bootstrap:
+After explicitly staging and launching the fastboot RAM loader using the
+[host tools](https://github.com/highenergymagic/openh432-tools/blob/main/docs/installation.md):
 
 ```sh
 fastboot -s OPENH432-FASTBOOT getvar version-bootloader
@@ -73,9 +75,9 @@ download lengths from 1 to 65536 bytes passed CRC, including USB packet and
 Native C parser tests run inside the pinned build container.
 
 Only high-speed USB has been hardware-tested. This is not production security
-qualification or proof of NAND boot. Corrected NAND reads, ECC write support,
-bad-block handling and protected named partitions remain required before
-implementing persistent kernel installation.
+qualification or a persistent flashing interface. Separate Linux/UBI provisioning
+and NAND boot tests are documented in [NAND support](nand.md); they do not add
+storage-write support to fastboot.
 
 Protocol: https://android.googlesource.com/platform/system/core/+/master/fastboot/README.md
 Image layout: https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/main/include/bootimg/bootimg.h

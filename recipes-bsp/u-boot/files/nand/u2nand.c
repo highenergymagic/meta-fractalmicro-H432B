@@ -12,6 +12,9 @@ static struct nand_chip u2_chip;
 static int blocked;
 static unsigned saved_cont;
 static int initialized, identified;
+#ifdef CONFIG_U2_NAND_PROFILE
+static int profile_attached;
+#endif
 extern int u2probe_is_active(void);
 extern int u2probe_start(void);
 extern int usb_gadget_handle_interrupts(void);
@@ -102,7 +105,19 @@ static int do_u2nandboot(cmd_tbl_t *cmdtp,int flag,int argc,char *const argv[])
  struct u2_fb_image image;
  size_t actual=0;
  char *volume;
- if(argc!=2 || !initialized) return CMD_RET_USAGE;
+#ifdef CONFIG_U2_NAND_PROFILE
+ int mode=0;
+ if(argc==3) {
+  if(!strcmp(argv[2],"load")) mode=1;
+  else if(!strcmp(argv[2],"attach")) mode=2;
+  else if(!strcmp(argv[2],"read")) mode=3;
+  else return CMD_RET_USAGE;
+ } else if(argc!=2) return CMD_RET_USAGE;
+ if(mode==3 && !profile_attached) return CMD_RET_FAILURE;
+#else
+ if(argc!=2) return CMD_RET_USAGE;
+#endif
+ if(!initialized) return CMD_RET_USAGE;
  if(!strcmp(argv[1],"a")) volume="kernel_a";
  else if(!strcmp(argv[1],"b")) volume="kernel_b";
  else return CMD_RET_USAGE;
@@ -110,19 +125,37 @@ static int do_u2nandboot(cmd_tbl_t *cmdtp,int flag,int argc,char *const argv[])
   * including a second-stage launch inheriting NAND51 USB DMA state. */
  if(!u2probe_is_active() && u2probe_start()) return CMD_RET_FAILURE;
  /* ENV_IS_NOWHERE: defaults are compiled, but not loaded by mtdparts_init. */
+#ifdef CONFIG_U2_NAND_PROFILE
+ if(mode!=3) {
+ profile_attached=0;
+#endif
  if(run_command("mtdparts default",0) ||
     run_command("ubi part linux",0)) return CMD_RET_FAILURE;
+#ifdef CONFIG_U2_NAND_PROFILE
+ profile_attached=1;
+ }
+ if(mode==2) { puts("PROFILE attach complete; host-time this command\n"); return 0; }
+#endif
  if(ubi_volume_read_bounded(volume,(void *)U2_FB_ADDRESS,
                              132U*126976U,&actual) ||
     u2_fb_layout((const unsigned char *)U2_FB_ADDRESS,actual,&image)) {
   puts("NAND boot refused: unreadable/incomplete/invalid static kernel volume\n");
   return CMD_RET_FAILURE;
  }
+#ifdef CONFIG_U2_NAND_PROFILE
+ /* get_timer is still a software call counter in the baseline. Never label
+  * it milliseconds. Time separate attach/read commands on the host. */
+ printf("PROFILE icache=%d dcache=%d; host elapsed time required\n",
+        icache_status(),dcache_status());
+#endif
  printf("NAND kernel %s: %u bytes, CRC32 %08x\n",volume,(unsigned)actual,
         crc32(0,(void *)U2_FB_ADDRESS,actual));
+#ifdef CONFIG_U2_NAND_PROFILE
+ if(mode) return 0;
+#endif
  return u2_fastboot_linux(&image);
 }
-U_BOOT_CMD(u2nandboot,2,0,do_u2nandboot,"boot a checked NAND kernel volume","a|b");
+U_BOOT_CMD(u2nandboot,3,0,do_u2nandboot,"boot a checked NAND kernel volume","a|b [load|attach|read: profiling build only]");
 
 /* Inject errors only into RAM copies of the first scratch page. NAND is never
  * programmed here. Verify the Linux/U-Boot parity contract and 1..8-bit repair. */
@@ -166,3 +199,51 @@ static int do_u2nandcheck(cmd_tbl_t *cmdtp,int flag,int argc,char *const argv[])
  return 0;
 }
 U_BOOT_CMD(u2nandcheck,1,0,do_u2nandcheck,"read scratch page and test BCH in RAM","");
+
+#ifdef CONFIG_U2_NAND_PROFILE
+static int do_u2icache(cmd_tbl_t *cmdtp,int flag,int argc,char *const argv[])
+{
+ if(argc!=2) return CMD_RET_USAGE;
+ if(!strcmp(argv[1],"on")) icache_enable();
+ else if(!strcmp(argv[1],"off")) icache_disable();
+ else if(strcmp(argv[1],"status")) return CMD_RET_USAGE;
+ printf("Instruction cache=%d data cache=%d; no data-cache changes\n",
+        icache_status(),dcache_status());
+ return 0;
+}
+U_BOOT_CMD(u2icache,2,0,do_u2icache,"profile instruction caching","on|off|status");
+#endif
+
+#ifdef CONFIG_U2_NAND_SUBPAGE
+/* Compare corrected short reads against corrected full pages. No NAND writes. */
+static int do_u2nandslices(cmd_tbl_t *cmdtp,int flag,int argc,char *const argv[])
+{
+ static const unsigned pages[]={0x00400000,0x00400800,0x1fee0000};
+ static const unsigned ranges[][2]={{0,64},{511,2},{512,512},{1023,514},{1984,64}};
+ struct mtd_info *mtd=&nand_info[0];
+ u8 full[2048],part[2048];
+ size_t done;
+ unsigned i,j;
+ int ret;
+ if(argc!=1 || !initialized || !NAND_SUBPAGE_READ(&u2_chip)) return CMD_RET_USAGE;
+ for(i=0;i<ARRAY_SIZE(pages);i++) {
+  ret=mtd->read(mtd,pages[i],sizeof(full),&done,full);
+  if((ret && ret!=-EUCLEAN) || done!=sizeof(full)) return CMD_RET_FAILURE;
+  for(j=0;j<ARRAY_SIZE(ranges);j++) {
+   unsigned offset=ranges[j][0],length=ranges[j][1];
+   memset(part,0xa5,sizeof(part));
+   ret=mtd->read(mtd,pages[i]+offset,length,&done,part);
+   if((ret && ret!=-EUCLEAN) || done!=length ||
+      memcmp(full+offset,part,length)) {
+    printf("Subpage mismatch page=%08x offset=%u length=%u ret=%d\n",
+           pages[i],offset,length,ret);
+    return CMD_RET_FAILURE;
+   }
+  }
+ }
+ printf("BCH subpage PASS: 15 corrected slices match full pages; ECC failures=%u\n",
+        mtd->ecc_stats.failed);
+ return mtd->ecc_stats.failed ? CMD_RET_FAILURE : 0;
+}
+U_BOOT_CMD(u2nandslices,1,0,do_u2nandslices,"compare BCH subpage and full reads","");
+#endif

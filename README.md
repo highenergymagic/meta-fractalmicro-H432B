@@ -62,6 +62,8 @@ The loader firmware itself remains in this BSP layer.
 - [Boot contract](docs/boot-contract.md): boot stages, image roles and deployment constraints.
 - [NAND support](docs/nand.md): storage layout, protection boundaries and validation.
 - [Fastboot support](docs/fastboot.md): RAM download and boot workflow.
+- [Boot performance](docs/boot-performance.md): measured bottlenecks and profiling limits.
+- [Input support](docs/input.md): power-key qualification and remaining controls.
 - [Source provenance](docs/provenance.md): origins and licensing of board support.
 
 Read the boot contract before attempting deployment. RAM loaders and
