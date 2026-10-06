@@ -53,6 +53,10 @@ See the [validation record](https://github.com/highenergymagic/openh432-build/bl
 for the scope of testing. Demonstrated hardware support is not a claim of
 production readiness.
 
+Host-side recovery transport and the stock-CE conversion guide are maintained
+in [openh432-tools](https://github.com/highenergymagic/openh432-tools).
+The loader firmware itself remains in this BSP layer.
+
 ## Technical documentation
 
 - [Boot contract](docs/boot-contract.md): boot stages, image roles and deployment constraints.
