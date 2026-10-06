@@ -1,0 +1,17 @@
+From: Fractal Microsystems <maintainers@fractalmicro.invalid>
+Subject: [PATCH] compiler: recognize GCC 15 with the existing port attributes
+
+The historical port supplies a GCC 14 compatibility header. GCC 15.3 uses
+the same attribute definitions for this build; retain that contract rather
+than adding a second copy. The compiler dialect is pinned to GNU89 by the
+recipe. This is a bridge to a newer U-Boot port, not general GCC support.
+
+Upstream-Status: Inappropriate [historical downstream port]
+
+diff --git a/include/linux/compiler-gcc15.h b/include/linux/compiler-gcc15.h
+new file mode 100644
+--- /dev/null
++++ b/include/linux/compiler-gcc15.h
+@@ -0,0 +1,2 @@
++/* GCC 15.3: retain the port's existing compiler attribute contract. */
++#include <linux/compiler-gcc14.h>
