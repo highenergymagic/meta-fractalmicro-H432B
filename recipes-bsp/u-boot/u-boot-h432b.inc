@@ -8,15 +8,18 @@ SRCREV = "6528ff0109d81c1f21d20f9f1370782bccf87bcb"
 BB_GIT_SHALLOW = "1"
 BB_GIT_SHALLOW_DEPTH = "1"
 B = "${S}"
-inherit deploy h432b-arm-gnu
+inherit deploy h432b-build-identity
 COMPATIBLE_MACHINE = "^h432b$"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
-INHIBIT_DEFAULT_DEPS = "1"
+DEPENDS += "libgcc"
 INHIBIT_PACKAGE_STRIP = "1"
 INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
 PACKAGES = ""
 SOURCE_DATE_EPOCH = "1791158400"
-EXTRA_OEMAKE = "CROSS_COMPILE=${H432B_CROSS} SUBDIR_TOOLS= SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}"
+# This historical source predates C23. Preserve its GNU89 language contract.
+EXTRA_OEMAKE = 'CROSS_COMPILE=${TARGET_PREFIX} SUBDIR_TOOLS= SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}'
+EXTRA_OEMAKE += 'CC="${TARGET_PREFIX}gcc ${TOOLCHAIN_OPTIONS} ${DEBUG_PREFIX_MAP} -std=gnu89"'
+EXTRA_OEMAKE += 'HOSTCC="${BUILD_CC} ${BUILD_CFLAGS} ${BUILD_LDFLAGS}"'
 do_configure() {
     unset CFLAGS CPPFLAGS LDFLAGS
     oe_runmake hims_u2_config
@@ -24,7 +27,7 @@ do_configure() {
 do_compile() {
     unset CFLAGS CPPFLAGS LDFLAGS
     oe_runmake u-boot.bin
-    ${H432B_CROSS}nm -n ${S}/u-boot | grep -qx "${H432B_UBOOT_ENTRY} T _start" ||
+    ${TARGET_PREFIX}nm -n ${S}/u-boot | grep -qx "${H432B_UBOOT_ENTRY} T _start" ||
         bbfatal "Wrong link address: refuse to deploy this artifact"
 }
 do_install[noexec] = "1"

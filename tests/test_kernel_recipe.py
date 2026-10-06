@@ -13,7 +13,7 @@ class KernelRecipe(unittest.TestCase):
         text = RECIPE.read_text()
         self.assertGreater(
             text.index('S = "${UNPACKDIR}/linux-cip-6.12.111-cip32"'),
-            text.index("inherit kernel h432b-arm-gnu"),
+            text.index("inherit kernel h432b-build-identity"),
         )
 
     def test_rt_metadata_preserves_payload_and_is_idempotent(self):
@@ -46,12 +46,28 @@ class KernelRecipe(unittest.TestCase):
         self.assertNotIn('S = "${UNPACKDIR}/git"', text)
         self.assertIn('B = "${S}"', text)
 
-    def test_packaging_uses_pinned_arm_binutils(self):
-        text = (ROOT / "classes/h432b-arm-gnu.bbclass").read_text()
-        for variable, executable in (("OBJCOPY", "objcopy"), ("STRIP", "strip"),
-                                     ("OBJDUMP", "objdump"), ("READELF", "readelf"),
-                                     ("NM", "nm")):
-            self.assertIn(f'export {variable}:class-target = "${{H432B_CROSS}}{executable}"', text)
+    def test_kernel_uses_oe_toolchain(self):
+        text = RECIPE.read_text()
+        self.assertNotIn("H432B_CROSS", text)
+        self.assertNotIn("DEPENDS:remove", text)
+        self.assertIn("inherit kernel h432b-build-identity", text)
+
+    def test_uboot_uses_oe_toolchain_and_explicit_language(self):
+        text = (ROOT / "recipes-bsp/u-boot/u-boot-h432b.inc").read_text()
+        self.assertIn("CROSS_COMPILE=${TARGET_PREFIX}", text)
+        self.assertIn("-std=gnu89", text)
+        self.assertIn('DEPENDS += "libgcc"', text)
+        self.assertNotIn("INHIBIT_DEFAULT_DEPS", text)
+        self.assertNotIn("H432B_CROSS", text)
+
+    def test_gcc_patch_sequences_all_three_shift_variants(self):
+        append = (ROOT / "recipes-devtools/gcc/gcc-source_15.3.bbappend").read_text()
+        self.assertIn("0001-arm-sequence-shift-scratch-registers.patch", append)
+        patch = (ROOT / "recipes-devtools/gcc/files/0001-arm-sequence-shift-scratch-registers.patch").read_text()
+        self.assertEqual(patch.count("+  rtx scratch0 = gen_reg_rtx (SImode);"), 3)
+        self.assertEqual(patch.count("+  rtx scratch1 = gen_reg_rtx (SImode);"), 3)
+        for op in ("ASHIFT", "ASHIFTRT", "LSHIFTRT"):
+            self.assertIn("arm_emit_coreregs_64bit_shift (" + op, patch)
 
     def test_xz_ram_root_and_fixed_artifact_names(self):
         text = RECIPE.read_text()

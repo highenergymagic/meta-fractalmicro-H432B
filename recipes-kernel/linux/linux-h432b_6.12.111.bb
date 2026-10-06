@@ -19,21 +19,13 @@ SRC_URI = "https://www.kernel.org/pub/linux/kernel/projects/cip/6.12/linux-cip-6
 "
 SRC_URI[kernel.sha256sum] = "879b45f18c1bd8322b2026f72642faedcb77242418cb10a5aa56f5404f647059"
 SRC_URI[rt.sha256sum] = "8b9b7b59f0372e1e70b5fd99729765d335928ef0a0196fb1e869afc45fc69b55"
-inherit kernel h432b-arm-gnu
+inherit kernel h432b-build-identity
 # Override kernel.bbclass after inheritance so do_symlink_kernsrc moves the
 # actual unpacked tree into the shared kernel source before patching.
 S = "${UNPACKDIR}/linux-cip-6.12.111-cip32"
 COMPATIBLE_MACHINE = "^h432b$"
-DEPENDS:remove = "virtual/cross-binutils virtual/cross-cc"
 DEPENDS += "flex-native openssl-native"
-export CROSS_COMPILE = "${H432B_CROSS}"
-KERNEL_CC = "${H432B_CROSS}gcc ${DEBUG_PREFIX_MAP}"
-KERNEL_LD = "${H432B_CROSS}ld.bfd"
-KERNEL_AR = "${H432B_CROSS}ar"
-KERNEL_OBJCOPY = "${H432B_CROSS}objcopy"
-KERNEL_STRIP = "${H432B_CROSS}strip"
 KERNEL_LOCALVERSION = ""
-KERNEL_EXTRA_ARGS += "AR=${KERNEL_AR}"
 SOURCE_DATE_EPOCH = "1791158400"
 IMAGE_VERSION_SUFFIX = "-${SOURCE_DATE_EPOCH}"
 

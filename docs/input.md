@@ -16,7 +16,7 @@ electrical poweroff and wake behavior have not yet been qualified.
 The input-only discovery tool is in tools/power-input/read-power-input.c.
 It maps one GPIO register page read-only, checks the pin mux, and reports
 transitions for a bounded interval. It neither configures GPIO nor shuts down
-the board. Build with the pinned Arm GNU container, not a host cross-compiler.
+the board. Build with the pinned OE build container, not a host cross-compiler.
 
 ## Remaining controls
 

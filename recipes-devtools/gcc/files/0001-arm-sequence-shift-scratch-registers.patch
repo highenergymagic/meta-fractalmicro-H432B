@@ -1,0 +1,45 @@
+Subject: [PATCH] arm: sequence scratch register allocation for doubleword shifts
+
+Two gen_reg_rtx calls in one argument list have an unspecified evaluation
+order. Native x86-64 and AArch64 compiler builds can number the resulting
+pseudos differently even when preprocessed input and optimized GIMPLE match.
+Allocate them in explicit statements before expanding the operation.
+
+This affects ASHIFT, ASHIFTRT and LSHIFTRT. It changes only the order in which
+scratch registers are allocated, not the shift semantics.
+
+Upstream-Status: Pending
+---
+ gcc/config/arm/arm.md | 15 +++++++++------
+ 1 file changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/gcc/config/arm/arm.md b/gcc/config/arm/arm.md
+--- a/gcc/config/arm/arm.md
++++ b/gcc/config/arm/arm.md
+@@ -4620,5 +4620,6 @@
++  rtx scratch0 = gen_reg_rtx (SImode);
++  rtx scratch1 = gen_reg_rtx (SImode);
+   arm_emit_coreregs_64bit_shift (ASHIFT, operands[0], operands[1],
+-				 operands[2], gen_reg_rtx (SImode),
+-				 gen_reg_rtx (SImode));
++				 operands[2], scratch0, scratch1);
+   DONE;
+ ")
+@@ -4656,5 +4657,6 @@
++  rtx scratch0 = gen_reg_rtx (SImode);
++  rtx scratch1 = gen_reg_rtx (SImode);
+   arm_emit_coreregs_64bit_shift (ASHIFTRT, operands[0], operands[1],
+-				 operands[2], gen_reg_rtx (SImode),
+-				 gen_reg_rtx (SImode));
++				 operands[2], scratch0, scratch1);
+   DONE;
+ ")
+@@ -4688,5 +4690,6 @@
++  rtx scratch0 = gen_reg_rtx (SImode);
++  rtx scratch1 = gen_reg_rtx (SImode);
+   arm_emit_coreregs_64bit_shift (LSHIFTRT, operands[0], operands[1],
+-				 operands[2], gen_reg_rtx (SImode),
+-				 gen_reg_rtx (SImode));
++				 operands[2], scratch0, scratch1);
+   DONE;
+ ")
