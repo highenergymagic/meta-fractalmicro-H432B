@@ -106,3 +106,19 @@ and consume-before-fastboot behavior. It is deliberately a split test:
 a host still stages the RAM consumer. It does not establish an installed,
 unattended Linux-to-fastboot path, NAND flashing support, power-loss persistence,
 or support for untested hardware units.
+
+## Fixed slot-B maintenance carrier
+
+`u-boot-h432b-maintenance` selects the existing `kernel_b` volume and falls
+back to the development USB interface if loading fails.
+`u-boot-h432b-maintenance-chain` embeds that stage in a validated CE carrier.
+The original `u-boot-h432b-chain` default remains the kernel-A stage.
+
+This is a fixed-slot development policy, not automatic A/B rollback.
+A qualified kernel-B image and matching systembase-B volume must already
+exist before installing the carrier. The build does not flash or provision
+either volume. Preserve the factory first-stage loader and EBOOT.
+
+The maintenance carrier has booted the installed Linux system after an
+independent plain Reset on the qualification device. The factory Ethernet
+identity handoff is covered separately in [Ethernet support](ethernet.md).

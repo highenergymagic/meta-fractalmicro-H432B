@@ -1,0 +1,12 @@
+Subject: [PATCH] H432B maintenance candidate selects the preserved alternate kernel
+
+Upstream-Status: Inappropriate [board deployment policy]
+
+--- a/include/configs/hims_u2.h
++++ b/include/configs/hims_u2.h
+@@ -81,4 +81,4 @@
+ #define CONFIG_BOOTDELAY		0
+-#define CONFIG_BOOTCOMMAND "u2bootmode && u2nandinit ident && u2nandinit ecc && u2nandboot a; u2 probe"
++#define CONFIG_BOOTCOMMAND "u2bootmode && u2nandinit ident && u2nandinit ecc && u2nandboot b; u2 probe"
+ #define CONFIG_SYS_LONGHELP
+ #define CONFIG_SYS_HUSH_PARSER
