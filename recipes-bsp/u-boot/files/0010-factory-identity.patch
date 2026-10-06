@@ -1,0 +1,43 @@
+Subject: [PATCH] H432B preserve factory Ethernet identity in Linux FDT
+
+Upstream-Status: Inappropriate [board-specific factory handoff]
+
+--- a/board/hims/u2/Makefile
++++ b/board/hims/u2/Makefile
+@@ -14,6 +14,9 @@
+ 
+ SRCS := $(SOBJS:.o=.S) $(COBJS-y:.o=.c)
+ OBJS := $(addprefix $(obj),$(COBJS-y))
++COBJS-y += u2identity.o
++SRCS += u2identity.c
++OBJS += $(obj)u2identity.o
+ SOBJS := $(addprefix $(obj),$(SOBJS))
+ 
+ $(LIB): $(obj).depend $(SOBJS) $(OBJS)
+--- a/board/hims/u2/u2.c
++++ b/board/hims/u2/u2.c
+@@ -9,6 +9,7 @@
+ #include <asm/io.h>
+ #include <asm/mach-types.h>
+ #include "u2_braille.h"
++extern void u2_identity_capture(void);
+ extern int u2probe_start(void);
+ extern void u2probe_poll(void);
+ 
+@@ -24,6 +25,7 @@
+ 
+ int board_init(void)
+ {
++	u2_identity_capture();
+ 	/* Inherited, already-powered display. A refused update must not
+ 	 * prevent boot or the USB shell from starting. No rail changes. */
+ 	(void)u2_braille_brf(U2_BRAILLE_BRAND_BRF);
+--- a/include/configs/hims_u2.h
++++ b/include/configs/hims_u2.h
+@@ -1,5 +1,6 @@
+ #ifndef __CONFIG_HIMS_U2_H
+ #define __CONFIG_HIMS_U2_H
++#define CONFIG_OF_BOARD_SETUP
+ 
+ #define CONFIG_SAMSUNG		1
+ #define CONFIG_S5P		1

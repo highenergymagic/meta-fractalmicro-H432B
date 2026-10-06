@@ -60,3 +60,36 @@ PHY discovery, IRQ self-test, cable link, DHCP and packet transfers remain pendi
 Upstream references:
 [Linux binding](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/Documentation/devicetree/bindings/net/smsc,lan9115.yaml?h=linux-6.12.y),
 [Linux driver](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/drivers/net/ethernet/smsc/smsc911x.c?h=linux-6.12.y).
+
+## Factory Ethernet identity
+
+The stock bootloader supplies an ARGS v1.1 handoff in low RAM. Its Ethernet
+address originates in the preserved factory NAND configuration, not a
+per-boot random seed. Linux-capable U-Boot stages copy and validate that
+handoff before Linux reuses RAM, then populate both `mac-address` and
+`local-mac-address` on the LAN9220 device-tree node.
+
+The parser rejects invalid handoff signatures/versions, zero, broadcast,
+multicast, and the stock driver's shared fallback address. An invalid handoff
+does not cause a NAND write or synthesis of a replacement factory address;
+U-Boot reports that factory identity is unavailable.
+
+Linux exposes the effective Ethernet address at
+`/sys/class/net/eth0/address`. The root device-tree property
+`/sys/firmware/devicetree/base/fractalmicro,board-id` contains a NUL-terminated
+`FM-H432B-MAC-` identifier derived from the validated factory Ethernet MAC.
+`fractalmicro,board-id-source` identifies that derivation explicitly.
+
+This board ID is **not a verified manufacturer serial number**. No
+`serial-number` property is fabricated. The stock processor-model-derived
+boot name and a removable battery's identity are not suitable system serials.
+Per-device addresses and identifiers must never be embedded in published
+sources or generic firmware artifacts.
+
+Validation: native parser tests and 90 hardware-layer integration tests pass.
+Both the standalone fastboot stage and the NAND maintenance carrier compile in
+the pinned builder. On the tested unit, recovery-assisted launch and an
+independent plain-Reset NAND boot expose the same factory address and derived
+board ID. Linux reports address assignment type 0, and systemd preserves the
+address. This does not qualify other firmware revisions or establish a
+manufacturer serial-number source.
