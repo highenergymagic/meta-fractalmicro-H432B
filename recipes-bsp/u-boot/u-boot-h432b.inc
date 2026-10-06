@@ -22,6 +22,9 @@ EXTRA_OEMAKE += 'CC="${TARGET_PREFIX}gcc ${TOOLCHAIN_OPTIONS} ${DEBUG_PREFIX_MAP
 EXTRA_OEMAKE += 'HOSTCC="${BUILD_CC} ${BUILD_CFLAGS} ${BUILD_LDFLAGS}"'
 do_configure() {
     unset CFLAGS CPPFLAGS LDFLAGS
+    # B=S: discard objects and dependency paths from an earlier toolchain.
+    # tidy retains the second-stage .bin installed by the chain recipe.
+    oe_runmake tidy
     oe_runmake hims_u2_config
 }
 do_compile() {
