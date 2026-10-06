@@ -15,6 +15,7 @@
 #include "s5pv210.dtsi"
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
 
 / {
 	model = "HIMS BrailleSense U2 (H432B)";
@@ -22,6 +23,21 @@
 
 	chosen {
 		bootargs = "console=ttyGS0,115200 rdinit=/init loglevel=8 ignore_loglevel clk_ignore_unused g_serial.iProduct=OpenH432-RAM g_serial.iSerialNumber=H432-RAM-TEST";
+	};
+
+	/* GPH2[6] was correlated with four physical press/release pairs.
+	 * Keep the inherited pull configuration; gpio-keys owns the input/IRQ.
+	 * No wakeup-source until suspend and electrical power-off are qualified.
+	 */
+	power-keys {
+		compatible = "gpio-keys";
+		label = "H432B power switch";
+		power-button {
+			label = "Power";
+			linux,code = <KEY_POWER>;
+			gpios = <&gph2 6 GPIO_ACTIVE_HIGH>;
+			debounce-interval = <20>;
+		};
 	};
 
 	/* CE ROM header and the product specification both report 256 MiB. */
