@@ -82,5 +82,8 @@ untainted. The subsequent `pm_test=devices` run did not return a responsive
 USB console within 50 seconds. Its last visible message was console
 suspension, after the task freezer completed. This is not proof of CPU sleep
 or a failed wake trampoline: the devices test does not enter low power.
-Console-only loss versus a stalled device callback remains unresolved.
+Later logs showed repeated mmc1 SDIO CMD5 timeouts and eventual PM suspend
+exit approximately 88 seconds after entry. Thus the initial console timeout
+was not evidence of a permanent hang. Post-test shell health was not verified
+before Reset. The SDIO resume path needs isolation before a real sleep test.
 Real suspend and automatic power-button policy are not qualified or enabled.
