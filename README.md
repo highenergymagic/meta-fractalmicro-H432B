@@ -12,10 +12,13 @@ the pinned container and exact source/layer revisions.
 
 ## Development status
 
-The pre-Yocto bring-up baseline has working USB diagnostics, internal SD
-reads, raw NAND reads and limited WM8983 playback. NAND writes and SD writes
-are blocked in that kernel. Wi-Fi enumerates over SDIO but has no working
-function driver. Linux braille, keyboard, suspend and battery management
+The Yocto RAM baseline has booted on a U2 with working USB diagnostics,
+internal SD reads, raw NAND reads and PREEMPT_RT. Both U-Boot roles compile;
+the device test retained the proven installed bootloader and RAM loader.
+WM8983 mixer controls and the 50/63 volume ceiling passed muted checks;
+audible playback was qualified in the earlier bring-up baseline, not retested
+in this Yocto run. NAND and SD writes remain blocked in the kernel.
+Wi-Fi enumerates over SDIO but has no working function driver. Linux braille, keyboard, suspend and battery management
 remain incomplete. This is not a complete, secure replacement firmware.
 
 Linux is CIP 6.12.111-cip32 plus the separately pinned upstream rt21 patch:

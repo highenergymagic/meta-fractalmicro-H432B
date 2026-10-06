@@ -7,7 +7,6 @@ SRC_URI = "git://github.com/u-boot/u-boot.git;protocol=https;nobranch=1 \
 SRCREV = "6528ff0109d81c1f21d20f9f1370782bccf87bcb"
 BB_GIT_SHALLOW = "1"
 BB_GIT_SHALLOW_DEPTH = "1"
-S = "${UNPACKDIR}/git"
 B = "${S}"
 inherit deploy h432b-arm-gnu
 COMPATIBLE_MACHINE = "^h432b$"
