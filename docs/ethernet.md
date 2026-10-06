@@ -52,10 +52,10 @@ Diagnostics and device logs stay out of the source repository.
 ## Validation status
 
 Chip identity, byte ordering, chip-select correction and restoration are
-hardware-verified. Source contract tests pass. The enabled Ethernet kernel
-configuration has not yet been compiled or booted at this checkpoint.
-PHY discovery, IRQ self-test, cable link, DHCP and packet transfers are still
-pending. No networking configuration or network-accessible shell is added.
+hardware-verified. All 54 layer source tests pass. The enabled Ethernet kernel, device tree
+and RAM boot envelope compiled successfully through the pinned Docker/OE build
+(2,840-task graph). Native metadata CI passed. These are not yet boot-tested;
+PHY discovery, IRQ self-test, cable link, DHCP and packet transfers remain pending. No networking configuration or network-accessible shell is added.
 
 Upstream references:
 [Linux binding](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/Documentation/devicetree/bindings/net/smsc,lan9115.yaml?h=linux-6.12.y),
