@@ -1,48 +1,75 @@
 # meta-fractalmicro-H432B
 
-Fractal Microsystems' experimental Yocto/OpenEmbedded BSP for the HIMS
-BrailleSense U2 (H432B / Samsung S5PV210). Independent project, not affiliated
-with or endorsed by HIMS. Target series: Yocto 6.0 Wrynose.
+Hardware support for running OpenH432 on the HIMS BrailleSense U2.
 
-This layer contains machine support, ordered Linux/U-Boot patches and
-hardware configuration. OS policy lives in
-[meta-fractalmicro-openh432](https://github.com/highenergymagic/meta-fractalmicro-openh432).
-Use [openh432-build](https://github.com/highenergymagic/openh432-build) for
-the pinned container and exact source/layer revisions.
+OpenH432 is a Fractal Microsystems project to extend the useful life of
+existing braille notetakers with a Linux-based operating system. This
+Yocto/OpenEmbedded board support layer targets the H432B platform, based
+on Samsung's S5PV210 processor.
 
-## Development status
+The project is under active development. It is not yet a replacement for
+the device's accessible, everyday functionality.
 
-The Yocto RAM baseline has booted on a U2 with working USB diagnostics,
-internal SD reads, raw NAND reads and PREEMPT_RT. Both U-Boot roles compile;
-the device test retained the proven installed bootloader and RAM loader.
-WM8983 mixer controls and the 50/63 volume ceiling passed muted checks;
-audible playback was qualified in the earlier bring-up baseline, not retested
-in this Yocto run. Default kernel NAND and SD writes remain blocked.
-Explicit NAND-only write-window profiles have now passed BCH erase/program,
-UBI provisioning and full readback. A RAM-staged U-Boot has loaded the kernel
-and debug initramfs from NAND; the base SquashFS volume mounts read-only.
-NAND56 is installed and a plain Reset has booted Linux from NAND without
-host uploads; factory StepLoader/EBOOT are verified unchanged. See [NAND status](docs/nand.md).
-Wi-Fi enumerates over SDIO but has no working function driver. Linux braille, keyboard, suspend and battery management
-remain incomplete. This is not a complete, secure replacement firmware.
+## What this layer provides
 
-Linux is CIP 6.12.111-cip32 plus the separately pinned upstream rt21 patch:
-a project integration, not a claim of an official CIP RT release.
-U-Boot is the existing 2012.10 port, deliberately not upgraded during migration.
-Kernel/U-Boot use Arm GNU 14.3.rel1 in the pinned build container.
+- Machine configuration for `MACHINE = "h432b"`.
+- Linux kernel configuration, device tree and board-specific patches.
+- U-Boot recipes and patches for the device's boot and development workflows.
+- Hardware-specific storage protections and image layout constraints.
 
-**No build target installs or flashes anything.** Raw NAND51-linked U-Boot
-and the high-RAM RAM52 loader are different artifacts, neither a factory
-update image. The RAM52 loader must never be put in a NAND carrier.
-Read docs/boot-contract.md before discussing deployment.
+The kernel is based on Linux CIP with a separately integrated PREEMPT_RT
+patch. The bootloader is based on U-Boot 2012.10. Exact source revisions,
+patches and toolchain inputs are recorded in the recipes and build locks.
 
-A third, separate role, `u-boot-h432b-fastboot`, adds standard fastboot to the
-RAM loader. It has booted the Yocto RAM image using an unmodified fastboot
-host. It does not flash NAND. See [fastboot contract](docs/fastboot.md).
+Operating-system policy and image composition belong to
+[meta-fractalmicro-openh432](https://github.com/highenergymagic/meta-fractalmicro-openh432),
+not this hardware layer.
 
-## Licensing
+## Building
 
-New recipe/build metadata is MIT. Linux/DTS and U-Boot patches retain their
-component licenses and notices; the MIT license does not relicense them.
-See docs/provenance.md. No vendor firmware, extracted firmware, device dumps,
-decompilations or proprietary SDK material is included.
+Start with [openh432-build](https://github.com/highenergymagic/openh432-build).
+It provides the pinned layer revisions, build container and commands for
+building a complete development image. The supported layer series is
+Yocto Wrynose.
+
+This repository is a source layer, not a downloadable firmware package.
+Building it does not install anything on a device.
+
+## Hardware status
+
+Linux has booted from NAND across repeated normal resets, retaining the
+factory bootloader. USB diagnostics, internal SD reads, NAND access and
+real-time kernel operation have been exercised on hardware. Audio playback
+and bootloader braille output have also been demonstrated during bring-up.
+
+Important work remains:
+
+- The internal Wi-Fi device enumerates over SDIO but has no working driver.
+- Linux braille, keyboard, battery management and suspend support are incomplete.
+- The operating system still runs from a development initramfs; a persistent
+  production root filesystem and coordinated A/B updates are not complete.
+
+See the [validation record](https://github.com/highenergymagic/openh432-build/blob/main/docs/status.md)
+for the scope of testing. Demonstrated hardware support is not a claim of
+production readiness.
+
+## Technical documentation
+
+- [Boot contract](docs/boot-contract.md): boot stages, image roles and deployment constraints.
+- [NAND support](docs/nand.md): storage layout, protection boundaries and validation.
+- [Fastboot support](docs/fastboot.md): RAM download and boot workflow.
+- [Source provenance](docs/provenance.md): origins and licensing of board support.
+
+Read the boot contract before attempting deployment. RAM loaders and
+persistent boot images are not interchangeable; fastboot currently supports
+RAM boot, not persistent flash or erase.
+
+## License and affiliation
+
+New layer metadata is MIT-licensed. Linux, device-tree and U-Boot patches
+retain their component licenses and copyright notices; the MIT license
+does not relicense them. Proprietary vendor firmware and device dumps are
+not included.
+
+OpenH432 is an independent project and is not affiliated with or endorsed
+by HIMS.
