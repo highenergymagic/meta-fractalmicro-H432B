@@ -1,0 +1,141 @@
+Subject: [PATCH] usb: exynos: balance host PHY initialization and power
+
+The Exynos host helpers power PHYs before the generic root-hub code
+initializes them. Pair each helper-owned power reference with an init
+reference, including rollback of failed initialization or power-on.
+The generic root-hub references remain independently balanced.
+
+Upstream-Status: Pending
+
+--- a/drivers/usb/host/ehci-exynos.c
++++ b/drivers/usb/host/ehci-exynos.c
+@@ -90,25 +90,38 @@
+-static int exynos_ehci_phy_enable(struct device *dev)
+-{
+-	struct usb_hcd *hcd = dev_get_drvdata(dev);
+-	struct exynos_ehci_hcd *exynos_ehci = to_exynos_ehci(hcd);
+-	int i;
+-	int ret = 0;
+-
+-	for (i = 0; ret == 0 && i < PHY_NUMBER; i++)
+-		ret = phy_power_on(exynos_ehci->phy[i]);
+-	if (ret)
+-		for (i--; i >= 0; i--)
+-			phy_power_off(exynos_ehci->phy[i]);
+-
+-	return ret;
+-}
+-
+-static void exynos_ehci_phy_disable(struct device *dev)
+-{
+-	struct usb_hcd *hcd = dev_get_drvdata(dev);
+-	struct exynos_ehci_hcd *exynos_ehci = to_exynos_ehci(hcd);
+-	int i;
+-
+-	for (i = 0; i < PHY_NUMBER; i++)
+-		phy_power_off(exynos_ehci->phy[i]);
+-}
++static int exynos_ehci_phy_enable(struct device *dev)
++{
++	struct usb_hcd *hcd = dev_get_drvdata(dev);
++	struct exynos_ehci_hcd *exynos_ehci = to_exynos_ehci(hcd);
++	int i, ret;
++
++	for (i = 0; i < PHY_NUMBER; i++) {
++		ret = phy_init(exynos_ehci->phy[i]);
++		if (ret)
++			goto rollback;
++
++		ret = phy_power_on(exynos_ehci->phy[i]);
++		if (ret) {
++			phy_exit(exynos_ehci->phy[i]);
++			goto rollback;
++		}
++	}
++	return 0;
++
++rollback:
++	while (--i >= 0) {
++		phy_power_off(exynos_ehci->phy[i]);
++		phy_exit(exynos_ehci->phy[i]);
++	}
++	return ret;
++}
++
++static void exynos_ehci_phy_disable(struct device *dev)
++{
++	struct usb_hcd *hcd = dev_get_drvdata(dev);
++	struct exynos_ehci_hcd *exynos_ehci = to_exynos_ehci(hcd);
++	int i;
++
++	for (i = PHY_NUMBER - 1; i >= 0; i--) {
++		phy_power_off(exynos_ehci->phy[i]);
++		phy_exit(exynos_ehci->phy[i]);
++	}
++}
+--- a/drivers/usb/host/ohci-exynos.c
++++ b/drivers/usb/host/ohci-exynos.c
+@@ -79,25 +79,38 @@
+-static int exynos_ohci_phy_enable(struct device *dev)
+-{
+-	struct usb_hcd *hcd = dev_get_drvdata(dev);
+-	struct exynos_ohci_hcd *exynos_ohci = to_exynos_ohci(hcd);
+-	int i;
+-	int ret = 0;
+-
+-	for (i = 0; ret == 0 && i < PHY_NUMBER; i++)
+-		ret = phy_power_on(exynos_ohci->phy[i]);
+-	if (ret)
+-		for (i--; i >= 0; i--)
+-			phy_power_off(exynos_ohci->phy[i]);
+-
+-	return ret;
+-}
+-
+-static void exynos_ohci_phy_disable(struct device *dev)
+-{
+-	struct usb_hcd *hcd = dev_get_drvdata(dev);
+-	struct exynos_ohci_hcd *exynos_ohci = to_exynos_ohci(hcd);
+-	int i;
+-
+-	for (i = 0; i < PHY_NUMBER; i++)
+-		phy_power_off(exynos_ohci->phy[i]);
+-}
++static int exynos_ohci_phy_enable(struct device *dev)
++{
++	struct usb_hcd *hcd = dev_get_drvdata(dev);
++	struct exynos_ohci_hcd *exynos_ohci = to_exynos_ohci(hcd);
++	int i, ret;
++
++	for (i = 0; i < PHY_NUMBER; i++) {
++		ret = phy_init(exynos_ohci->phy[i]);
++		if (ret)
++			goto rollback;
++
++		ret = phy_power_on(exynos_ohci->phy[i]);
++		if (ret) {
++			phy_exit(exynos_ohci->phy[i]);
++			goto rollback;
++		}
++	}
++	return 0;
++
++rollback:
++	while (--i >= 0) {
++		phy_power_off(exynos_ohci->phy[i]);
++		phy_exit(exynos_ohci->phy[i]);
++	}
++	return ret;
++}
++
++static void exynos_ohci_phy_disable(struct device *dev)
++{
++	struct usb_hcd *hcd = dev_get_drvdata(dev);
++	struct exynos_ohci_hcd *exynos_ohci = to_exynos_ohci(hcd);
++	int i;
++
++	for (i = PHY_NUMBER - 1; i >= 0; i--) {
++		phy_power_off(exynos_ohci->phy[i]);
++		phy_exit(exynos_ohci->phy[i]);
++	}
++}

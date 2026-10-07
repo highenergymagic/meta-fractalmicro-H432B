@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
+/* Opt-in RAM test: only the internal SD controller becomes writable. */
+#include "s5pv210-hims-u2-resume-test.dts"
+/ {
+    hims,internal-sd-write-test;
+};
+&sdhci1 {
+    /delete-property/ hims,read-only-probe;
+};

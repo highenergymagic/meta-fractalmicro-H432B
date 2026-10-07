@@ -1,5 +1,111 @@
 # Boot performance investigation
 
+## Runtime NAND measurements (2026-10-06)
+
+The normal NAND-root system runs the CPU at 800 MHz. This is confirmed by
+the Linux clock tree, not inferred from BogoMIPS. The retained factory first
+stage also explicitly selects this rate. A later stock CE transition to the
+advertised 1 GHz has not been established.
+
+On the byte-transfer Linux driver, repeated 4 MiB reads measured:
+
+| Path | Elapsed | Kernel CPU |
+| --- | ---: | ---: |
+| MTD corrected read | 1.993 s | about 1.9 s |
+| UBI character-volume read | 2.006 s | about 1.9 s |
+| nanddump without ECC | 1.85 s | 1.73 s |
+| nanddump with ECC | 2.09–2.10 s | 1.94–1.96 s |
+
+The two nanddump cases use the same address, length and bad-block policy.
+Raw reads bypass correction only for measurement; runtime reads retain ECC.
+These results do not support blaming most of the delay on BCH: bypassing it
+saves roughly 12% here. They also show little additional UBI overhead.
+
+Python startup without imports took 0.64–0.66 s. The assistance program's
+standard-library imports took 3.73–4.37 s warm. After syncing and dropping
+clean filesystem caches, the same imports took 9.40 s (3.48 s user CPU,
+3.50 s kernel CPU), followed by 3.74 s warm. The difference includes NAND,
+filesystem and decompression costs; it is not a standalone XZ benchmark.
+
+The factory NAND implementation uses word-sized data FIFO transfers and a
+hardware error-correction engine. The Linux optimization uses word reads
+only for aligned bulk operations that do not require byte access. It retains
+byte fallback, existing software BCH/OOB format and the unchanged write path.
+Hardware ECC cannot simply replace software BCH without proving parity
+compatibility with the installed Linux volumes.
+
+CPU-frequency support is not enabled. The upstream S5PV210 driver requires
+working ARM/internal-supply regulators and DMC information, and coordinates
+voltage, PLL, bus dividers and DRAM refresh. A PLL-only write is not an
+implementation of board DVFS. The PMIC control-bus address alone does not
+identify the chip or establish its rail voltages.
+
+EBOOT contains menu-selectable 1000/800/400/100 MHz clock profiles and a
+routine that changes PLLs, dividers and memory refresh. The existence of
+that menu is evidence for a factory clock transition implementation, not
+proof of the operating voltage or a normal CE boot selecting 1 GHz.
+
+## Word-read result
+
+The aligned word-read kernel was installed in kernel_B and booted normally
+from NAND. Full SHA256 checks of both kernel volumes and both system-base
+volumes passed. NAND corrected-bit and ECC-failure counters were zero;
+the kernel was untainted, systemd had no failed units and gpsd was active.
+The root images, slot A and persistent bootstrap were not changed.
+
+Repeated 4 MiB MTD reads fell from 1.993 s to 1.145 s, approximately **74%
+higher throughput** (2.1 to 3.7 MB/s), or **43% less read time**. UBI reads
+fell from 2.006 s to 1.162–1.163 s. Identical nanddump tests measured
+1.02–1.05 s without correction and 1.24–1.25 s with correction.
+
+The cold-import test fell from 9.40 s to 8.30 s; warm imports remained about
+3.8 s. These are individual controlled-cache samples, not statistical
+end-to-end boot results.
+
+A separate RAM-only XZ benchmark decoded a 1,390,508-byte compressed Python
+shared library to 4,763,296 bytes in 0.84 s warm, with matching decoded
+SHA256. It used BusyBox xzcat, CRC32 and 256 KiB dictionary/blocks. This
+isolates a representative decoder workload from NAND I/O but is not the
+kernel SquashFS decoder or a measurement of all boot-time decompression.
+
+The patch builds with the pinned OE container; 124 hardware-layer tests
+pass, including byte-fallback and patch-order regressions. Cross-host
+bit-for-bit reproduction has not been repeated for this change.
+The bootloader still uses its previous transfer path: this Linux result
+does not establish a faster complete boot or meet the 30-second target.
+
+## Persistent bootloader word reads
+
+The maintenance bootstrap now uses aligned 32-bit FIFO reads, with byte
+reads for unaligned heads and short tails. NAND status/ID access remains
+byte-sized; ECC, write restrictions and image checks are unchanged.
+An exhaustive FIFO test covers lengths 0–4096 at four buffer alignments
+inside the pinned OE build. The layer has 126 passing regression tests.
+
+The CE-carried bootstrap was installed and read back exactly, including
+its embedded high-RAM stage. The retained factory StepLoader/EBOOT and
+their OOB bytes match the private pre-conversion backup. Both the
+recovery-assisted launch and a subsequent ordinary software reboot reached
+the existing NAND-root Linux system, untainted and without failed units.
+
+One comparable host-monotonic sample measured reboot-request to executable
+USB-shell command at **107.46 s**, versus **121.48 s** with the byte-read
+bootstrap and the same Linux word-read kernel/root. This interval includes
+shutdown and console-handshake overhead; it is not power-on-to-ready time.
+Linux uptime at the measurement was 44.21 s versus 46.58 s. The reduction
+is about 14 s (12%) end to end, not the 74% Linux read-throughput result.
+No sub-30-second boot is claimed.
+
+The bootstrap still needs separate integration/qualification of the
+hardware timer, partial-page BCH reads and cache-aware execution. The
+earlier experiments below must not be mistaken for enabled default behavior.
+
+## Historical bootloader measurements
+
+The measurements below used earlier, larger development initramfs bundles.
+They remain useful comparisons for those exact experiments, not current
+end-to-end boot measurements of the split NAND kernel/root filesystem.
+
 The qualified development NAND boot is about 138 seconds end to end, including
 roughly 29 seconds in Linux/systemd. A sub-30-second complete boot is a target, not
 a current result.
@@ -99,3 +205,32 @@ The partial-page candidate also loaded and booted the existing NAND kernel
 through to a Linux USB shell: zero failed systemd units and kernel taint 0.
 Linux/systemd took 28.774 seconds, excluding the loader. This was a RAM-staged
 loader test, not a normal-reset qualification of an optimized persistent carrier.
+
+## Comparison with Windows CE
+
+Package size does not explain the current boot latency by itself. The examined
+factory NK package is 34,463,699 bytes (32.9 MiB), whereas the measured Linux
+kernel bundle plus compressed base is 33,038,336 bytes (31.5 MiB). The factory
+application package is a separate ZIP archive, not evidence that all its bytes
+are read at every boot. These products contain different functionality; package
+size is neither RAM consumption nor the startup working set.
+
+CE uses a board-specific image construction and loader path. Microsoft describes
+[Romimage as the locator that creates NK images](https://learn.microsoft.com/en-us/previous-versions/windows/embedded/ms938650%28v%3Dmsdn.10%29).
+The recovered factory NAND driver uses word transfers and hardware ECC. Linux's
+measured word-transfer gain is documented above; the current software-ECC cost
+alone does not explain the full difference. No matched stock-CE cold-boot timing
+has been captured, so an overall CE/Linux speed ratio is not established.
+
+A representative optimized-loader Linux boot reported 13.690 seconds in the
+kernel and 60.064 seconds in userspace from systemd-analyze, with multi-user.target
+reached 47.544 seconds into userspace. This excludes the bootloader and is not
+the earlier USB-shell readiness metric. The reported critical chain includes
+udev-trigger (13.571 seconds) and D-Bus activation (15.347 seconds). Individual
+unit durations overlap and include waits; they must not be summed or treated as
+CPU execution time. Investigate cold storage access, decompression and service
+ordering before attributing delays to systemd itself.
+
+Finally, the factory power switch normally suspended and resumed the device.
+Comparing that wake-up with a full Linux reboot is not a cold-boot comparison.
+Full suspend/resume support remains separate work.

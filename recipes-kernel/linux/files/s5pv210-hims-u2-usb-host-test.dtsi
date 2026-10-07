@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: GPL-2.0
+/* Experimental external hub integration. No PMIC or SYSTEM5V writes. */
+/ {
+    usb_hub_supply: regulator-usb-hub {
+        compatible = "regulator-fixed";
+        regulator-name = "usb-hub-enable";
+        gpio = <&gph2 7 GPIO_ACTIVE_HIGH>;
+        enable-active-high;
+        pinctrl-names = "default";
+        pinctrl-0 = <&usb_hub_enable_pin>;
+    };
+    usb12_supply: regulator-usb12 {
+        compatible = "regulator-fixed";
+        regulator-name = "usb12-enable";
+        gpio = <&gph3 7 GPIO_ACTIVE_HIGH>;
+        enable-active-high;
+        regulator-always-on;
+        pinctrl-names = "default";
+        pinctrl-0 = <&usb12_enable_pin>;
+    };
+    usb3_supply: regulator-usb3 {
+        compatible = "regulator-fixed";
+        regulator-name = "usb3-enable";
+        gpio = <&gph1 3 GPIO_ACTIVE_HIGH>;
+        enable-active-high;
+        regulator-always-on;
+        pinctrl-names = "default";
+        pinctrl-0 = <&usb3_enable_pin>;
+    };
+};
+&pinctrl0 {
+    usb_hub_enable_pin: usb-hub-enable-pin {
+        samsung,pins = "gph2-7";
+        samsung,pin-function = <1>;
+        samsung,pin-pud = <0>;
+    };
+    usb12_enable_pin: usb12-enable-pin {
+        samsung,pins = "gph3-7";
+        samsung,pin-function = <1>;
+        samsung,pin-pud = <0>;
+    };
+    usb3_enable_pin: usb3-enable-pin {
+        samsung,pins = "gph1-3";
+        samsung,pin-function = <1>;
+        samsung,pin-pud = <0>;
+    };
+    usb_hub_reset_pin: usb-hub-reset-pin {
+        samsung,pins = "gpj4-2";
+        /* Shared OF node: GPIO consumer sets direction; only apply bias here. */
+        samsung,pin-pud = <0>;
+    };
+};
+&ehci {
+    #address-cells = <1>;
+    #size-cells = <0>;
+    hub@1 {
+        compatible = "usb409,5a";
+        reg = <1>;
+        vdd-supply = <&usb_hub_supply>;
+        reset-gpios = <&gpj4 2 GPIO_ACTIVE_LOW>;
+        pinctrl-names = "default";
+        pinctrl-0 = <&usb_hub_reset_pin>;
+    };
+};

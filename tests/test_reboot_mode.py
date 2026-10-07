@@ -41,7 +41,8 @@ class RebootModeContract(unittest.TestCase):
 
     def test_kernel_is_isolated(self):
         recipe = (ROOT / "recipes-kernel/linux/linux-h432b-reboot-test_6.12.111.bb").read_text()
-        self.assertIn('PROVIDES:remove = "virtual/kernel"', recipe)
+        self.assertIn('H432B_KERNEL_PROVIDER_REMOVE ?= "virtual/kernel"', recipe)
+        self.assertIn('PROVIDES:remove = "${H432B_KERNEL_PROVIDER_REMOVE}"', recipe)
         self.assertIn('KERNEL_PACKAGE_NAME = "kernel-reboot-test"', recipe)
         normal = (ROOT / "recipes-kernel/linux/linux-h432b_6.12.111.bb").read_text()
         self.assertNotIn("reboot-test", normal)

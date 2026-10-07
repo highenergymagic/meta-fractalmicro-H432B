@@ -1,0 +1,35 @@
+Subject: [PATCH] usb: onboard: add experimentally qualified H432B hub ID
+
+Use the existing onboard-device regulator/reset lifecycle for 0409:005a.
+The 100 ms reset hold is the H432B factory sequence, qualified on this
+board; it is not a claimed silicon minimum or upstream-ready binding.
+
+Upstream-Status: Inappropriate [board bring-up timing pending hardware documentation]
+
+--- a/drivers/usb/misc/onboard_usb_dev.h
++++ b/drivers/usb/misc/onboard_usb_dev.h
+@@ -19,1 +19,9 @@
++/* Conservative reset hold verified on the H432B board. */
++static const struct onboard_dev_pdata nec_0409_005a_data = {
++	.reset_us = 100000,
++	.num_supplies = 1,
++	.supply_names = { "vdd" },
++	.is_hub = true,
++};
++
+ static const struct onboard_dev_pdata microchip_usb424_data = {
+--- a/drivers/usb/misc/onboard_usb_dev.h
++++ b/drivers/usb/misc/onboard_usb_dev.h
+@@ -98,1 +98,2 @@
++	{ .compatible = "usb409,5a", .data = &nec_0409_005a_data, },
+ 	{ .compatible = "usb424,2412", .data = &microchip_usb424_data, },
+--- a/drivers/usb/misc/onboard_usb_dev.c
++++ b/drivers/usb/misc/onboard_usb_dev.c
+@@ -567,1 +567,2 @@
++#define VENDOR_ID_NEC		0x0409
+ #define VENDOR_ID_CYPRESS	0x04b4
+--- a/drivers/usb/misc/onboard_usb_dev.c
++++ b/drivers/usb/misc/onboard_usb_dev.c
+@@ -650,1 +650,2 @@
++	{ USB_DEVICE(VENDOR_ID_NEC, 0x005a) }, /* H432B four-port USB 2.0 hub */
+ 	{ USB_DEVICE(VENDOR_ID_CYPRESS, 0x6502) }, /* CYUSB330x 2.0 HUB */

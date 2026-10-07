@@ -51,6 +51,17 @@ class ResumeBridgeTests(unittest.TestCase):
         recipe = (ROOT / "recipes-kernel/linux/linux-h432b_6.12.111.bb").read_text()
         self.assertNotIn("0009-factory-resume-test", recipe)
 
+    def test_guarded_device_diagnostic(self):
+        text = (ROOT / "tests/check-pm-devices.sh").read_text()
+        self.assertIn("SDIO_ID=024C:8712", text)
+        self.assertIn("eb300000.mmc", text)
+        self.assertIn("eb100000.mmc/driver", text)
+        self.assertIn('test "$found" = 1', text)
+        self.assertIn('grep -q "\\\\[$level\\\\]" /sys/power/pm_test', text)
+        self.assertIn("trap cleanup EXIT", text)
+        self.assertNotIn("level=none", text)
+        self.assertNotIn("/sys/power/disk", text)
+
     def test_wake_input(self):
         text = (FILES / "s5pv210-hims-u2-resume-test.dts").read_text()
         self.assertIn("&{/power-keys/power-button}", text)

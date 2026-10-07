@@ -1,2 +1,3 @@
 * text=auto eol=lf
-*.patch -text
+## Unified-diff context prefixes can legitimately precede source tabs.
+*.patch -text whitespace=-space-before-tab

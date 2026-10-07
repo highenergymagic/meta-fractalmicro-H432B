@@ -1,0 +1,7 @@
+Subject: Build H432B physically mapped input driver
+Upstream-Status: Inappropriate [board qualification driver]
+
+--- a/drivers/input/keyboard/Makefile
++++ b/drivers/input/keyboard/Makefile
+@@ -1,0 +2,1 @@
++obj-y += h432b-input.o

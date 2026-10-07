@@ -25,3 +25,5 @@
 &{/power-keys/power-button} {
     wakeup-source;
 };
+
+#include "s5pv210-hims-u2-usb-host-test.dtsi"

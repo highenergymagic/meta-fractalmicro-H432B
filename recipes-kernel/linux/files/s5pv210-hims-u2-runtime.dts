@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0
+/* Normal runtime: Linux UBI and internal SD writable. Factory/BBT protected. */
+#include "s5pv210-hims-u2-reboot-test.dts"
+#include "s5pv210-hims-u2-pmic-bus.dtsi"
+
+&{/nand@b0e00000} {
+    hims,write-window = <0x00400000 0x1fb00000>;
+};
+&sdhci1 {
+    /delete-property/ hims,read-only-probe;
+};
+&sdhci3 {
+    /delete-property/ hims,read-only-probe;
+};

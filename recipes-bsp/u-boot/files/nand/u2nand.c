@@ -8,6 +8,14 @@
 #include "u2fastboot.h"
 
 #define REG(o) ((void __iomem *)(0xb0e00000U+(o)))
+#define U2_NAND_READ8() readb(REG(0x10))
+#define U2_NAND_READ32() readl(REG(0x10))
+#include "nand-read-fifo.h"
+static void read_buf(struct mtd_info *mtd, u8 *buf, int len)
+{
+ (void)mtd;
+ u2_nand_read_fifo(buf, len);
+}
 static struct nand_chip u2_chip;
 static int blocked;
 static unsigned saved_cont;
@@ -74,6 +82,7 @@ static int do_u2nandinit(cmd_tbl_t *cmdtp,int flag,int argc,char *const argv[])
   n->IO_ADDR_R=n->IO_ADDR_W=REG(0x10);
   n->cmd_ctrl=control; n->dev_ready=ready;
   n->write_buf=no_write_buf;
+  n->read_buf=read_buf;
   n->options=NAND_NO_SUBPAGE_WRITE|NAND_SKIP_BBTSCAN;
   n->ecc.mode=NAND_ECC_SOFT_BCH; n->ecc.size=512; n->ecc.bytes=13;
   n->chip_delay=50;

@@ -38,16 +38,21 @@ Building it does not install anything on a device.
 ## Hardware status
 
 Linux has booted from NAND across repeated normal resets, retaining the
-factory bootloader. USB diagnostics, internal SD reads, NAND access and
-real-time kernel operation have been exercised on hardware. Audio playback
-and bootloader braille output have also been demonstrated during bring-up.
+factory bootloader. USB diagnostics, bounded internal SD read/write testing,
+NAND access and real-time kernel operation have been exercised on hardware.
+The normal NAND runtime permits Linux UBI and internal SD writes, while
+protecting the factory boot and BBT regions. Audio playback, bootloader braille,
+wired Ethernet and GPS service integration have also been demonstrated.
+Broader input, vibration, USB-host and removable-SD qualification remains
+available through explicit diagnostic profiles.
 
 Important work remains:
 
 - The internal Wi-Fi device enumerates over SDIO but has no working driver.
 - Linux braille, keyboard, battery management and suspend support are incomplete.
-- The operating system still runs from a development initramfs; a persistent
-  production root filesystem and coordinated A/B updates are not complete.
+- The normal kernel uses a minimal initramfs to mount the separate NAND
+  SquashFS systembase. Writable state is volatile; persistent userdata and
+  coordinated A/B updates are not complete.
 
 See the [validation record](https://github.com/highenergymagic/openh432-build/blob/main/docs/status.md)
 for the scope of testing. Demonstrated hardware support is not a claim of
@@ -61,6 +66,9 @@ The loader firmware itself remains in this BSP layer.
 
 - [Boot contract](docs/boot-contract.md): boot stages, image roles and deployment constraints.
 - [NAND support](docs/nand.md): storage layout, protection boundaries and validation.
+- [Internal SD](docs/internal-sd.md): controller identity, read-only baseline and opt-in write testing.
+- [External SD](docs/external-sd.md): removable-slot configuration and read-only qualification.
+- [GPS receiver](docs/gps.md): UART mapping, shared runtime power control and assistance qualification.
 - [Fastboot support](docs/fastboot.md): RAM download and boot workflow.
 - [Boot performance](docs/boot-performance.md): measured bottlenecks and profiling limits.
 - [Input support](docs/input.md): power-key qualification and remaining controls.

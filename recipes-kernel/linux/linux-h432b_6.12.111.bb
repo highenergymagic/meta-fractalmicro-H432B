@@ -12,7 +12,7 @@ SRC_URI = "https://www.kernel.org/pub/linux/kernel/projects/cip/6.12/linux-cip-6
     file://0005-sdio-cis-end.patch \
     file://0006-audio-clock-codec.patch \
     file://0007-hims-u2-audio.patch \
-    file://0008-nand-bch-window.patch file://test-nand-guard.c file://nand-profile.py \
+    file://0008-nand-bch-window.patch file://0015-nand-word-reads.patch file://test-nand-guard.c file://nand-profile.py \
     file://s5pv210-hims-u2.dts \
     file://u2-ram.config file://u2-storage.config file://u2-sdio.config \
     file://u2-audio.config file://u2-systemd.config file://u2-input.config file://u2-ethernet.config \

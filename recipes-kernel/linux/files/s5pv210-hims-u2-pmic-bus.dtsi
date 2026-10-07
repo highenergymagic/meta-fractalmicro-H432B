@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0
+/* PMIC control bus. No automatic register-value writes or regulator driver. */
+
+/ {
+    aliases { i2c9 = &pmic_inventory_bus; };
+    /* Board firmware uses GPD1[4] SDA, GPD1[5] SCL, 7-bit address 0x66.
+     * Release both lines through standard open-drain GPIO emulation.
+     * No bus scan and no automatic PMIC register writes.
+     */
+    pmic_inventory_bus: i2c-pmic-inventory {
+        compatible = "i2c-gpio";
+        sda-gpios = <&gpd1 4 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+        scl-gpios = <&gpd1 5 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+        i2c-gpio,delay-us = <10>;
+        i2c-gpio,timeout-ms = <100>;
+        #address-cells = <1>;
+        #size-cells = <0>;
+    };
+};

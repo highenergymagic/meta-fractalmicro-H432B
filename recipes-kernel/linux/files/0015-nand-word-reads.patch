@@ -1,0 +1,28 @@
+Subject: [PATCH] mtd: H432B use word transfers for aligned NAND reads
+
+Upstream-Status: Inappropriate [board-specific driver]
+
+The S5PV210 data FIFO accepts 32-bit CPU accesses on this 8-bit NAND bus.
+Use repeated word reads for aligned bulk transfers; keep forced byte,
+unaligned and non-word-sized operations on the existing byte path.
+The ECC format, timings, write path and partition boundaries are unchanged.
+
+--- a/drivers/mtd/nand/raw/hims-u2-nand.c
++++ b/drivers/mtd/nand/raw/hims-u2-nand.c
+@@ -110,7 +110,15 @@
+     writeb(in->ctx.addr.addrs[j],n->regs+NFADDR);
+    break;
+   case NAND_OP_DATA_IN_INSTR:
+-   ioread8_rep(n->regs+NFDATA,in->ctx.data.buf.in,in->ctx.data.len); break;
++   if (!in->ctx.data.force_8bit &&
++       IS_ALIGNED((unsigned long)in->ctx.data.buf.in, 4) &&
++       IS_ALIGNED(in->ctx.data.len, 4))
++    ioread32_rep(n->regs+NFDATA,in->ctx.data.buf.in,
++                in->ctx.data.len / 4);
++   else
++    ioread8_rep(n->regs+NFDATA,in->ctx.data.buf.in,
++               in->ctx.data.len);
++   break;
+   case NAND_OP_DATA_OUT_INSTR:
+    iowrite8_rep(n->regs+NFDATA,in->ctx.data.buf.out,in->ctx.data.len); break;
+   case NAND_OP_WAITRDY_INSTR:

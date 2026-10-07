@@ -1,0 +1,19 @@
+Subject: [PATCH] misc: add opt-in H432B GPS power/reset diagnostic
+
+Upstream-Status: Inappropriate [temporary board qualification driver]
+
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -1,0 +2,8 @@
++config H432B_GPS_POWER_TEST
++	bool "H432B GPS power/reset diagnostic"
++	depends on ARCH_S5PV210 && GPIOLIB && REGULATOR
++	help
++	  Board-specific opt-in power/reset sequencing for UART receive tests.
++	  Not a production GNSS driver; runtime and system PM are unqualified.
++	  Leave disabled in normal kernels.
++
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -1,0 +2,1 @@
++obj-$(CONFIG_H432B_GPS_POWER_TEST) += h432b-gps-power-test.o

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-/* Fixed two-register read, not a scanner or general PMIC programming tool.
+/* Fixed control/DVS register reads, not a scanner or PMIC programming tool.
  * The write phase selects a register address; it contains no register value.
  */
 #define _POSIX_C_SOURCE 200809L
@@ -14,8 +14,8 @@
 
 int main(int argc, char **argv)
 {
-    (void)argv;
-    if (argc != 1) return 2;
+    int dvs = argc == 2 && !strcmp(argv[1], "--dvs");
+    if (argc != 1 && !dvs) return 2;
     FILE *name = fopen("/sys/class/i2c-dev/i2c-9/name", "r");
     char buf[80] = {0};
     if (!name) { perror("adapter identity"); return 1; }
@@ -29,7 +29,9 @@ int main(int argc, char **argv)
     if (ioctl(fd, I2C_FUNCS, &funcs) < 0 || !(funcs & I2C_FUNC_I2C)) {
         fputs("Combined transfers unavailable\n", stderr); close(fd); return 1;
     }
-    for (uint8_t reg = 0; reg < 2; reg++) {
+    for (uint8_t reg = 0; reg < (dvs ? 7 : 2); reg++) {
+        /* Only control 0/1 and DVS 4/5/6; never probe other addresses. */
+        if (reg == 2 || reg == 3) continue;
         uint8_t value = 0;
         struct i2c_msg msgs[2] = {
             {.addr = 0x66, .flags = 0, .len = 1, .buf = &reg},

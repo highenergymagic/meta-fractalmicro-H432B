@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Opt-in warm-reboot experiment, not the default board device tree. */
+/* NAND runtime board additions; historical recipe name retained. */
 #include "s5pv210-hims-u2.dts"
+#include "s5pv210-hims-u2-gps.dtsi"
 
 &pmu_syscon {
     compatible = "samsung-s5pv210-pmu", "syscon", "simple-mfd";

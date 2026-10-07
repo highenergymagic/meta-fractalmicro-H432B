@@ -1,0 +1,18 @@
+Subject: [PATCH] misc: add H432B GPS power/reset sequencing
+
+Upstream-Status: Inappropriate [board-specific power sequencer; PM not implemented]
+
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -1,0 +2,7 @@
++config H432B_GPS_POWER
++	bool "H432B GPS power/reset sequencing"
++	depends on ARCH_S5PV210 && GPIOLIB && REGULATOR
++	help
++	  Enable the qualified board GPS rail and release reset after 100 ms.
++	  Receiver remains powered; runtime and system PM are not implemented.
++
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -1,0 +2,1 @@
++obj-$(CONFIG_H432B_GPS_POWER) += h432b-gps-power.o

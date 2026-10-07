@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Guard the scope of the opt-in PMIC inventory experiment."""
+"""Guard the fixed-bus PMIC inventory and runtime bus wiring."""
 from pathlib import Path
 import unittest
 
@@ -13,7 +13,7 @@ class PowerInventoryTests(unittest.TestCase):
         self.assertIn('require linux-h432b-reboot-test_', text)
 
     def test_only_established_bus_pins(self):
-        text = (FILES / "s5pv210-hims-u2-power-test.dts").read_text()
+        text = (FILES / "s5pv210-hims-u2-pmic-bus.dtsi").read_text()
         self.assertIn('<&gpd1 4 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>', text)
         self.assertIn('<&gpd1 5 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>', text)
         self.assertNotIn('gpio-poweroff', text)
@@ -27,14 +27,28 @@ class PowerInventoryTests(unittest.TestCase):
 
     def test_bounded_register_reads(self):
         text = (ROOT / "recipes-support/h432b-power-inventory/files/power-inventory.c").read_text()
-        self.assertIn('reg < 2', text)
+        self.assertIn('reg < (dvs ? 7 : 2)', text)
+        self.assertIn('if (reg == 2 || reg == 3) continue;', text)
         self.assertIn('strcmp(buf, "i2c-pmic-inventory\\n")', text)
         self.assertIn('.addr = 0x66, .flags = 0, .len = 1, .buf = &reg', text)
         self.assertIn('.addr = 0x66, .flags = I2C_M_RD, .len = 1, .buf = &value', text)
         self.assertNotIn('I2C_SLAVE_FORCE', text)
         self.assertNotIn('/dev/mem', text)
 
-    def test_not_default_device_tree(self):
+    def test_runtime_uses_shared_bus_without_regulator(self):
+        text = (FILES / "s5pv210-hims-u2-runtime.dts").read_text()
+        self.assertIn('#include "s5pv210-hims-u2-pmic-bus.dtsi"', text)
+        recipe = (ROOT / "recipes-kernel/linux/linux-h432b-runtime_6.12.111.bb").read_text()
+        self.assertIn("file://s5pv210-hims-u2-pmic-bus.dtsi", recipe)
+        self.assertIn("file://u2-power-test.config", recipe)
+        self.assertIn("I2C I2C_CHARDEV I2C_GPIO", recipe)
+
+    def test_dvs_requires_explicit_argument(self):
+        text = (ROOT / "recipes-support/h432b-power-inventory/files/power-inventory.c").read_text()
+        self.assertIn('argc == 2 && !strcmp(argv[1], "--dvs")', text)
+        self.assertIn("if (argc != 1 && !dvs) return 2;", text)
+
+    def test_historical_base_tree_unchanged(self):
         text = (FILES / "s5pv210-hims-u2.dts").read_text()
         self.assertNotIn('i2c-pmic-inventory', text)
 

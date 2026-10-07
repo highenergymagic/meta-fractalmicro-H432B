@@ -1,0 +1,46 @@
+// SPDX-License-Identifier: GPL-2.0
+/* Qualified UART1 and GPS enable/reset wiring; receiver PM not implemented. */
+/ {
+    gps_power {
+        compatible = "fractal,h432b-gps-power";
+        vcc-supply = <&gps_enable>;
+        reset-gpios = <&gph3 3 GPIO_ACTIVE_LOW>;
+        pinctrl-names = "default";
+        pinctrl-0 = <&gps_reset_pin>;
+    };
+    gps_enable: regulator-gps-enable {
+        compatible = "regulator-fixed";
+        regulator-name = "gps-enable";
+        gpio = <&gpe1 0 GPIO_ACTIVE_HIGH>;
+        enable-active-high;
+        pinctrl-names = "default";
+        pinctrl-0 = <&gps_enable_pin>;
+    };
+};
+&pinctrl0 {
+    gps_reset_pin: gps-reset-pin {
+        samsung,pins = "gph3-3";
+        samsung,pin-function = <1>;
+        samsung,pin-pud = <0>;
+    };
+    gps_enable_pin: gps-enable-pin {
+        samsung,pins = "gpe1-0";
+        samsung,pin-function = <1>;
+        samsung,pin-pud = <0>;
+    };
+    gps_uart_tx_pin: gps-uart-tx-pin {
+        samsung,pins = "gpa0-5";
+        samsung,pin-function = <2>;
+        samsung,pin-pud = <0>;
+    };
+    gps_uart_rx_pin: gps-uart-rx-pin {
+        samsung,pins = "gpa0-4";
+        samsung,pin-function = <2>;
+        samsung,pin-pud = <0>;
+    };
+};
+&uart1 {
+    pinctrl-names = "default";
+    pinctrl-0 = <&gps_uart_rx_pin &gps_uart_tx_pin>;
+    status = "okay";
+};

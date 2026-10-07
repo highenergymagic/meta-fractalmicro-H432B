@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
+/* Explicit diagnostic permission markers; GPS wiring is shared with NAND. */
+#include "s5pv210-hims-u2-external-sd-test.dts"
+/ {
+    hims,gps-receive-test;
+    hims,gps-query-test;
+};
