@@ -397,7 +397,7 @@ static ssize_t command_test_store(struct device *dev, struct device_attribute *a
 	struct h432b_command_result *r = &sample->command;
 	int error;
 
-	if (!sysfs_streq(buf, "loopback"))
+	if (!sysfs_streq(buf, "loopback") && !sysfs_streq(buf, "opmode"))
 		return -EINVAL;
 	mutex_lock(&sample->lock);
 	if (r->attempted || sample->event.attempted) {
@@ -411,6 +411,7 @@ static ssize_t command_test_store(struct device *dev, struct device_attribute *a
 		goto out;
 	}
 	r->attempted = true;
+	r->opmode = sysfs_streq(buf, "opmode");
 	error = wifi_command_test(func, r, sample->firmware.c2h_base);
 	r->error = error;
 	if (!error)
@@ -440,6 +441,12 @@ static ssize_t command_result_show(struct device *dev,
 			r->events, r->debug_events, r->bytes, r->consumed,
 			r->port_seq, r->event_seq, r->public_pages, r->command_pages,
 			r->status_before, r->status_after, 28, r->reply, 32, r->debug_head);
+	if (r->attempted)
+		size += sysfs_emit_at(buf, size,
+			"mac_stage=%u rcr=%08x,%08x cr=%08x,%08x pmc_status=%02x pause=%02x debug_select=%02x\n",
+			r->mac_stage, r->mac_before[0], r->mac_after[0],
+			r->mac_before[1], r->mac_after[1], r->pmc_after,
+			r->pause_after, r->debug_after);
 	for (i = 0; i < r->snapshots; i++) {
 		struct h432b_command_snapshot *s = &r->snapshot[i];
 

@@ -15,7 +15,7 @@ struct h432b_command_snapshot {
 };
 
 struct h432b_command_result {
-	bool attempted, sent, matched;
+	bool attempted, sent, matched, opmode;
 	int error, cleanup;
 	unsigned int batches, events, debug_events, bytes, replies, reply_length;
 	u8 command_seq;
@@ -23,6 +23,9 @@ struct h432b_command_result {
 	u8 port_seq, event_seq, public_pages, command_pages;
 	u8 reply[28];
 	u8 debug_head[32];
+	unsigned int mac_stage;
+	u32 mac_before[2], mac_after[2];
+	u8 pmc_after, pause_after, debug_after;
 	unsigned int snapshots;
 	struct h432b_command_snapshot snapshot[5];
 };
@@ -64,6 +67,71 @@ static void wifi_command_snapshot(struct sdio_func *func,
 	}
 }
 
+/*
+ * Post-firmware setup from the factory HAL and Realtek GPL hal_init.c.
+ * Host held; stop at the first failed operation. Polling owns the queues,
+ * so omit factory HIMR=0x000f until a matching interrupt handler exists.
+ * These are live initialization writes, not registers to restore afterward.
+ */
+static int wifi_command_mac_init(struct sdio_func *func,
+				 struct h432b_command_result *r)
+{
+	int error = 0;
+
+	r->mac_before[0] = wifi_read(func, 4, 0x48, &error);
+	if (error)
+		return error;
+	r->mac_stage = 1;
+	wifi_write(func, 4, 0x48, r->mac_before[0] | BIT(25), &error);
+	if (error)
+		return error;
+	r->mac_before[1] = wifi_read(func, 4, 0x40, &error);
+	if (error)
+		return error;
+	r->mac_stage = 2;
+	wifi_write(func, 4, 0x40, r->mac_before[1] & 0x00ffffff, &error);
+	if (error)
+		return error;
+	r->mac_stage = 3;
+	wifi_write(func, 1, 0x06, 0x3b, &error);
+	if (error)
+		return error;
+	r->mac_stage = 4;
+	wifi_write(func, 1, 0x40, 0xfc, &error);
+	if (error)
+		return error;
+	r->mac_stage = 5;
+	wifi_write(func, 1, 0x42, 0x00, &error);
+	if (error)
+		return error;
+	r->mac_stage = 6;
+	sdio_writeb(func, 0, 0xff, &error);
+	if (error)
+		return error;
+	r->mac_after[0] = wifi_read(func, 4, 0x48, &error);
+	if (error)
+		return error;
+	r->mac_after[1] = wifi_read(func, 4, 0x40, &error);
+	if (error)
+		return error;
+	r->pmc_after = wifi_read(func, 1, 0x06, &error);
+	if (error)
+		return error;
+	r->pause_after = wifi_read(func, 1, 0x42, &error);
+	if (error)
+		return error;
+	r->debug_after = sdio_readb(func, 0xff, &error);
+	if (error)
+		return error;
+	if (!(r->mac_after[0] & BIT(25)) ||
+	    (r->mac_after[1] & 0xff0000ff) != 0xfc ||
+	    r->pause_after || r->debug_after)
+		return -EIO;
+	/* PMC_FSM+2 is live status, not a write/readback latch. */
+	r->mac_stage = 7;
+	return 0;
+}
+
 static void wifi_loopback_packet(u8 *packet, u8 seq)
 {
 	u8 *p = packet + 40;
@@ -81,6 +149,15 @@ static void wifi_loopback_packet(u8 *packet, u8 seq)
 	put_unaligned_le16(0x2468, p + 18);
 	p[20] = 0xbc;
 	put_unaligned_le32(0x89abcdef, p + 24);
+}
+
+static void wifi_opmode_packet(u8 *packet, u8 seq)
+{
+	memset(packet, 0, 512);
+	put_unaligned_le32(0x8c200010, packet); /* 8-byte header + padded params */
+	put_unaligned_le32(0x1300, packet + 4);
+	put_unaligned_le32(0x00110008 | ((u32)seq << 24), packet + 32);
+	packet[40] = 1; /* infrastructure mode; no scan or association */
 }
 
 /* Factory firmware reply observed on hardware: command header + four bytes.
@@ -140,7 +217,19 @@ static int wifi_command_drain(struct sdio_func *func,
 			memcpy(r->debug_head, data + offset + 32,
 			       min_t(unsigned int, length, sizeof(r->debug_head)));
 		}
+		if (r->opmode && code == 19 && r->sent &&
+		    length == sizeof("set opmode: 1\n") &&
+		    !memcmp(data + offset + 32, "set opmode: 1\n", length)) {
+			if (r->matched)
+				return -EPROTO;
+			r->reply_length = length;
+			memcpy(r->reply, data + offset + 32, length);
+			r->matched = true;
+			r->replies++;
+		}
 		if (code == 18) {
+			if (r->opmode)
+				return -EPROTO;
 			if (!r->sent || r->matched)
 				return -EPROTO;
 			r->reply_length = length;
@@ -199,6 +288,9 @@ static int wifi_command_test(struct sdio_func *func,
 	r->status_before = sdio_readw(func, WIFI_HISR, &error);
 	if (error)
 		goto out;
+	error = wifi_command_mac_init(func, r);
+	if (error)
+		goto out;
 	wifi_command_snapshot(func, r, 0);
 	/* Drain boot events before sending; every loop has a fixed bound. */
 	for (i = 0; i < 32; i++) {
@@ -214,7 +306,7 @@ static int wifi_command_test(struct sdio_func *func,
 		error = -EBUSY;
 		goto out;
 	}
-	for (r->command_seq = 1; r->command_seq <= 2; r->command_seq++) {
+	for (r->command_seq = 1; r->command_seq <= (r->opmode ? 16 : 2); r->command_seq++) {
 		r->public_pages = sdio_readb(func, 1, &error);
 		if (error)
 			goto out;
@@ -227,7 +319,10 @@ static int wifi_command_test(struct sdio_func *func,
 			goto out;
 		}
 		wifi_command_snapshot(func, r, r->command_seq * 2 - 1);
-		wifi_loopback_packet(packet, r->command_seq);
+		if (r->opmode)
+			wifi_opmode_packet(packet, r->command_seq);
+		else
+			wifi_loopback_packet(packet, r->command_seq);
 		r->matched = false;
 		/* Factory H2C uses one 512-byte block, incrementing CMD53.
 		 * The interface callback at +0x38 is io_ops +0x18 (block write),

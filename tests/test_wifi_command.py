@@ -30,7 +30,7 @@ class WifiCommand(unittest.TestCase):
 
     def test_reply_fields_and_bounds(self):
         for text in ("length == 12", "p[9] == 0x11 + seq * 0x10",
-                     "r->command_seq <= 2", "r->replies++", "r->batches >= 64",
+                     "r->command_seq <= (r->opmode ? 16 : 2)", "r->replies++", "r->batches >= 64",
                      "i < 32", "i < 100 && !r->matched"):
             self.assertIn(text, C)
         self.assertIn("!r->sent || r->matched", C)
@@ -42,7 +42,7 @@ class WifiCommand(unittest.TestCase):
         self.assertIn("kfree(data)", C)
 
     def test_queue_snapshots_are_bounded_and_read_only(self):
-        snapshot = C.split("static void wifi_command_snapshot", 1)[1].split("static void wifi_loopback_packet", 1)[0]
+        snapshot = C.split("static void wifi_command_snapshot", 1)[1].split("static int wifi_command_mac_init", 1)[0]
         for text in ("ARRAY_SIZE(r->snapshot)", "0x40", "WIFI_C2H_COUNT",
                      "0xc0 + i", "if (s->error)", "sdio_readw", "sdio_readb"):
             self.assertIn(text, snapshot)
@@ -51,6 +51,30 @@ class WifiCommand(unittest.TestCase):
         self.assertIn("r->command_seq * 2 - 1", C)
         self.assertIn("r->command_seq * 2);", C)
         self.assertIn("sysfs_emit_at", D)
+
+    def test_factory_post_firmware_sequence(self):
+        init = C.split("static int wifi_command_mac_init", 1)[1].split("static void wifi_loopback_packet", 1)[0]
+        writes = ["wifi_write(func, 4, 0x48", "wifi_write(func, 4, 0x40",
+                  "wifi_write(func, 1, 0x06, 0x3b", "wifi_write(func, 1, 0x40, 0xfc",
+                  "wifi_write(func, 1, 0x42, 0x00", "sdio_writeb(func, 0, 0xff"]
+        positions = [init.index(w) for w in writes]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(init.count("if (error)"), 13)
+        self.assertIn("0xff0000ff", init)
+        self.assertIn("r->mac_stage = 7", init)
+        self.assertNotIn("WIFI_HIMR", init)
+        self.assertLess(C.index("error = wifi_command_mac_init(func, r)"),
+                        C.index("wifi_command_snapshot(func, r, 0)"))
+        self.assertIn("mac_stage=%u", D)
+
+    def test_normal_command_diagnostic(self):
+        for text in ("0x8c200010", "0x00110008 | ((u32)seq << 24)",
+                     "packet[40] = 1", "r->opmode && code == 19 && r->sent",
+                     'sizeof("set opmode: 1\\n")', "if (r->opmode)"):
+            self.assertIn(text, C)
+        self.assertIn('sysfs_streq(buf, "opmode")', D)
+        self.assertNotIn("r->pmc_after != 0x3b", C)
+        self.assertNotIn("rf_after", C + D)
 
     def test_exclusive_stream_owner(self):
         self.assertIn("r->attempted || sample->event.attempted", D)

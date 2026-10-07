@@ -344,6 +344,42 @@ The error-report bit's meaning is not established: do not label it a CRC
 error or apply HISR bit definitions to it. Next investigate command framing,
 queue consumption and the factory SDIO transfer/error-report path.
 
+## Post-firmware hardware setup
+
+The optional command test now applies the factory HAL's post-firmware
+register sequence before issuing commands: enable appended PHY status,
+clear the command register's high byte, write PMC_FSM+2 to 0x3b, set the
+command register's low byte to 0xfc, clear TX pause, and select normal
+SDIO debug status. Access widths and order match the factory path and
+[Realtek's GPL HAL](https://github.com/ronangaillard/rtl8712-driver-src/blob/2237e98dacd8421b38beb2d1aad88aa2b9f79dd8/hal/rtl8712/hal_init.c).
+Stage and register readbacks are included in `command_result`.
+
+The factory then unmasks interrupts. The polling diagnostic deliberately
+does not: it has no general RX/C2H handler yet. This is not a claim that
+the complete factory runtime has been reproduced. The first test applied the writes but stopped before sending commands:
+an incorrect latch-style readback check was applied to PMC_FSM+2, which
+returned live status 0x71 after a 0x3b write. That assumption and its earlier
+RF-control label have been removed; the status remains reported. RCR and
+command-register readbacks matched. The revised test is not yet qualified.
+
+The factory firmware's command table and loopback handler were also traced.
+Its loopback event is explicitly 12 bytes, unlike the transformed structure
+described in the public header. A loopback stall alone is therefore not
+sufficient evidence that all normal firmware commands are broken.
+
+## Normal-command diagnostic
+
+Writing `opmode` to `command_test` instead of `loopback` requests
+infrastructure mode sixteen times, one request at a time. It does not scan,
+join a network, set keys or transmit test frames. Each request must produce
+the exact factory debug event (including its terminating NUL), while the
+C2H event sequence remains continuous. This observable handler trace is not
+a protocol-level command acknowledgement or evidence of working networking.
+
+The test shares the one-shot stream ownership and bounded waits with
+loopback. Reboot between actions. The image builds and offline tests pass;
+hardware qualification is pending.
+
 ## Remaining milestones
 
 - Qualify the warm chip initialization path and repeated power cycles.
