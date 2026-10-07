@@ -243,6 +243,47 @@ taint or failed services. This qualifies one first-sequence FIFO read, not
 continuous reception, C2H interrupt delivery or host-command responses.
 No host scan or association command was sent.
 
+## Host-command loopback test
+
+After a successful active-state acknowledgement, writing `loopback` to
+`command_test` runs a bounded command/event test. It cannot follow or precede
+`event_read` on the same binding: each operation owns the initial FIFO
+sequence. Reboot between tests.
+
+The test drains startup events, checks command queue space, then sends two
+differently tagged H2C loopback requests. Its descriptor selects the command queue;
+the SDIO transfer is explicitly byte-mode, padded to 512 bytes. This differs
+from firmware code upload. No scan, association or RF manufacturing command
+is issued.
+
+The vendor header describes a transformed 28-byte reply, but the tested
+factory firmware returned a prefix matching the command header and initial
+parameters instead. The first test correctly rejected that mismatch. The
+current test checks a proposed 12-byte echo format: exact command length,
+command code, sequence, reserved word and four parameter bytes, for both
+requests. One matching response has been observed; the second request times out.
+Event reads track a two-bit FIFO port sequence
+and a seven-bit event sequence. The consumed block count advances only to the
+pre-transfer snapshot, preserving events arriving during a read. Transfer sizes,
+batch counts and the two-second response wait are bounded.
+
+`command_result` reports whether a command was sent, whether its reply matched,
+stream counts, cleanup errors and limited private diagnostic bytes. A successful
+SDIO write alone is not a successful firmware command. The first test received 21 correctly sequenced events across six FIFO
+batches, including a loopback event, but did not pass its response-content
+check. This qualifies successive event reads, not an exact command round trip.
+
+The revised bundle (SHA256
+`83cd6149e7a60b2ce6f51b0058f620d80b26195d42949ecf669345ccf39dece4`)
+matched the first request's exact 12-byte echo, including sequence and tags.
+The second request was transmitted but timed out: `error=-110`, `cleanup=0`,
+`replies=1`, `reply_length=12`. Across the test, six FIFO batches contained
+21 correctly sequenced events (20 debug events and one loopback response).
+HISR changed from `04fe` to `05fe`; its additional flags remain unresolved.
+Kernel taint and failed-service counts remained zero. This establishes one
+correlated command response, **not a repeatable command channel**. No scan,
+association or wireless networking has been qualified.
+
 ## Remaining milestones
 
 - Qualify the warm chip initialization path and repeated power cycles.

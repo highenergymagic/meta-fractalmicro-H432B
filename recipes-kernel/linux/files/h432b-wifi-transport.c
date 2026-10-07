@@ -19,6 +19,7 @@
 #include "h432b-wifi-firmware.h"
 #include "h432b-wifi-irq.h"
 #include "h432b-wifi-events.h"
+#include "h432b-wifi-command.h"
 
 #define SAMPLE_BYTES 4
 
@@ -29,6 +30,7 @@ struct h432b_wifi_sample {
 	struct h432b_fw_result firmware;
 	struct h432b_ack_result ack;
 	struct h432b_event_result event;
+	struct h432b_command_result command;
 	int error;
 	int cleanup_error;
 	u8 before[SAMPLE_BYTES];
@@ -346,7 +348,7 @@ static ssize_t event_read_store(struct device *dev, struct device_attribute *att
 	if (!sysfs_streq(buf, "1"))
 		return -EINVAL;
 	mutex_lock(&sample->lock);
-	if (r->attempted) {
+	if (r->attempted || sample->command.attempted) {
 		error = -EALREADY;
 		goto out;
 	}
@@ -387,7 +389,64 @@ static ssize_t event_result_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(event_result);
 
+static ssize_t command_test_store(struct device *dev, struct device_attribute *attr,
+				  const char *buf, size_t count)
+{
+	struct sdio_func *func = dev_to_sdio_func(dev);
+	struct h432b_wifi_sample *sample = sdio_get_drvdata(func);
+	struct h432b_command_result *r = &sample->command;
+	int error;
+
+	if (!sysfs_streq(buf, "loopback"))
+		return -EINVAL;
+	mutex_lock(&sample->lock);
+	if (r->attempted || sample->event.attempted) {
+		error = -EALREADY;
+		goto out;
+	}
+	if (sample->firmware.stage != 12 || sample->firmware.error ||
+	    sample->firmware.cleanup || sample->power.warm ||
+	    !sample->ack.attempted || sample->ack.error || sample->ack.cleanup) {
+		error = -EAGAIN;
+		goto out;
+	}
+	r->attempted = true;
+	error = wifi_command_test(func, r, sample->firmware.c2h_base);
+	r->error = error;
+	if (!error)
+		error = r->cleanup;
+out:
+	mutex_unlock(&sample->lock);
+	return error ? error : count;
+}
+static DEVICE_ATTR_WO(command_test);
+
+static ssize_t command_result_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct h432b_wifi_sample *sample = sdio_get_drvdata(dev_to_sdio_func(dev));
+	struct h432b_command_result *r = &sample->command;
+	ssize_t size;
+
+	mutex_lock(&sample->lock);
+	if (!r->attempted)
+		size = sysfs_emit(buf, "idle\n");
+	else
+		size = sysfs_emit(buf,
+			"error=%d cleanup=%d sent=%d matched=%d replies=%u reply_length=%u batches=%u events=%u debug=%u bytes=%u consumed=%04x port_seq=%u event_seq=%u pages=%u,%u status=%04x,%04x reply=%*ph debug_head=%*ph\n",
+			r->error, r->cleanup, r->sent, r->matched, r->replies,
+			r->reply_length, r->batches,
+			r->events, r->debug_events, r->bytes, r->consumed,
+			r->port_seq, r->event_seq, r->public_pages, r->command_pages,
+			r->status_before, r->status_after, 28, r->reply, 32, r->debug_head);
+	mutex_unlock(&sample->lock);
+	return size;
+}
+static DEVICE_ATTR_RO(command_result);
+
 static struct attribute *h432b_wifi_attrs[] = {
+	&dev_attr_command_test.attr,
+	&dev_attr_command_result.attr,
 	&dev_attr_event_read.attr,
 	&dev_attr_event_result.attr,
 	&dev_attr_power_ack.attr,
