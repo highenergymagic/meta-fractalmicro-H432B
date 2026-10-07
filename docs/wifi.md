@@ -11,7 +11,7 @@ explicit disconnect/reconnect have also passed; see the
 
 The default runtime includes the driver. Systembase supplies `iw`,
 `wpa_supplicant`, `wpa_cli`, the signed regulatory database and
-`FMWiFi.service`. Compatible operator-supplied firmware is required.
+`FMWiFi.service`. Radio firmware is extracted from an operator-supplied stock CE image at build time.
 With it, startup initializes the radio and creates the interface automatically;
 without it, initialization is skipped. Building never accesses hardware.
 
@@ -69,9 +69,10 @@ embedded in the kernel or public systembase.
 ## Firmware and hardware
 
 The BSP does not contain, fetch or redistribute the factory Wi-Fi firmware.
-Obtain a compatible file independently and establish its provenance and usage
-rights. Linux requests `h432b/rtl8712s.bin`. The build launcher can package a
-digest-checked private input; see
+Supply the qualified stock `nk.bin` to the build launcher with `--stock-nk`.
+The launcher extracts the named ROM file inside its pinned container and
+verifies both stock-image and extracted-firmware hashes. Linux requests
+`h432b/rtl8712s.bin`. See the supported input digest and build commands in
 [openh432-build](https://github.com/highenergymagic/openh432-build).
 USB firmware compatibility has not been established.
 
