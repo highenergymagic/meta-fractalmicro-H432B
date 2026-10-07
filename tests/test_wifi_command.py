@@ -9,9 +9,16 @@ D = (ROOT / "h432b-wifi-transport.c").read_text()
 class WifiCommand(unittest.TestCase):
     def test_command_descriptor(self):
         for text in ("memset(packet, 0, 512)", "0x8c200028", "0x1300",
-                     "0x002c0020 | ((u32)seq << 24)", "packet + 40", "packet, 0, 512"):
+                     "0x002c0020 | ((u32)seq << 24)", "packet + 40", "packet, 1, 512"):
             self.assertIn(text, C)
         self.assertIn("mmc_io_rw_extended(func->card, 1, func->num, 0x18c80, 1", C)
+
+    def test_factory_cmd53_argument(self):
+        factory = (((0x18c80 | (1 << 19) | 0xffc60000) << 9) & 0xffffffff) | 1
+        linux = (1 << 31) | (1 << 28) | (1 << 27) | (1 << 26) | (0x18c80 << 9) | 1
+        self.assertEqual(factory, linux)
+        self.assertEqual(linux, 0x9f190001)
+        self.assertNotIn("  packet, 0, 512);", C)
 
     def test_sequence_and_consumed_count(self):
         for text in ("WIFI_C2H_FIFO | (r->port_seq & 3)",

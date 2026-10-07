@@ -252,8 +252,7 @@ sequence. Reboot between tests.
 
 The test drains startup events, checks command queue space, then sends two
 differently tagged H2C loopback requests. Its descriptor selects the command queue;
-the SDIO transfer is explicitly byte-mode, padded to 512 bytes. This differs
-from firmware code upload. No scan, association or RF manufacturing command
+the SDIO transfer is one incrementing 512-byte block-mode CMD53. No scan, association or RF manufacturing command
 is issued.
 
 The vendor header describes a transformed 28-byte reply, but the tested
@@ -283,6 +282,31 @@ HISR changed from `04fe` to `05fe`; its additional flags remain unresolved.
 Kernel taint and failed-service counts remained zero. This establishes one
 correlated command response, **not a repeatable command channel**. No scan,
 association or wireless networking has been qualified.
+
+## Factory command-transfer correction
+
+A deeper trace corrected the initial byte-mode interpretation. The factory
+interface embeds its callback table at offset 0x20: the H2C callback at
+interface offset 0x38 is therefore the block-write member at table offset
+0x18, not the byte-write member. Its final zero argument selects synchronous
+operation. For function 1 and FIFO address 0x18c80, the reconstructed CMD53
+argument is `0x9f190001`: write, block mode, incrementing address, one block.
+
+The implementation now explicitly requests one 512-byte block. Earlier
+command-test results above used byte mode and remain historical evidence,
+not qualification of the correction. Descriptor, payload and reply checks
+are unchanged.
+
+The corrected bundle (SHA256
+`3fe44b7b084ee31d87ce1f11a8dc16a31576f965cdb6c4f0a669f866398887dc`)
+was built and tested on the device. All five error-report snapshots now
+remain `00 00 00`, removing the earlier `08` report. The first exact echo
+still matches, but the second command still times out (`error=-110`,
+`cleanup=0`, one reply). RX remains zero, C2H stops at 21, command free
+pages fall from 203 to 202 to 201, and HISR ends at `05fe`. Kernel taint
+and failed-service counts remain zero. This validates removal of the
+observed transfer error, not a working repeated command channel. Command
+processing and queue consumption still need investigation.
 
 ## Queue/error snapshots
 

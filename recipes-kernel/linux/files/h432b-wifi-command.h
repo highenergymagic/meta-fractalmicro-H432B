@@ -3,7 +3,7 @@
  * Bounded RTL8712 H2C/C2H loopback qualification.
  * Loopback fields/protocol: Realtek GPL-2.0 rtl871x_cmd.h, commit
  * 2237e98dacd8421b38beb2d1aad88aa2b9f79dd8.
- * SDIO descriptor, FIFO and byte-mode command transport match the factory HAL.
+ * SDIO descriptor, FIFO and block-mode command transport match the factory HAL.
  */
 #include "sdio_ops.h"
 
@@ -229,11 +229,12 @@ static int wifi_command_test(struct sdio_func *func,
 		wifi_command_snapshot(func, r, r->command_seq * 2 - 1);
 		wifi_loopback_packet(packet, r->command_seq);
 		r->matched = false;
-		/* Factory H2C is one 512-byte, incrementing, BYTE-mode CMD53.
-		 * blocks=0 explicitly avoids the generic helper selecting block mode.
+		/* Factory H2C uses one 512-byte block, incrementing CMD53.
+		 * The interface callback at +0x38 is io_ops +0x18 (block write),
+		 * not +0x1c (byte write): intf_hdl embeds io_ops at +0x20.
 		 */
 		error = mmc_io_rw_extended(func->card, 1, func->num, 0x18c80, 1,
-					  packet, 0, 512);
+					  packet, 1, 512);
 		if (error)
 			goto out;
 		r->sent = true;
