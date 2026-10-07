@@ -4,7 +4,8 @@
  * Local window offset zero is TX_CTRL; offsets 1..3 are free-page counters.
  * Reference: Realtek rtl8712_sdio_regdef.h, vendor tree commit
  * 2237e98dacd8421b38beb2d1aad88aa2b9f79dd8.
- * Never access FIFO, interrupt status, efuse, firmware or RF registers here.
+ * Power initialization is a separate explicit one-shot action after sampling.
+ * No FIFO, IRQ handling, firmware download or network interface.
  */
 #include <linux/device.h>
 #include <linux/mmc/sdio.h>
@@ -14,11 +15,14 @@
 #include <linux/of.h>
 #include <linux/slab.h>
 
+#include "h432b-wifi-power.h"
+
 #define SAMPLE_BYTES 4
 
 struct h432b_wifi_sample {
 	struct mutex lock;
 	bool attempted;
+	struct h432b_power_result power;
 	int error;
 	int cleanup_error;
 	u8 before[SAMPLE_BYTES];
@@ -131,9 +135,79 @@ static ssize_t result_show(struct device *dev, struct device_attribute *attr,
 }
 static DEVICE_ATTR_RO(result);
 
+static ssize_t power_init_store(struct device *dev, struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct sdio_func *func = dev_to_sdio_func(dev);
+	struct h432b_wifi_sample *sample = sdio_get_drvdata(func);
+	struct h432b_power_result *r = &sample->power;
+	int error;
+	u8 ioex;
+	bool enable_attempted = false;
+
+	if (!sysfs_streq(buf, "1"))
+		return -EINVAL;
+	mutex_lock(&sample->lock);
+	if (r->attempted) {
+		mutex_unlock(&sample->lock);
+		return -EALREADY;
+	}
+	if (!sample->attempted || sample->error || sample->cleanup_error) {
+		mutex_unlock(&sample->lock);
+		return -EAGAIN;
+	}
+	r->attempted = true;
+	sdio_claim_host(func);
+	ioex = sdio_f0_readb(func, SDIO_CCCR_IOEx, &error);
+	if (error)
+		goto out;
+	if (!(ioex & BIT(func->num))) {
+		enable_attempted = true;
+		error = sdio_enable_func(func);
+		if (error)
+			goto out;
+	}
+	error = wifi_power_sequence(func, r);
+out:
+	if (enable_attempted)
+		r->cleanup = sdio_disable_func(func);
+	sdio_release_host(func);
+	r->error = error;
+	dev_info(dev, "power test: error=%d cleanup=%d warm=%d step=%u\n",
+		 r->error, r->cleanup, r->warm, r->step);
+	mutex_unlock(&sample->lock);
+	/* Register changes persist; no unsupported rollback sequence is attempted. */
+	return error ? error : r->cleanup ? r->cleanup : count;
+}
+static DEVICE_ATTR_WO(power_init);
+
+static ssize_t power_result_show(struct device *dev, struct device_attribute *attr,
+				  char *buf)
+{
+	struct h432b_wifi_sample *sample = sdio_get_drvdata(dev_to_sdio_func(dev));
+	struct h432b_power_result *r = &sample->power;
+	ssize_t size;
+
+	mutex_lock(&sample->lock);
+	if (!r->attempted)
+		size = sysfs_emit(buf, "idle\n");
+	else
+		size = sysfs_emit(buf,
+			"error=%d cleanup=%d warm=%d step=%u before=%04x,%04x,%04x after=%04x,%04x,%04x command=%04x verify=%04x\n",
+			r->error, r->cleanup, r->warm, r->step,
+			r->before[0], r->before[1], r->before[2],
+			r->after[0], r->after[1], r->after[2],
+			r->command, r->verify);
+	mutex_unlock(&sample->lock);
+	return size;
+}
+static DEVICE_ATTR_RO(power_result);
+
 static struct attribute *h432b_wifi_attrs[] = {
 	&dev_attr_sample.attr,
 	&dev_attr_result.attr,
+	&dev_attr_power_init.attr,
+	&dev_attr_power_result.attr,
 	NULL,
 };
 static const struct attribute_group h432b_wifi_group = {

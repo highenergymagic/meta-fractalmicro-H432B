@@ -80,9 +80,45 @@ the local register window. It does not qualify block-mode FIFO access,
 interrupts, firmware startup or any network operation. A successful restore
 API return is not an independent electrical measurement of power state.
 
+## Explicit chip power initialization
+
+The optional test kernel also exposes root-write-only `power_init` and
+read-only `power_result` attributes. A successful transport sample is required
+first. Writing `1` runs one attempt per binding; it never runs automatically.
+
+The implementation selects the factory warm/cold path from PLL, crystal and
+clock register values, then initializes the chip's power and clock domains.
+Delay values are in microseconds, with Linux sleep-range slack. It stops at
+the first transfer error and bounds the warm-path polling loop. Final command
+and scratch-register readbacks check that MAC register access responds.
+
+This changes volatile chip registers, including the factory power-path bit
+in EFUSE_TEST; it does not issue an efuse-programming command. It does not
+load firmware, handle interrupts, send packets or create a network interface.
+Function-enable cleanup is reported separately. **Chip register changes are
+not rolled back**; reboot after the experiment. Do not confuse successful
+bus cleanup with restored chip power state.
+
+The register sequence is reconstructed for this board. Byte accesses currently
+use Linux CMD52, while word/dword accesses use CMD53. The factory implementation
+uses CMD53 for its translated register accesses; the prototype is therefore
+not an instruction- or bus-transaction-exact clone.
+
+The cold power path passed on hardware with bundle SHA256
+`161ca0963c6c1cd051ec41b82935c308e25f3cd6621bb9fbc1629a4dedb5705c`.
+Transfer and function-enable cleanup errors were both zero. PLL/crystal/clock
+readbacks changed from `6900/ff0e/70a4` to `6911/fb8f/b8a0`; command
+and scratch readbacks were `3fff` and `5678`. The duplicate request was
+rejected, kernel taint remained zero, and no systemd units failed.
+
+This qualifies the implemented cold path, including its CMD52 byte accesses.
+The warm path is implemented but untested. Neither result establishes
+firmware readiness, interrupt delivery or wireless connectivity.
+
 ## Remaining milestones
 
-- Recover or implement chip-specific SDIO initialization and firmware loading.
+- Implement and qualify SDIO firmware loading; the cold power path is qualified.
+- Qualify the warm chip initialization path and repeated power cycles.
 - Qualify interrupt acknowledgement and block-mode FIFO transfers.
 - Integrate a maintained wireless userspace interface, then scan and association.
 - Validate security capabilities, regulatory behavior, RT locking and power saving.

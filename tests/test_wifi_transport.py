@@ -40,8 +40,8 @@ class WifiTransport(unittest.TestCase):
         self.assertIn("sdio_set_block_size(func, saved_blksize)", SOURCE)
         self.assertIn("if (enable_attempted)", SOURCE)
         self.assertIn("sdio_disable_func(func)", SOURCE)
-        self.assertEqual(SOURCE.count("sdio_claim_host(func)"), 1)
-        self.assertEqual(SOURCE.count("sdio_release_host(func)"), 1)
+        self.assertEqual(SOURCE.count("sdio_claim_host(func)"), 2)
+        self.assertEqual(SOURCE.count("sdio_release_host(func)"), 2)
         self.assertIn("sample->cleanup_error = cleanup", SOURCE)
 
     def test_remove_drains_sysfs_before_managed_free(self):
