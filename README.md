@@ -70,6 +70,7 @@ The loader firmware itself remains in this BSP layer.
 - [NAND support](docs/nand.md): storage layout, protection boundaries and validation.
 - [Internal SD](docs/internal-sd.md): controller identity, read-only baseline and opt-in write testing.
 - [External SD](docs/external-sd.md): removable-slot configuration and read-only qualification.
+- [Internal Wi-Fi](docs/wifi.md): SDIO identity, source investigation and transport qualification.
 - [GPS receiver](docs/gps.md): UART mapping, shared runtime power control and assistance qualification.
 - [Fastboot support](docs/fastboot.md): RAM download and boot workflow.
 - [Boot performance](docs/boot-performance.md): measured bottlenecks and profiling limits.

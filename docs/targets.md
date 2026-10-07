@@ -30,6 +30,7 @@ These targets are deliberately separate from normal deployment:
 
 | Kernel suffix / matching OS image suffix | Reason retained |
 | --- | --- |
+| `wifi-test` | Explicit RTL8712 CMD52/CMD53 transport qualification; not a network driver. |
 | `power-test` | Read-only-storage PMIC bus inspection baseline. |
 | `battery-test` | Battery telemetry driver not yet integrated into the runtime. |
 | `input-test` | Key, switch and vibration qualification. |

@@ -1,0 +1,7 @@
+Subject: Add opt-in H432B SDIO transport qualification
+Upstream-Status: Inappropriate [board transport qualification]
+
+--- a/drivers/mmc/core/Makefile
++++ b/drivers/mmc/core/Makefile
+@@ -1,0 +2,1 @@
++obj-y += h432b-wifi-transport.o
