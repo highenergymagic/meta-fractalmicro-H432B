@@ -686,3 +686,19 @@ standard supplicant association, DHCP and five successful Internet pings.
 The regulatory domain remained NZ, driver faults and kernel taint were zero,
 and systemd reported no failed units. The private profile was provisioned
 again after reboot because the development writable overlay is volatile.
+
+
+## Published checkpoint completion
+
+The extended test completed 60 interface-bound Internet pings with no packet
+loss, service faults, CCMP integrity errors, TX failures or kernel taint.
+The final public source rebuild produced the same kernel bytes as the
+qualified NAND image above.
+
+A subsequent build using pinned public Git revisions, without local-layer
+overrides, completed all 3,199 tasks. Its kernel bundle and separate systembase
+both matched the above installed artifact hashes byte-for-byte. This used the
+same host, existing caches and the same operator-supplied firmware; it does
+not establish a new clean-cache or cross-host reproducibility result.
+The source checkpoint is recorded in the
+[build validation status](https://github.com/highenergymagic/openh432-build/blob/main/docs/status.md#wi-fi-checkpoint-2026-10-07).
