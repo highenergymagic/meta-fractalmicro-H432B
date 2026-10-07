@@ -20,6 +20,12 @@ SRC_URI = "https://www.kernel.org/pub/linux/kernel/projects/cip/6.12/linux-cip-6
 SRC_URI[kernel.sha256sum] = "879b45f18c1bd8322b2026f72642faedcb77242418cb10a5aa56f5404f647059"
 SRC_URI[rt.sha256sum] = "8b9b7b59f0372e1e70b5fd99729765d335928ef0a0196fb1e869afc45fc69b55"
 inherit kernel h432b-build-identity
+# Keep the legacy RAM kernel buildable beside the normal runtime provider.
+H432B_KERNEL_PROVIDER_REMOVE ?= "virtual/kernel"
+PROVIDES:remove = "${H432B_KERNEL_PROVIDER_REMOVE}"
+KERNEL_PACKAGE_NAME = "kernel-legacy"
+# Preserve legacy bundle paths; derived diagnostic kernels remain isolated.
+KERNEL_DEPLOYSUBDIR = "${@'' if d.getVar('PN') == 'linux-h432b' else d.getVar('KERNEL_PACKAGE_NAME')}"
 # Override kernel.bbclass after inheritance so do_symlink_kernsrc moves the
 # actual unpacked tree into the shared kernel source before patching.
 S = "${UNPACKDIR}/linux-cip-6.12.111-cip32"
