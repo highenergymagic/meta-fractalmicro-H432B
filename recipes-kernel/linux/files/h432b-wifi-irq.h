@@ -43,7 +43,7 @@ static void wifi_ack_irq(struct sdio_func *func, struct h432b_ack_result *r)
 	sdio_writew(func, 0, WIFI_HIMR, &mask_error);
 	r->status = sdio_readw(func, WIFI_HISR, &error);
 	if (!error)
-		r->reply = sdio_readb(func, WIFI_HCPWM, &error);
+		r->reply = wifi_sdio_readb(func, WIFI_HCPWM, &error);
 	if (!r->irq_error)
 		r->irq_error = mask_error ? mask_error : error;
 	complete(&r->done);
@@ -84,11 +84,11 @@ static int wifi_ack_test(struct sdio_func *func, struct h432b_ack_result *r,
 	sdio_writew(func, 0, WIFI_HIMR, &error);
 	if (error)
 		goto out;
-	r->old_request = sdio_readb(func, WIFI_HRPWM, &error);
+	r->old_request = wifi_sdio_readb(func, WIFI_HRPWM, &error);
 	if (error)
 		goto out;
 	/* Drain any old acknowledgement before requesting a new toggle. */
-	r->before = sdio_readb(func, WIFI_HCPWM, &error);
+	r->before = wifi_sdio_readb(func, WIFI_HCPWM, &error);
 	if (error)
 		goto out;
 	r->request = ((r->old_request ^ BIT(7)) & BIT(7)) | BIT(6) | 0x0c;
@@ -107,7 +107,7 @@ static int wifi_ack_test(struct sdio_func *func, struct h432b_ack_result *r,
 		error = -EIO;
 		goto out;
 	}
-	sdio_writeb(func, r->request, WIFI_HRPWM, &error);
+	wifi_sdio_writeb(func, r->request, WIFI_HRPWM, &error);
 	if (error)
 		goto out;
 	/* The IRQ thread needs the host: never wait while holding it. */
@@ -136,7 +136,7 @@ out:
 		r->final_status = sdio_readw(func, WIFI_HISR, &restore);
 		if (!r->cleanup)
 			r->cleanup = restore;
-		r->final_reply = sdio_readb(func, WIFI_HCPWM, &restore);
+		r->final_reply = wifi_sdio_readb(func, WIFI_HCPWM, &restore);
 		if (!r->cleanup)
 			r->cleanup = restore;
 		sdio_writew(func, r->saved_mask, WIFI_HIMR, &restore);

@@ -10,6 +10,8 @@
 #include <linux/mmc/host.h>
 #include <linux/unaligned.h>
 
+#include "sdio_ops.h"
+
 #define WIFI_FW_NAME "h432b/rtl8712s.bin"
 #define WIFI_FW_CHUNK 49152
 #define WIFI_FW_PACKET ALIGN(WIFI_FW_CHUNK + 32, 512)
@@ -71,7 +73,8 @@ static int wifi_fw_section(struct sdio_func *func, struct h432b_fw_result *r,
 		 * Factory CMD53 has WRITE, BLOCK_MODE and INCREMENT all set.
 		 * Each firmware packet starts at the same FIFO address.
 		 */
-		error = sdio_memcpy_toio(func, WIFI_FW_FIFO, packet, transfer);
+		error = mmc_io_rw_extended(func->card, 1, func->num,
+					  WIFI_FW_FIFO, 1, packet, transfer / 512, 512);
 		if (error)
 			return error;
 		r->bytes += length;

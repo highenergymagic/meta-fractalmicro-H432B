@@ -21,7 +21,9 @@ class WifiFirmware(unittest.TestCase):
         self.assertIn("transfer = ALIGN(length + 32, 512)", FW)
         self.assertIn("memset(packet, 0, transfer)", FW)
         self.assertIn("length == remaining ? BIT(28) : 0", FW)
-        self.assertIn("sdio_memcpy_toio(func, WIFI_FW_FIFO, packet, transfer)", FW)
+        self.assertIn("mmc_io_rw_extended(func->card, 1, func->num", FW)
+        self.assertIn("WIFI_FW_FIFO, 1, packet, transfer / 512, 512", FW)
+        self.assertNotIn("sdio_memcpy_toio(func, WIFI_FW_FIFO", FW)
         self.assertNotIn("sdio_writesb", FW)
         self.assertIn("host->max_blk_count < WIFI_FW_PACKET / 512", FW)
 

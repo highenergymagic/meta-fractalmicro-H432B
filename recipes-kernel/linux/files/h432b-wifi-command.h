@@ -51,18 +51,18 @@ static void wifi_command_snapshot(struct sdio_func *func,
 	s->c2h_blocks = sdio_readw(func, WIFI_C2H_COUNT, &s->error);
 	if (s->error)
 		return;
-	s->tx_ctrl = sdio_readb(func, 0, &s->error);
+	s->tx_ctrl = wifi_sdio_readb(func, 0, &s->error);
 	if (s->error)
 		return;
-	s->public_pages = sdio_readb(func, 1, &s->error);
+	s->public_pages = wifi_sdio_readb(func, 1, &s->error);
 	if (s->error)
 		return;
-	s->command_pages = sdio_readb(func, 3, &s->error);
+	s->command_pages = wifi_sdio_readb(func, 3, &s->error);
 	if (s->error)
 		return;
 	/* Vendor SDIOERR_RPT, CMD_ERRCNT, DATA_ERRCNT; no clear write. */
 	for (i = 0; i < ARRAY_SIZE(s->errors); i++) {
-		s->errors[i] = sdio_readb(func, 0xc0 + i, &s->error);
+		s->errors[i] = wifi_sdio_readb(func, 0xc0 + i, &s->error);
 		if (s->error)
 			return;
 	}
@@ -106,7 +106,7 @@ static int wifi_command_mac_init(struct sdio_func *func,
 	if (error)
 		return error;
 	r->mac_stage = 6;
-	sdio_writeb(func, 0, 0xff, &error);
+	wifi_sdio_writeb(func, 0, 0xff, &error);
 	if (error)
 		return error;
 	r->mac_after[0] = wifi_read(func, 4, 0x48, &error);
@@ -121,7 +121,7 @@ static int wifi_command_mac_init(struct sdio_func *func,
 	r->pause_after = wifi_read(func, 1, 0x42, &error);
 	if (error)
 		return error;
-	r->debug_after = sdio_readb(func, 0xff, &error);
+	r->debug_after = wifi_sdio_readb(func, 0xff, &error);
 	if (error)
 		return error;
 	if (!(r->mac_after[0] & BIT(25)) ||
@@ -348,10 +348,10 @@ static int wifi_command_test(struct sdio_func *func,
 	}
 	commands = r->survey ? 3 : (r->opmode ? 16 : 2);
 	for (r->command_seq = 1; r->command_seq <= commands; r->command_seq++) {
-		r->public_pages = sdio_readb(func, 1, &error);
+		r->public_pages = wifi_sdio_readb(func, 1, &error);
 		if (error)
 			goto out;
-		r->command_pages = sdio_readb(func, 3, &error);
+		r->command_pages = wifi_sdio_readb(func, 3, &error);
 		if (error)
 			goto out;
 		if (r->command_pages < r->public_pages ||

@@ -98,6 +98,16 @@ class WifiCommand(unittest.TestCase):
         self.assertIn('sysfs_streq(buf, "survey")', D)
         self.assertIn("survey_done=%d", D)
 
+    def test_function_register_bus_contract(self):
+        import re
+        for name in ("power", "firmware", "irq", "events", "command"):
+            source = (ROOT / ("h432b-wifi-" + name + ".h")).read_text()
+            self.assertIsNone(re.search(r"(?<![a-z_])sdio_(?:readb|writeb)[(]", source))
+            self.assertNotIn("wifi_wifi_", source)
+        power = (ROOT / "h432b-wifi-power.h").read_text()
+        self.assertIn("func->tmpbuf", power)
+        self.assertIn("sdio_f0_readb", (ROOT / "h432b-wifi-firmware.h").read_text())
+
     def test_exclusive_stream_owner(self):
         self.assertIn("r->attempted || sample->event.attempted", D)
         self.assertIn("r->attempted || sample->command.attempted", D)

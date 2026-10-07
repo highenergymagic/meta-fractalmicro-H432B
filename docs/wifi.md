@@ -99,10 +99,12 @@ Function-enable cleanup is reported separately. **Chip register changes are
 not rolled back**; reboot after the experiment. Do not confuse successful
 bus cleanup with restored chip power state.
 
-The register sequence is reconstructed for this board. Byte accesses currently
-use Linux CMD52, while word/dword accesses use CMD53. The factory implementation
-uses CMD53 for its translated register accesses; the prototype is therefore
-not an instruction- or bus-transaction-exact clone.
+The register sequence is reconstructed for this board. Function-register
+accesses now use CMD53 at every width, including one-byte transfers. Standard
+function-zero CCCR operations retain the SDIO core APIs. FIFO transfers explicitly
+select block mode, including a single 512-byte block. The historical results
+below identify which earlier implementation was tested; they do not automatically
+qualify later transport changes.
 
 The cold power path passed on hardware with bundle SHA256
 `161ca0963c6c1cd051ec41b82935c308e25f3cd6621bb9fbc1629a4dedb5705c`.
@@ -415,12 +417,31 @@ firmware survey path, not association or data transmission. The unexplained
 `08` error-report value appeared during this successful run too; it must
 not be treated as sufficient evidence of a fatal command-channel fault.
 
+A second fresh boot repeated the passive survey successfully: six validated
+reports and a matching completion count, zero transfer/cleanup errors, no kernel
+taint and no failed services. All five sampled error reports were zero. Ambient
+network counts are not expected to remain constant between scans.
+
+## CE-matched SDIO transfer qualification
+
+Bundle SHA256
+`9ac8bb5c78795eb0571920c32613c6077afa71f8be5233e5b2597076d565e74f`
+uses CMD53 for one-byte function registers and explicit block mode for every
+FIFO transfer, including the final firmware configuration packet. Separate
+fresh boots passed sixteen exact normal-command responses and a passive survey
+with three validated reports and matching completion count. Firmware startup,
+native CPWM acknowledgement and MAC setup passed in both runs, with no transfer
+or cleanup errors, kernel taint or failed services. The unexplained `08` report
+appeared in the successful survey; the normal-command run's sampled reports
+were zero. This change does not resolve that report's meaning.
+
 ## Remaining milestones
 
 - Qualify the warm chip initialization path and repeated power cycles.
 - Resolve additional status flags; qualify subsequent C2H sequences and event interrupts.
-- Implement host-command round trips and RX packet handling.
-- Integrate a maintained wireless userspace interface, then scan and association.
+- Extend the qualified command subset and implement RX packet handling.
+- Integrate a maintained wireless userspace interface, then qualify association
+  and data transmission.
 - Validate security capabilities, regulatory behavior, RT locking and power saving.
 
 The source-contract tests are offline checks. They do not emulate the device

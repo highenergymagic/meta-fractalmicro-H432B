@@ -8,6 +8,31 @@
  */
 #include <linux/delay.h>
 
+/*
+ * Factory function-register access uses incrementing byte-mode CMD53,
+ * including single bytes. CCCR/FBR still use the standard function-0 API.
+ * Host held; func->tmpbuf is the core's DMA-safe small-transfer buffer.
+ */
+static u8 wifi_sdio_readb(struct sdio_func *func, unsigned int address, int *error)
+{
+	int ret = sdio_memcpy_fromio(func, func->tmpbuf, address, 1);
+
+	if (error)
+		*error = ret;
+	return ret ? 0xff : func->tmpbuf[0];
+}
+
+static void wifi_sdio_writeb(struct sdio_func *func, u8 value,
+			     unsigned int address, int *error)
+{
+	int ret;
+
+	func->tmpbuf[0] = value;
+	ret = sdio_memcpy_toio(func, address, func->tmpbuf, 1);
+	if (error)
+		*error = ret;
+}
+
 struct h432b_power_result {
 	bool attempted;
 	bool warm;
@@ -25,7 +50,7 @@ static u32 wifi_read(struct sdio_func *func, unsigned int width,
 		     unsigned int offset, int *error)
 {
 	if (width == 1)
-		return sdio_readb(func, 0x8000 | offset, error);
+		return wifi_sdio_readb(func, 0x8000 | offset, error);
 	if (width == 2)
 		return sdio_readw(func, 0x8000 | offset, error);
 	return sdio_readl(func, 0x8000 | offset, error);
@@ -35,7 +60,7 @@ static void wifi_write(struct sdio_func *func, unsigned int width,
 		       unsigned int offset, u32 value, int *error)
 {
 	if (width == 1)
-		sdio_writeb(func, value, 0x8000 | offset, error);
+		wifi_sdio_writeb(func, value, 0x8000 | offset, error);
 	else if (width == 2)
 		sdio_writew(func, value, 0x8000 | offset, error);
 	else
@@ -187,7 +212,7 @@ static int wifi_power_sequence(struct sdio_func *func,
 		return error;
 	r->step++;
 	/* Local-window HRPWM; do not translate it into the WLAN window. */
-	sdio_writeb(func, 0, 0x80, &error);
+	wifi_sdio_writeb(func, 0, 0x80, &error);
 	if (error)
 		return error;
 	error = wifi_signature(func, r->after);
