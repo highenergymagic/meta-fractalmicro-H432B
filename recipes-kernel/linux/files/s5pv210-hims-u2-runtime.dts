@@ -2,6 +2,7 @@
 /* Normal runtime: Linux UBI and internal SD writable. Factory/BBT protected. */
 #include "s5pv210-hims-u2-reboot-test.dts"
 #include "s5pv210-hims-u2-pmic-bus.dtsi"
+#include "s5pv210-hims-u2-bluetooth.dtsi"
 
 &{/nand@b0e00000} {
     hims,write-window = <0x00400000 0x1fb00000>;

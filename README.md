@@ -48,6 +48,11 @@ available through explicit diagnostic profiles.
 
 Important work remains:
 
+- Internal Bluetooth has passed discovery, pairing and L2CAP packet exchange
+  with a speaker using the NAND runtime and manual factory initialization.
+  Automatic initialization, persistent identity provisioning and audio playback
+  remain unfinished. See the [Bluetooth guide](docs/bluetooth.md).
+
 - Internal Wi-Fi has a NAND-integrated cfg80211 station driver. WPA2-PSK/CCMP,
   DHCP, checksum-verified bidirectional transfers and reconnect have passed. Operator-supplied
   firmware is required; throughput, warm restart and power saving remain
@@ -73,6 +78,7 @@ The loader firmware itself remains in this BSP layer.
 - [NAND support](docs/nand.md): storage layout, protection boundaries and validation.
 - [Internal SD](docs/internal-sd.md): controller identity, read-only baseline and opt-in write testing.
 - [External SD](docs/external-sd.md): removable-slot configuration and read-only qualification.
+- [Internal Bluetooth](docs/bluetooth.md): transport, tested scope and initialization gaps.
 - [Internal Wi-Fi](docs/wifi.md): current support, firmware requirements and optional diagnostics.
 - [Wi-Fi qualification](docs/wifi-qualification.md): tested images, results and unresolved behavior.
 - [Tests](tests/README.md): offline checks versus explicit device qualification.

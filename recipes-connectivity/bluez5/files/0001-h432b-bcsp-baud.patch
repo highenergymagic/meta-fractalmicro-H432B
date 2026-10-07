@@ -1,0 +1,61 @@
+Subject: [PATCH] hciattach: support H432B factory 1382400 baud BCSP
+
+Upstream-Status: Inappropriate [board-specific nonstandard rate]
+
+--- a/tools/hciattach.c
++++ b/tools/hciattach.c
+@@ -75,8 +75,14 @@
+ 	exit(1);
+ }
+
++int h432b_set_custom_baud(int fd, unsigned int rate);
++
+ int set_speed(int fd, struct termios *ti, int speed)
+ {
++	/* The factory H432B CSR transport uses a nonstandard UART rate. */
++	int custom = speed == 1382400;
++	if (custom)
++		speed = 38400;
+ 	if (cfsetospeed(ti, tty_get_speed(speed)) < 0)
+ 		return -errno;
+
+@@ -86,7 +92,7 @@
+ 	if (tcsetattr(fd, TCSANOW, ti) < 0)
+ 		return -errno;
+
+-	return 0;
++	return custom ? h432b_set_custom_baud(fd, 1382400) : 0;
+ }
+
+ /*
+@@ -339,16 +345,10 @@
+ 	struct sigaction sa;
+ 	int len;
+
++	ti->c_cflag |= PARENB;
++	ti->c_cflag &= ~PARODD;
+ 	if (set_speed(fd, ti, u->speed) < 0) {
+-		perror("Can't set default baud rate");
+-		return -1;
+-	}
+-
+-	ti->c_cflag |= PARENB;
+-	ti->c_cflag &= ~(PARODD);
+-
+-	if (tcsetattr(fd, TCSANOW, ti) < 0) {
+-		perror("Can't set port settings");
++		perror("Can't set BCSP port settings");
+ 		return -1;
+ 	}
+
+--- a/Makefile.tools
++++ b/Makefile.tools
+@@ -417,7 +417,7 @@
+ bin_PROGRAMS += tools/hciattach tools/hciconfig tools/hcitool tools/hcidump \
+ 			tools/rfcomm tools/sdptool tools/ciptool
+
+-tools_hciattach_SOURCES = tools/hciattach.c tools/hciattach.h \
++tools_hciattach_SOURCES = tools/hciattach.c tools/hciattach.h tools/hciattach_h432b.c \
+ 						tools/hciattach_st.c \
+ 						tools/hciattach_ti.c \
+ 						tools/hciattach_tialt.c \
