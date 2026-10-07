@@ -48,11 +48,11 @@ available through explicit diagnostic profiles.
 
 Important work remains:
 
-- Internal Wi-Fi firmware startup, native SDIO notifications, normal commands
-  and passive scanning are qualified in the optional test kernel. There is no
-  Linux wireless network interface yet; association and data traffic remain
-  unsupported. Firmware redistribution and redundant interrupt handling are
-  unresolved. See the [Wi-Fi qualification guide](docs/wifi.md).
+- Internal Wi-Fi has a NAND-integrated cfg80211 station driver. WPA2-PSK/CCMP,
+  DHCP, checksum-verified bidirectional transfers and reconnect have passed. Operator-supplied
+  firmware is required; throughput, warm restart and power saving remain
+  development work. See the [Wi-Fi guide](docs/wifi.md) for the supported
+  profile and exact qualification scope.
 - Linux braille, keyboard, battery management and suspend support are incomplete.
 - The normal kernel uses a minimal initramfs to mount the separate NAND
   SquashFS systembase. Writable state is volatile; persistent userdata and

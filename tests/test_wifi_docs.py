@@ -27,7 +27,8 @@ class WifiDocumentation(unittest.TestCase):
         self.assertNotIn("SHA256", GUIDE)
 
     def test_limitations_remain_explicit(self):
-        for phrase in ("no `wlan0`", "empty wakeups",
+        for phrase in ("PMF", "not implemented", "empty work invocations",
+                       "fixed 1 Mb/s", "volatile writable overlay",
                        "does not contain, fetch or redistribute",
                        "do not emulate the radio",
                        "mutually exclusive"):

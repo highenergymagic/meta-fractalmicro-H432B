@@ -6,6 +6,7 @@
  * SDIO descriptor, FIFO and block-mode command transport match the factory HAL.
  */
 #include "sdio_ops.h"
+#include "h432b-wifi-rx.h"
 
 /* Non-atomic, ordered snapshots; reads do not acknowledge or drain RX. */
 struct h432b_command_snapshot {
@@ -17,6 +18,12 @@ struct h432b_command_snapshot {
 struct h432b_command_result {
 	bool attempted, sent, matched, opmode, survey, scanning, survey_done;
 	bool irq_mode, irq_native, stress, survey_repeat;
+	bool persistent, stream_started, cancelled, irq_owned;
+	struct h432b_rx_result rx;
+	u8 next_command, survey_channels[32], survey_nchannels;
+	int (*report_bss)(void *context, const u8 *bss, unsigned int length);
+	void *report_context;
+	int (*report_event)(void *context, u8 code, const u8 *data, unsigned int size);
 	unsigned int commands_done, survey_runs, survey_total;
 	struct completion irq_done;
 	unsigned int irq_callbacks, irq_empty;
@@ -44,9 +51,12 @@ static void wifi_command_irq(struct sdio_func *func,
 	int error = 0, mask_error;
 
 	r->irq_callbacks++;
-	/* One-shot masking prevents an unserviced source from spinning the host. */
-	sdio_writew(func, 0, WIFI_HIMR, &mask_error);
+	/* Match the factory ordering: sample HISR while its mask is enabled,
+	 * then mask before handing ownership to the queue consumer. The host
+	 * is held, so this callback cannot reenter between these operations.
+	 */
 	r->irq_status = sdio_readw(func, WIFI_HISR, &error);
+	sdio_writew(func, 0, WIFI_HIMR, &mask_error);
 	if (!r->irq_error)
 		r->irq_error = mask_error ? mask_error : error;
 	complete(&r->irq_done);
@@ -57,10 +67,16 @@ static int wifi_command_arm(struct sdio_func *func,
 			    struct h432b_command_result *r)
 {
 	int error = 0;
+	u16 mask = BIT(1) | (r->irq_owned ? BIT(0) : 0), actual;
 
+	if (READ_ONCE(r->cancelled))
+		return -ECANCELED;
 	reinit_completion(&r->irq_done);
-	sdio_writew(func, BIT(1), WIFI_HIMR, &error);
-	return error;
+	sdio_writew(func, mask, WIFI_HIMR, &error);
+	if (error)
+		return error;
+	actual = sdio_readw(func, WIFI_HIMR, &error);
+	return error ? error : (actual == mask ? 0 : -EIO);
 }
 
 /* Host held on entry/exit; no polling fallback on interrupt timeout. */
@@ -70,17 +86,21 @@ static int wifi_command_wait(struct sdio_func *func,
 {
 	unsigned long completed, remaining;
 
+	if (READ_ONCE(r->cancelled))
+		return -ECANCELED;
 	remaining = deadline - jiffies;
 	if (time_after_eq(jiffies, deadline))
 		return -ETIMEDOUT;
 	sdio_release_host(func);
 	completed = wait_for_completion_timeout(&r->irq_done, remaining);
 	sdio_claim_host(func);
+	if (READ_ONCE(r->cancelled))
+		return -ECANCELED;
 	if (!completed)
 		return -ETIMEDOUT;
 	if (r->irq_error)
 		return r->irq_error;
-	return r->irq_status & BIT(1) ? 0 : -EPROTO;
+	return r->irq_status & (BIT(1) | (r->irq_owned ? BIT(0) : 0)) ? 0 : -EPROTO;
 }
 
 /* Host held. Keep failures visible separately from the command result. */
@@ -213,7 +233,8 @@ static void wifi_opmode_packet(u8 *packet, u8 seq)
 	packet[40] = 1; /* infrastructure mode; no scan or association */
 }
 
-static void wifi_survey_packet(u8 *packet, u8 seq)
+static void wifi_survey_packet(u8 *packet, u8 seq,
+			       const u8 *channels, u8 count)
 {
 	u8 *p = packet + 40;
 
@@ -225,8 +246,13 @@ static void wifi_survey_packet(u8 *packet, u8 seq)
 	put_unaligned_le32(48, p + 4);
 	/* Packed DriverCtrl begins at 46, not 48. No timeout override. */
 	p[50] = 1;
-	p[51] = 1; p[52] = 6; p[53] = 11;
-	p[83] = 3;
+	if (count) {
+		memcpy(p + 51, channels, count);
+		p[83] = count;
+	} else {
+		p[51] = 1; p[52] = 6; p[53] = 11;
+		p[83] = 3;
+	}
 }
 
 /* Factory firmware reply observed on hardware: command header + four bytes.
@@ -258,7 +284,7 @@ static int wifi_command_drain(struct sdio_func *func,
 	pending = (u16)(count - r->consumed);
 	if (!pending)
 		return 0;
-	if (pending > WIFI_EVENT_MAX / 512 || r->batches >= (r->stress ? 512 : (r->survey ? 256 : 64)))
+	if (pending > WIFI_EVENT_MAX / 512 || (!r->irq_owned && r->batches >= (r->stress ? 512 : (r->survey ? 256 : 64))))
 		return -EOVERFLOW;
 	/* Factory FIFO reads use block mode even for exactly one block. */
 	error = mmc_io_rw_extended(func->card, 0, func->num,
@@ -282,6 +308,11 @@ static int wifi_command_drain(struct sdio_func *func,
 			return -EILSEQ;
 		r->event_seq = (r->event_seq + 1) & 0x7f;
 		r->events++;
+		if (r->report_event) {
+			error = r->report_event(r->report_context, code, data + offset + 32, length);
+			if (error)
+				return error;
+		}
 		if (code == 19) {
 			r->debug_events++;
 			memset(r->debug_head, 0, sizeof(r->debug_head));
@@ -308,6 +339,11 @@ static int wifi_command_drain(struct sdio_func *func,
 			    get_unaligned_le32(bss + 112) > length - 116 ||
 			    r->survey_events >= 64 || r->survey_done)
 				return -EBADMSG;
+			if (r->report_bss) {
+				error = r->report_bss(r->report_context, bss, length);
+				if (error)
+					return error;
+			}
 			r->survey_events++;
 		}
 		if (r->scanning && code == 9) {
@@ -343,21 +379,32 @@ static int wifi_command_test(struct sdio_func *func,
 {
 	struct mmc_host *host = func->card->host;
 	unsigned int saved = func->cur_blksize, i, commands, tries, command;
+	u8 first_command = r->persistent && r->stream_started ? r->next_command : 1;
 	bool enabled = false, blocks = false, irq_attempted = false;
 	unsigned long deadline;
 	u8 *data, *packet, ioex;
 	int error = 0, restore, drain;
 	u16 mask;
 
+	if (r->survey_nchannels > ARRAY_SIZE(r->survey_channels))
+		return -EINVAL;
+	if (READ_ONCE(r->cancelled))
+		return -ECANCELED;
 	if (!saved || host->max_blk_count < WIFI_EVENT_MAX / 512 ||
 	    host->max_req_size < WIFI_EVENT_MAX || host->max_seg_size < WIFI_EVENT_MAX)
 		return -EOPNOTSUPP;
-	data = kzalloc(WIFI_EVENT_MAX + 512, GFP_KERNEL);
+	data = kzalloc(max(WIFI_EVENT_MAX, WIFI_RX_MAX) + 512, GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
-	packet = data + WIFI_EVENT_MAX;
+	packet = data + max(WIFI_EVENT_MAX, WIFI_RX_MAX);
 	wifi_loopback_packet(packet, 1);
-	r->consumed = baseline;
+	if (!r->persistent || !r->stream_started)
+		r->consumed = baseline;
+	/* Per-request statistics, not wire sequence or FIFO ownership. */
+	r->batches = 0;
+	r->sent = false;
+	r->matched = false;
+	r->scanning = false;
 	sdio_claim_host(func);
 	ioex = sdio_f0_readb(func, SDIO_CCCR_IOEx, &error);
 	if (error)
@@ -371,7 +418,7 @@ static int wifi_command_test(struct sdio_func *func,
 	mask = sdio_readw(func, WIFI_HIMR, &error);
 	if (error)
 		goto out;
-	if (mask || func->irq_handler) {
+	if (!r->irq_owned && (mask || func->irq_handler)) {
 		error = -EBUSY;
 		goto out;
 	}
@@ -382,7 +429,8 @@ static int wifi_command_test(struct sdio_func *func,
 	r->status_before = sdio_readw(func, WIFI_HISR, &error);
 	if (error)
 		goto out;
-	error = wifi_command_mac_init(func, r);
+	if (!r->persistent || !r->stream_started)
+		error = wifi_command_mac_init(func, r);
 	if (error)
 		goto out;
 	wifi_command_snapshot(func, r, 0);
@@ -400,22 +448,28 @@ static int wifi_command_test(struct sdio_func *func,
 		error = -EBUSY;
 		goto out;
 	}
-	if (r->irq_mode) {
+	if (r->irq_mode && !r->irq_owned) {
 		r->irq_native = !!(host->caps & MMC_CAP_SDIO_IRQ);
 		if (!r->irq_native) {
 			error = -EOPNOTSUPP;
 			goto out;
 		}
-		init_completion(&r->irq_done);
+		if (!r->persistent)
+			init_completion(&r->irq_done);
 		irq_attempted = true;
 		error = sdio_claim_irq(func, handler);
 		if (error)
 			goto out;
 	}
+	r->stream_started = true;
 	commands = r->stress ? 256 : (r->survey_repeat ? 5 :
 		   (r->survey ? 3 : (r->opmode ? 16 : 2)));
 	for (command = 0; command < commands; command++) {
-		r->command_seq = (command + 1) & 0x7f;
+		if (READ_ONCE(r->cancelled)) {
+			error = -ECANCELED;
+			goto out;
+		}
+		r->command_seq = (command + first_command) & 0x7f;
 		r->public_pages = wifi_sdio_readb(func, 1, &error);
 		if (error)
 			goto out;
@@ -436,7 +490,8 @@ static int wifi_command_test(struct sdio_func *func,
 		}
 		tries = r->scanning ? 750 : 100; /* 15 s scan, 2 s command */
 		if (r->scanning)
-			wifi_survey_packet(packet, r->command_seq);
+			wifi_survey_packet(packet, r->command_seq,
+					   r->survey_channels, r->survey_nchannels);
 		else if (r->opmode)
 			wifi_opmode_packet(packet, r->command_seq);
 		else
@@ -463,6 +518,12 @@ static int wifi_command_test(struct sdio_func *func,
 				if (error)
 					goto out;
 			}
+			if (r->irq_owned) {
+				error = wifi_rx_drain(func, &r->rx, data);
+				if (error < 0)
+					goto out;
+				error = 0;
+			}
 			drain = wifi_command_drain(func, r, data);
 			if (drain < 0) {
 				error = drain;
@@ -487,6 +548,7 @@ static int wifi_command_test(struct sdio_func *func,
 			goto out;
 		}
 		r->commands_done++;
+		r->next_command = (r->command_seq + 1) & 0x7f;
 		if (r->scanning) {
 			r->survey_runs++;
 			r->survey_total += r->survey_count;
@@ -494,6 +556,7 @@ static int wifi_command_test(struct sdio_func *func,
 	}
 
 out:
+	r->scanning = false;
 	if (irq_attempted) {
 		sdio_writew(func, 0, WIFI_HIMR, &restore);
 		r->cleanup = restore;

@@ -2,162 +2,165 @@
 
 ## Support status
 
-The RTL8712 SDIO radio can load firmware, execute normal commands and perform
-passive scans under Linux. This is an **optional hardware-qualification driver**,
-not a usable wireless network interface. There is no `wlan0`, association,
-encryption-key installation or packet TX/RX support yet.
+The RTL8712 SDIO driver exposes a cfg80211 station interface, `wlan0`.
+WPA2-Personal association, host-managed CCMP keys, DHCP, IPv6 router
+advertisements and interface-bound Internet pings have passed on a NAND-booted
+H432B. Wi-Fi-only, checksum-verified TCP transfers in both directions and an
+explicit disconnect/reconnect have also passed; see the
+[validation record](wifi-qualification.md).
 
-The default NAND kernel does not enable this diagnostic driver. The optional
-`openh432-wifi-test` bundle uses the existing slot-B systembase; it is not a
-standalone recovery image. Building or running offline tests does not access
-the device.
+The default runtime includes the driver. Systembase supplies `iw`,
+`wpa_supplicant`, `wpa_cli`, the signed regulatory database and
+`FMWiFi.service`. Compatible operator-supplied firmware is required.
+With it, startup initializes the radio and creates the interface automatically;
+without it, initialization is skipped. Building never accesses hardware.
 
-| Capability | Device-qualified scope |
-| --- | --- |
-| SDIO transport | Function-register CMD53 and explicit block-mode FIFO transfers |
-| Power and firmware | Cold initialization, firmware upload and ready handshake |
-| Power acknowledgement | Native SDIO interrupt with verified active-state response |
-| Normal commands | 256 consecutive requests and exact replies across seven-bit sequence wrap |
-| Firmware events | Sequenced FIFO consumption and native C2H notifications |
-| Passive scanning | Channels 1, 6 and 11; three consecutive surveys without radio reset |
-| Networking | Not implemented: Linux wireless interface, association, keys and data traffic |
-| Power saving | Warm initialization, suspend and resume remain unqualified |
+This is a limited development station profile, not a production-ready driver:
 
-Native scan notifications include empty wakeups. Interrupt acknowledgement and
-efficient continuous event processing remain unresolved. An intermittent
-`08` error-report value has appeared during successful scans; its meaning is
-not established. Neither observation should be hidden or described as fixed.
+- WPA2-PSK with CCMP only. WEP, TKIP, WPA3/SAE, enterprise authentication,
+  PMF, AP mode, roaming and power saving are not implemented.
+- Scans are passive. Connection uses a recently observed BSS; hidden networks
+  requiring directed probes are unsupported. Scan requests while connected
+  return busy.
+- TX currently uses a fixed 1 Mb/s legacy rate. HT, aggregation, fragmentation,
+  A-MSDU and rate adaptation are not enabled. Throughput is not a release claim.
+- Firmware or SDIO stream faults require a fresh boot. Warm initialization,
+  suspend/resume and long-duration operation remain unqualified.
+- RSSI units are unqualified, so the driver does not invent signal-strength
+  values. Some empty work invocations remain visible in diagnostic counters.
 
-Qualification applies to the exact images in the
-[validation record](wifi-qualification.md), on one H432B device. Later source
-changes, other firmware and other devices do not inherit those results.
+Qualification is specific to the artifacts and hardware recorded in the
+validation record. Later builds and other devices do not inherit those results.
 
-## Hardware and protocol references
+## Configure a station
 
-The radio is SDIO vendor/device `024c:8712`, function 1, class 07, on the
-controller at `eb300000`, with 512-byte maximum blocks. MMC host numbering is
-asynchronous; do not identify the radio or storage by an assumed `mmc0` number.
+Select the actual operating country using the build launcher's
+`--wifi-country` option, or the installed Wi-Fi configuration. Do not infer a
+country from an SSID. Keep the signed regulatory database and its signature
+together; the kernel retains signature verification. The driver ignores AP
+country-IE hints so they cannot override the operator-selected country.
 
-Linux's [r8712u driver](https://github.com/torvalds/linux/blob/v6.12/drivers/staging/rtl8712/Kconfig)
-is USB-only and is not interchangeable with this SDIO device. The pinned
-[Realtek source mirror](https://github.com/ronangaillard/rtl8712-driver-src/tree/2237e98dacd8421b38beb2d1aad88aa2b9f79dd8)
-provides protocol definitions but omits referenced SDIO HAL files. The board
-implementation combines those definitions with analysis of the factory path;
-it is not a port of a complete upstream SDIO driver.
+Create a root-owned, mode-0600 file at
+`/etc/wpa_supplicant/wpa_supplicant-wlan0.conf`. It needs
+`ctrl_interface=/run/wpa_supplicant`, `passive_scan=1`, and a network block
+containing the operator's SSID and PSK with `key_mgmt=WPA-PSK`,
+`proto=RSN`, `pairwise=CCMP`, `group=CCMP` and `ieee80211w=0`.
+Do not put network credentials in a public layer or build log.
 
-Translated function-register accesses use byte-mode CMD53, including one-byte
-operations. Standard function-zero CCCR operations use the SDIO core APIs.
-FIFO transfers explicitly use block mode even when only one block is sent.
-H2C commands, C2H events and FIFO transactions have distinct framing and
-sequence counters; see the source and qualification record for tested details.
-
-## Firmware and publication boundary
-
-The BSP does not contain, fetch or redistribute the factory Wi-Fi firmware.
-Testing requires an independently obtained, compatible firmware file with
-established provenance. Linux requests `h432b/rtl8712s.bin` through the direct
-firmware loader. A valid header is not proof of compatibility or permission
-to redistribute the binary. Compatibility with publicly distributed USB
-firmware has not been established.
-
-Keep extracted firmware, factory images, disassembly, raw device logs,
-network identifiers and credentials out of Git. Diagnostic output can contain
-firmware bytes or debug text and must be treated as private evidence.
-
-## Build and diagnostic interface
-
-Use the pinned launcher in
-[openh432-build](https://github.com/highenergymagic/openh432-build):
+Start the standard service after provisioning the file:
 
 ```sh
-python3 scripts/bsp.py build openh432-wifi-test
+systemctl start wpa_supplicant@wlan0.service
+wpa_cli -i wlan0 status
+networkctl status wlan0
 ```
 
-For local layer development, use the launcher's documented `--local-layers`
-option. This changes build inputs, not the default deployment target.
-Deployment follows the [fastboot RAM-boot guide](fastboot.md); building is not
-authorization to install firmware or replace NAND images.
+The packaged drop-in orders the supplicant after `FMWiFi.service`.
+Systemd-networkd requests DHCP and accepts IPv6 router advertisements once the
+link connects. Its Wi-Fi route metric is higher than wired Ethernet's, so wired
+access remains preferred when both are available. No network profile is shipped
+and the supplicant instance is not enabled automatically.
 
-The driver binds only to the H432B board and matching SDIO function. Binding
-does not automatically initialize the chip. Root-only sysfs write attributes
-request explicit operations; corresponding read attributes report errors,
-cleanup status and measured results.
+The current development root uses a volatile writable overlay. Files created
+there, including a station profile, disappear on reboot. Persistent credential
+provisioning belongs in the eventual userdata policy; it is not silently
+embedded in the kernel or public systembase.
 
-| Write attribute | Accepted request | Prerequisite / purpose |
+## Firmware and hardware
+
+The BSP does not contain, fetch or redistribute the factory Wi-Fi firmware.
+Obtain a compatible file independently and establish its provenance and usage
+rights. Linux requests `h432b/rtl8712s.bin`. The build launcher can package a
+digest-checked private input; see
+[openh432-build](https://github.com/highenergymagic/openh432-build).
+USB firmware compatibility has not been established.
+
+Keep factory images, extracted firmware, disassembly, raw device logs,
+identifiers and credentials out of Git. Diagnostic text can expose private
+firmware data and must not be treated as a publishable log.
+
+The radio is SDIO `024c:8712`, function 1, class 07, on controller
+`eb300000`, with 512-byte blocks. MMC host numbers are asynchronous.
+Linux's [r8712u driver](https://github.com/torvalds/linux/blob/v6.12/drivers/staging/rtl8712/Kconfig)
+is USB-only. The pinned
+[Realtek source mirror](https://github.com/ronangaillard/rtl8712-driver-src/tree/2237e98dacd8421b38beb2d1aad88aa2b9f79dd8)
+has useful protocol definitions but omits referenced SDIO HAL files.
+This implementation combines those definitions with factory-path analysis.
+
+Function registers use byte-mode CMD53, including one-byte operations;
+standard CCCR access uses the SDIO core. FIFO requests explicitly use block
+mode. H2C command sequencing, C2H event sequencing and RX/C2H FIFO port
+sequencing are separate.
+
+## Packet and interrupt ownership
+
+One ordered workqueue and owner mutex serialize command, receive and transmit
+consumers. The native IRQ callback reads status before masking. Consumers drain
+queues and verify the mask on re-arm. RX and C2H have separate cumulative block
+counters and port sequences. Receive descriptors, optional driver information,
+frame lengths and 512-byte record padding are validated.
+
+Association uses the firmware's full-MAC join command. CCMP encryption and MIC
+verification use Linux's synchronous CCM implementation, not an unqualified
+firmware CAM offload. The host owns transmit PNs and per-key/per-TID replay
+counters. Reinstalling identical key material preserves those counters.
+Plaintext non-EAPOL traffic and ordinary traffic on an unauthorized port are
+rejected. This is implementation scope, not an independent security audit.
+
+The read-only `network_result` attribute reports fault, association,
+authorization, interrupt and packet counters without payloads or identifiers.
+A failed transfer is not blindly retried. Teardown cancels consumers before
+releasing the IRQ and SDIO function.
+
+## Optional diagnostics
+
+The runtime is the primary implementation. `openh432-wifi-test` is a
+compatibility target using the same driver and slot-B systembase, not a
+standalone recovery image. Build it through the pinned launcher only when that
+specific diagnostic target is needed.
+
+On a normal firmware-equipped installation, `FMWiFi.service` owns startup.
+Do not replay low-level initialization writes after it starts. The root-only
+sysfs interface remains available for separate diagnostic boots:
+
+| Write attribute | Request | Purpose |
 | --- | --- | --- |
-| `sample` | `1` | Compare initial CMD52/CMD53 register reads |
-| `power_init` | `1` | Successful sample; initialize chip power and clocks |
-| `firmware_load` | `memory` or `full` | Successful power initialization; code-only test or full firmware startup |
-| `power_ack` | `1` | Full startup; request and verify active-state acknowledgement |
-| `event_read` | `1` | Full cold startup; inspect the first pending event batch |
-| `command_test` | See below | Full cold startup and successful acknowledgement; own the event stream |
+| `sample` | `1` | Initial CMD52/CMD53 comparison |
+| `power_init` | `1` | Chip clocks and power |
+| `firmware_load` | `memory` or `full` | Code-only or full firmware startup |
+| `power_ack` | `1` | Active-state acknowledgement |
+| `event_read` | `1` | Initial event batch |
+| `command_test` | See below | Bounded command/scan diagnostic |
+| `network_start` | `1` | Register the station interface |
 
-The read attributes are `result`, `power_result`, `firmware_result`,
-`power_ack_result`, `event_result` and `command_result`. Check both operation
-and cleanup errors. Successful transport is not proof of successful firmware
-execution, and successful cleanup does not undo volatile chip initialization.
-
-Each action is one-shot per binding. Firmware `memory` and `full` are
-alternatives, not successive steps. `event_read` and `command_test` are
-mutually exclusive because both consume the initial FIFO sequence. Reboot
-between independent tests; do not retry a partially completed sequence.
+Actions are one-shot per binding. Firmware `memory` and `full` are alternatives.
+Event/command diagnostics and network ownership are mutually exclusive.
+Check operation and cleanup errors; cleanup does not undo volatile chip setup.
 
 ### Command actions
 
 | Action | Behavior |
 | --- | --- |
-| `opmode` | Sixteen infrastructure-mode requests; polling event reads |
-| `survey` | Two normal requests, then one passive scan; polling |
-| `opmode-irq` | Sixteen normal requests using native C2H notifications |
-| `survey-irq` | Two normal requests, then one interrupt-driven passive scan |
-| `stress-irq` | 256 normal requests across sequence wraparound |
-| `survey-repeat-irq` | Two normal requests, then three consecutive passive scans |
-| `loopback` | Historical diagnostic: first reply matches, second times out; not a passing acceptance test |
+| `opmode` | Sixteen infrastructure-mode requests, polling |
+| `survey` | Two normal requests and one passive scan, polling |
+| `opmode-irq` | Sixteen native-interrupt requests |
+| `survey-irq` | Two normal requests and one interrupt-driven scan |
+| `stress-irq` | 256 requests across sequence wrap |
+| `survey-repeat-irq` | Two normal requests and three passive scans |
+| `loopback` | Historical first-reply/second-timeout failure, not acceptance |
 
-Normal-command replies are validated factory debug events, not generic
-protocol acknowledgements. Passive scans set no SSID, request no probes and
-do not associate. BSSID record lengths and completion counts are checked;
-network identifiers are not included in the survey counters. Aggregate
-reports from several scans are not a count of unique networks.
+Normal-command replies in these diagnostics are exact factory debug events,
+not generic protocol acknowledgements. An earlier intermittent error-report
+value `08` remains unexplained; it was also observed in successful scans.
 
-Interrupt actions mask the source in the callback, release the MMC host while
-waiting, and fail on timeout rather than falling back to polling. Callback
-counts, empty wakeups and IRQ errors are separate results. RX and miscellaneous
-sources are not enabled without handlers.
-
-## Implementation and tests
-
-The optional recipe is `linux-h432b-wifi-test_6.12.111.bb`. Its implementation
-is intentionally separate from the default runtime provider:
-
-- `h432b-wifi-transport.c`: board/function binding, serialized sysfs requests
-  and result reporting.
-- `h432b-wifi-power.h`: register access and chip power sequencing.
-- `h432b-wifi-firmware.h`: image validation, upload and readiness checks.
-- `h432b-wifi-irq.h`: bounded active-state acknowledgement.
-- `h432b-wifi-events.h`: FIFO framing and initial event inspection.
-- `h432b-wifi-command.h`: command framing, event matching, scan validation
-  and bounded native-interrupt tests.
-
-Run the source-contract suite from this layer:
+## Tests
 
 ```sh
 python3 -m unittest discover -s tests
 ```
 
-These tests check source and metadata contracts; they do not emulate the radio.
-The [qualification record](wifi-qualification.md) preserves successful and
-failed hardware experiments separately.
-
-## Next development work
-
-1. Resolve redundant event notifications and build a persistent command/event
-   engine with correct interrupt, cancellation and teardown behavior.
-2. Integrate a Linux wireless interface using cfg80211 and the firmware's
-   full-MAC command protocol.
-3. Implement and qualify association, authentication/key installation and
-   packet TX/RX, including regulatory and security behavior.
-4. Qualify power saving, warm initialization, suspend/resume and endurance.
-
-No production-readiness, throughput, complete regulatory compliance or
-firmware-redistribution claim is made.
+The tests check source and metadata contracts; they do not emulate the radio.
+With `WIFI_RX_NATIVE_CC` set to a compiler inside the pinned build container,
+additional tests execute the actual C framing, RX parser, CCMP nonce/AAD and
+BSS-cache selection code. Compilation, deterministic artifacts, hardware
+qualification and an independent security review are distinct claims.

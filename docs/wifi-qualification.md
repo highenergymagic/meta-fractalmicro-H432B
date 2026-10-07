@@ -13,12 +13,10 @@ function 1, class 07, on the controller at `eb300000`. Its function CIS
 advertises 512-byte maximum blocks. MMC host numbers are asynchronous; do
 not identify the radio or internal storage by an assumed `mmc0` number.
 
-The optional test kernel has device-qualified power initialization, firmware
-startup, native power-state acknowledgement, repeated normal commands, and
-passive scanning on channels 1, 6 and 11. It still has **no Linux wireless
-network interface**: association, encryption and data traffic are not yet
-implemented or qualified. The factory firmware used for testing is private
-and is not distributed by the BSP.
+The NAND runtime now has a cfg80211 station interface. Later sections record
+WPA2-CCMP association and packet tests separately from the earlier scan-only
+milestones. The factory firmware is private and is not distributed by the BSP.
+Consult the Wi-Fi guide for the current supported profile and limitations.
 
 Board power, clock selection and the narrowly scoped malformed-CIS workaround
 are implemented. The sections below distinguish current capabilities from
@@ -506,3 +504,185 @@ remains. No association or data transmission was requested.
 
 The source-contract tests are offline checks. They do not emulate the device
 or qualify these milestones.
+
+## cfg80211 passive-scan interface
+
+The first cfg80211 image, SHA-256
+`4127288ae10b790ff6cb10265a55fd053f373732c9054a61777f9b8a3a2ca28d`,
+registered `wlan0` using the radio MAC registers and accepted passive scan
+requests through `iw`. The signed regulatory database loaded successfully.
+Four scans over channels 1–13 followed by 44 scans over channels 1, 6 and 11
+completed without radio reset: 144 commands, 874 sequenced firmware events,
+320 aggregate BSS reports, and zero command/cleanup errors. Aggregate reports
+are not a count of unique networks; cfg80211 retains a BSS cache.
+
+Interface down/up followed by another scan succeeded. Aborting an active scan
+returned cancellation, interface down completed, and driver unbind removed
+`wlan0` without a kernel warning or taint. The cancelled stream is deliberately
+not reusable until a fresh initialization; recovery after interrupted firmware
+commands remains future work.
+
+This image required an explicit frequency list: current `iw` adds
+`NL80211_SCAN_FLAG_COLOCATED_6GHZ` when none is supplied, and the initial driver
+rejected every scan flag. A source correction permits that inapplicable flag
+on the 2.4 GHz-only interface. Qualification of that correction is separate.
+
+No association, encryption-key installation, data TX/RX, signal-strength
+calibration or suspend/resume was tested or implemented by this milestone.
+
+The corrected image, SHA-256
+`430b761c5f6ee4ac542d12066e125855f59bb7fa61873d2dfd1cd088df0a0670`,
+completed three ordinary `iw dev wlan0 scan passive` requests without a
+frequency-list workaround (49 aggregate reports). Active scanning was rejected.
+Bringing the interface down during a fourth scan completed with `-ECANCELED`
+and cleanup status zero; reopening the faulted stream was rejected, and unbind
+removed the interface. Kernel taint remained zero and no systemd units failed.
+The kernel retained signed regulatory-database verification.
+
+The optional OpenEmbedded `openh432-wifi-tools` archive supplies iw 6.17,
+libnl and the signed database through pinned upstream recipes. The tested
+archive SHA-256 is
+`ea89482ad96b2a3ba492a3a8412f9f221fe4fee89804a1cb8301f4443de7f0e3`.
+Its timestamps and compression parameters are fixed in metadata; no new
+cross-host bit-for-bit reproduction claim is made for these artifacts.
+
+## NAND runtime integration
+
+The default runtime now includes the same driver through a shared recipe
+include. Systembase provides `iw`, the signed regulatory database and
+`FMWiFi.service`; startup requires compatible operator-supplied firmware.
+The launcher accepts this as an explicit, digest-checked private input rather
+than downloading or committing the binary.
+
+Installed slot-B artifacts:
+
+- Kernel bundle: `430b761c5f6ee4ac542d12066e125855f59bb7fa61873d2dfd1cd088df0a0670`
+  (5,933,056 bytes), identical to the corrected scan-qualified kernel bundle.
+- Systembase: `f3470f34e328cbaf7313b1253638129de6905e870fbe1ad6475849b677e6674a`
+  (27,537,408 bytes), containing the private radio firmware.
+- Installation maintenance bundle:
+  `e3dd87b96e31b70bd39952a46f81ecd6dc3008015989c72c3434cc06ecbbddf7`.
+
+Both B volumes passed full NAND readback hashing; both A hashes were preserved.
+Factory boot, EBOOT and the OpenH432 bootloader were not modified. The first
+normal NAND boot initialized Wi-Fi automatically, applied the configured
+regulatory domain and completed a passive scan (19 cached BSS entries), with
+zero kernel taint and no failed systemd units. No manual firmware upload or
+initialization commands were used on that boot.
+
+A second normal software reboot repeated automatic initialization and scanning
+(16 cached BSS entries), again with zero kernel taint and no failed units.
+The device was left running this NAND installation; the former runtime was
+not restored. Association and packet traffic remain unsupported.
+
+## Persistent interrupt ownership and RX framing
+
+The first continuous-service kernel bundle,
+`706c59109be31bdb8ecf76b9acbb402d9dafda6067722ce07d957d63f47b830a`,
+booted from NAND and consumed 20 firmware startup events, but then reached
+129 empty interrupt callbacks. The loop detector masked the source and reported
+`-ELOOP`. This image did not qualify continuous operation.
+
+The corrected bundle,
+`e1b139e2f3b9391c4e91dc79d47a997397edbac75dfe924720f6f945293199b4`,
+reads interrupt status before masking and verifies the re-armed mask, matching
+the factory sequence. Kernel B replacement passed complete readback hashing
+and preserved kernel A. The existing Wi-Fi-enabled systembase and bootloader
+were unchanged.
+
+On a normal NAND boot, startup consumed 20 events with one interrupt callback.
+Five passive scans completed without a service fault. During a subsequent
+20-second idle interval, interrupt and event counts remained unchanged.
+Interface down released the IRQ; interface up followed by an all-channel
+passive scan succeeded. The result was 115 callbacks and 136 sequenced firmware
+events, zero kernel taint and no failed systemd units.
+
+The actual C RX parser passed synthetic length, padding, truncation and
+CRC/ICV-flag vectors using a native compiler inside the pinned build container.
+No real RX data records were observed in the above tests. These results do
+not qualify packet delivery, association, encryption keys or transmission.
+No cross-host bit-for-bit reproduction comparison was performed for this bundle.
+
+An additional 44 scans brought the same boot to 50 completed scans, 150
+commands, 756 sequenced events and 229 aggregate BSS reports. H2C and C2H
+sequence wrap passed with no command, interrupt or cleanup errors.
+During a subsequent scan, interface down cancelled the firmware wait with
+`-ECANCELED`, released the IRQ and rejected reopening the faulted stream.
+Unbinding removed `wlan0` without a kernel warning or taint. The userspace
+scan utility returned zero on this abort; the driver's incomplete survey
+and cancellation status, not that exit code, establish the test outcome.
+
+A final normal NAND reboot repeated automatic radio initialization and a
+passive scan (seven cached BSS entries), with continuous IRQ ownership,
+zero errors, zero kernel taint and no failed units. Temporary SSH authorization
+was absent. The device was left on this corrected NAND kernel and the existing
+Wi-Fi-enabled systembase.
+
+## First NAND station-mode qualification
+
+Kernel bundle
+`1186a16dc3561eeddad6850f85a8b017196d8ec8c0232281b85b30ca61fde97a`
+and systembase
+`5143ce8bf5f6acd49766859c446d906503b1ae79a0275ea1688ffcbc1852e1d3`
+passed complete slot-B readback checks, with both A images preserved.
+The kernel and separate systembase booted normally from NAND.
+
+A private WPA2-Personal test profile completed the four-way handshake and
+CCMP key installation using host cryptography. DHCP assigned an IPv4 address;
+IPv6 router advertisements were received. Five interface-bound pings to the
+router and five to an Internet address all succeeded.
+
+Initial supplicant scans were rejected because the wiphy advertised no scan
+IE capacity. A separate BSS-cache bug mishandled empty entries before the
+initial jiffies wrap. The first handshake therefore used an explicit scan and
+supplicant direct-association mode after that wrap. It does not qualify
+unassisted early-boot connection.
+
+With Ethernet administratively down, Wi-Fi-only SSH connected after the host's
+stale ARP entry was refreshed. A larger TCP transfer then failed with receive
+service overflow after approximately 944 kB transmitted. Kernel taint stayed
+zero. This image does not qualify bulk transfers; bounded fair TX/RX servicing
+and receive-buffer sizing are required before that claim.
+
+## NAND station data-path qualification
+
+The next kernel, `0a4eb1d81742accf1ecd209f9d5f05222d6b42559ddb8f5eb0cac1df560dae3c`,
+fixed early-boot scan handling and increased the receive buffer to 48 KiB.
+Normal supplicant association completed before the initial jiffies wrap.
+A sustained transfer still exposed false empty-work accounting: RX serviced
+by the TX worker did not reset the consecutive-empty counter. The driver
+mistook useful traffic for an interrupt storm. This failed run is not a
+successful bulk-transfer qualification.
+
+Kernel bundle
+`3285150959a3013ead008552daca86bc4eb2545c63ff74264c089840b645e495`
+with systembase
+`5572f5e057d78635dae5ffbbaf51ddc0a44882bb5b6800e05c61550b7f8ebe22`
+corrected that accounting and ignored access-point country-IE overrides.
+The installed kernel passed a complete slot-B readback; kernel A was unchanged.
+Systembase remained the previously readback-verified image.
+
+On a normal NAND boot, the standard supplicant service performed passive
+scanning, WPA2-PSK/CCMP association and DHCP without manual scan seeding.
+The configured New Zealand regulatory domain remained effective after joining
+an AP advertising a different country.
+
+With Ethernet administratively down, two 2,689,160-byte SSH downloads and one
+upload over Wi-Fi matched the source SHA-256. Five subsequent Internet pings
+all succeeded. The driver reported no service fault, CCMP MIC failure or TX
+failure, and kernel taint was zero. Replay/duplicate frames were rejected;
+that counter is not expected to remain zero. An explicit supplicant
+disconnect/reconnect completed a new handshake and three further Internet
+pings passed. Receive batches reached 68 blocks, exceeding the old 16 KiB
+buffer limit without overflow.
+
+The pinned container build completed all 1,983 tasks. Hardware-layer tests
+passed 192 cases, including compiled packet, CCMP framing and BSS-cache
+regressions. These tests do not constitute an independent security audit,
+long-duration qualification or a new cross-host reproducibility comparison.
+
+A second normal NAND reboot repeated automatic interface initialization,
+standard supplicant association, DHCP and five successful Internet pings.
+The regulatory domain remained NZ, driver faults and kernel taint were zero,
+and systemd reported no failed units. The private profile was provisioned
+again after reboot because the development writable overlay is volatile.

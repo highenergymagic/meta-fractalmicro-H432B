@@ -15,6 +15,20 @@ The build repository's two-architecture CI runs this suite against the pinned
 layer and resolves the optional diagnostic targets. Actual kernel compilation,
 device testing and independent reproducibility comparisons are separate checks.
 
+## Receive-parser vectors
+
+`test_wifi_rx.py` can compile and run synthetic packets through the actual C
+receive parser. Set `WIFI_RX_NATIVE_CC=/usr/bin/gcc` when running that test
+inside the pinned build container. Without the variable, the compiled test
+is explicitly skipped; source-contract checks still run. The vectors cover
+record padding, driver-information lengths, truncated input and CRC/ICV flags.
+They do not test the SDIO controller or radio firmware.
+
+`test_wifi_station.py` uses the same compiler setting for actual C H2C framing,
+CCMP nonce/authenticated-header construction, and BSS-cache selection across
+initial jiffies wrap. Its crypto-provider stub checks framing and error
+propagation; it does not substitute for testing AES/CCM or a security audit.
+
 ## Device scripts
 
 Shell scripts in this directory are explicit operator tools, not part of the

@@ -52,7 +52,7 @@ class WifiPower(unittest.TestCase):
         self.assertIn("r->cleanup = sdio_disable_func(func)", DRIVER)
 
     def test_optional_recipe_carries_header(self):
-        recipe = (ROOT / "linux-h432b-wifi-test_6.12.111.bb").read_text()
+        recipe = (ROOT / "h432b-wifi.inc").read_text()
         self.assertIn("file://h432b-wifi-power.h", recipe)
         self.assertIn("${UNPACKDIR}/h432b-wifi-power.h", recipe)
 

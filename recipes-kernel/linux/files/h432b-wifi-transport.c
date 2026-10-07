@@ -23,7 +23,10 @@
 
 #define SAMPLE_BYTES 4
 
+struct h432b_wifi_net;
+
 struct h432b_wifi_sample {
+	struct h432b_wifi_net *net;
 	struct mutex lock;
 	bool attempted;
 	struct h432b_power_result power;
@@ -278,12 +281,17 @@ static ssize_t firmware_result_show(struct device *dev, struct device_attribute 
 }
 static DEVICE_ATTR_RO(firmware_result);
 
+static void wifi_net_irq_notify(struct h432b_wifi_net *net);
+
 static void h432b_wifi_irq(struct sdio_func *func)
 {
 	struct h432b_wifi_sample *sample = sdio_get_drvdata(func);
 
-	if (sample->command.irq_mode)
+	if (sample->command.irq_mode) {
 		wifi_command_irq(func, &sample->command);
+		if (sample->command.irq_owned && sample->net)
+			wifi_net_irq_notify(sample->net);
+	}
 	else
 		wifi_ack_irq(func, &sample->ack);
 }
@@ -485,7 +493,11 @@ static ssize_t command_result_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(command_result);
 
+#include "h432b-wifi-net.h"
+
 static struct attribute *h432b_wifi_attrs[] = {
+	&dev_attr_network_start.attr,
+	&dev_attr_network_result.attr,
 	&dev_attr_command_test.attr,
 	&dev_attr_command_result.attr,
 	&dev_attr_event_read.attr,
@@ -525,6 +537,7 @@ static void h432b_wifi_remove(struct sdio_func *func)
 {
 	/* Removing sysfs waits for any active sample before devres frees data. */
 	device_remove_group(&func->dev, &h432b_wifi_group);
+	wifi_net_unregister(sdio_get_drvdata(func));
 }
 
 static const struct sdio_device_id h432b_wifi_ids[] = {

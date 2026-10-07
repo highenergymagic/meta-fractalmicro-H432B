@@ -17,3 +17,5 @@ do_configure:append() {
         grep -qx "CONFIG_$option=y" ${B}/.config || bbfatal "Missing PMIC bus option: $option"
     done
 }
+
+require h432b-wifi.inc

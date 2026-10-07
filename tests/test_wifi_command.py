@@ -114,12 +114,12 @@ class WifiCommand(unittest.TestCase):
             self.assertIn(token, D)
         for token in ("sdio_claim_irq(func, handler)", "sdio_release_irq(func)",
                       "reinit_completion", "wait_for_completion_timeout",
-                      "r->irq_status & BIT(1)", "r->irq_empty++",
+                      "r->irq_status & (BIT(1) | (r->irq_owned ? BIT(0) : 0))", "r->irq_empty++",
                       "time_after_eq(jiffies, deadline)"):
             self.assertIn(token, C)
         callback = C.split("static void wifi_command_irq", 1)[1].split("static int wifi_command_arm", 1)[0]
-        self.assertLess(callback.index("sdio_writew(func, 0, WIFI_HIMR"),
-                        callback.index("sdio_readw(func, WIFI_HISR"))
+        self.assertLess(callback.index("sdio_readw(func, WIFI_HISR"),
+                        callback.index("sdio_writew(func, 0, WIFI_HIMR"))
         self.assertNotIn("mutex_lock", callback)
         wait = C.split("static int wifi_command_wait", 1)[1].split("static void wifi_command_snapshot", 1)[0]
         self.assertLess(wait.index("sdio_release_host(func)"),
@@ -130,7 +130,7 @@ class WifiCommand(unittest.TestCase):
 
     def test_sequence_wrap_and_repeated_survey(self):
         for token in ("r->stress ? 256", "r->survey_repeat ? 5",
-                      "command < commands", "(command + 1) & 0x7f",
+                      "command < commands", "(command + first_command) & 0x7f",
                       "r->survey && command >= 2", "r->commands_done++",
                       "r->survey_runs++", "r->survey_total += r->survey_count"):
             self.assertIn(token, C)

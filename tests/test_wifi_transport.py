@@ -48,13 +48,15 @@ class WifiTransport(unittest.TestCase):
         self.assertIn(".remove = h432b_wifi_remove", SOURCE)
         self.assertIn("device_remove_group(&func->dev, &h432b_wifi_group)", SOURCE)
 
-    def test_separate_recipe_only(self):
+    def test_runtime_and_diagnostic_share_wifi(self):
         recipe = (KERNEL / "linux-h432b-wifi-test_6.12.111.bb").read_text()
         self.assertIn("require linux-h432b-runtime_6.12.111.bb", recipe)
         self.assertIn('H432B_KERNEL_PROVIDER_REMOVE = "virtual/kernel"', recipe)
         self.assertIn('KERNEL_DEPLOYSUBDIR = "kernel-wifi-test"', recipe)
         runtime = (KERNEL / "linux-h432b-runtime_6.12.111.bb").read_text()
-        self.assertNotIn("wifi-transport", runtime)
+        self.assertIn("require h432b-wifi.inc", runtime)
+        shared = (KERNEL / "h432b-wifi.inc").read_text()
+        self.assertIn("file://h432b-wifi-net.h", shared)
 
 
 if __name__ == "__main__":
