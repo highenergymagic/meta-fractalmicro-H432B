@@ -7,8 +7,9 @@ is pinned and built with an internal-display backend (`h4`); the normal
 systembase packages it through the OS layer. Linux frame output, a readable
 Grade 2 greeting and eight-dot patterns have been checked on one U2.
 The standard systembase enables BRLTTY at startup. Console output, braille
-key entry and scrolling have been confirmed by the operator. Routing-key
-behavior, broader chord coverage and suspend/resume remain unqualified.
+key entry, Backspace, Enter, scrolling and cursor routing have been confirmed
+by the operator. Broader chord coverage, exhaustive routing-key coverage and
+suspend/resume remain unqualified.
 
 This is not the existing HIMS USB/Bluetooth external-display protocol.
 It uses Linux GPIO and evdev interfaces on the Sense itself.

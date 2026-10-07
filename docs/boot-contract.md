@@ -51,6 +51,14 @@ bundle uses the same runtime kernel with a complete RAM root filesystem and
 can boot without a provisioned UBI pool. Neither path implements automatic
 A/B selection or rollback.
 
+The maintenance-stage boot command selects `kernel_b` explicitly. The
+`openh432-early-b` image embeds a `b` root-slot marker, and root handoff checks
+that the systembase carries the same marker. Slot B is a software deployment
+choice, not a hardware requirement. Slot A is retained as an older image pair;
+it is not an automatic fallback. A/B operation requires coordinated image-pair
+selection, boot-attempt accounting, boot-success confirmation and rollback
+policy; copying images to the other slot does not implement those mechanisms.
+
 The [NAND documentation](nand.md) describes ECC and bounded UBI layout.
 The factory prefix uses a different ECC format and must not be rewritten by
 the Linux data driver. Installed EBOOT may differ from vendor download images:
