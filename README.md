@@ -46,6 +46,11 @@ wired Ethernet and GPS service integration have also been demonstrated.
 Broader input, vibration, USB-host and removable-SD qualification remains
 available through explicit diagnostic profiles.
 
+The internal Si4702 FM receiver supports muted V4L2 tuning and signal scans.
+Detected frequency peaks were corroborated against local broadcasts; audible
+FM output, stereo reception and suspend remain unqualified. See the
+[FM receiver guide](docs/fm.md).
+
 Important work remains:
 
 - Internal Bluetooth has passed discovery, pairing and L2CAP packet exchange
@@ -78,6 +83,7 @@ The loader firmware itself remains in this BSP layer.
 - [NAND support](docs/nand.md): storage layout, protection boundaries and validation.
 - [Internal SD](docs/internal-sd.md): controller identity, read-only baseline and opt-in write testing.
 - [External SD](docs/external-sd.md): removable-slot configuration and read-only qualification.
+- [FM receiver](docs/fm.md): tuning, signal scanning and audio qualification limits.
 - [Internal Bluetooth](docs/bluetooth.md): transport, tested scope and initialization gaps.
 - [Internal Wi-Fi](docs/wifi.md): current support, firmware requirements and optional diagnostics.
 - [Wi-Fi qualification](docs/wifi-qualification.md): tested images, results and unresolved behavior.

@@ -21,3 +21,5 @@ do_configure:append() {
 require h432b-wifi.inc
 
 require h432b-bluetooth.inc
+
+require h432b-fm.inc

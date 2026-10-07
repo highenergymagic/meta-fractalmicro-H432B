@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/ {
+	aliases { i2c10 = &fm_bus; };
+	fm_bus: i2c-fm {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpd1 0 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpd1 1 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <10>;
+		i2c-gpio,timeout-ms = <100>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		tuner@10 {
+			compatible = "hims,h432b-si4702";
+			reg = <0x10>;
+			enable-gpios = <&gpe0 4 GPIO_ACTIVE_HIGH>;
+			reset-gpios = <&gph3 2 GPIO_ACTIVE_LOW>;
+			/* Factory drives this high; tuner-side role not yet proven. */
+			mode-gpios = <&gph1 4 GPIO_ACTIVE_HIGH>;
+		};
+	};
+};
