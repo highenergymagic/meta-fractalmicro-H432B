@@ -69,12 +69,13 @@ The loader firmware itself remains in this BSP layer.
 ## Technical documentation
 
 - [Build targets](docs/targets.md): normal deployment, recovery and optional diagnostics.
-
 - [Boot contract](docs/boot-contract.md): boot stages, image roles and deployment constraints.
 - [NAND support](docs/nand.md): storage layout, protection boundaries and validation.
 - [Internal SD](docs/internal-sd.md): controller identity, read-only baseline and opt-in write testing.
 - [External SD](docs/external-sd.md): removable-slot configuration and read-only qualification.
-- [Internal Wi-Fi](docs/wifi.md): SDIO identity, source investigation, transport, power and firmware-start qualification.
+- [Internal Wi-Fi](docs/wifi.md): current support, firmware requirements and optional diagnostics.
+- [Wi-Fi qualification](docs/wifi-qualification.md): tested images, results and unresolved behavior.
+- [Tests](tests/README.md): offline checks versus explicit device qualification.
 - [GPS receiver](docs/gps.md): UART mapping, shared runtime power control and assistance qualification.
 - [Fastboot support](docs/fastboot.md): RAM download and boot workflow.
 - [Boot performance](docs/boot-performance.md): measured bottlenecks and profiling limits.
