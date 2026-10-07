@@ -191,8 +191,10 @@ static int wifi_command_drain(struct sdio_func *func,
 		return 0;
 	if (pending > WIFI_EVENT_MAX / 512 || r->batches >= 64)
 		return -EOVERFLOW;
-	error = sdio_memcpy_fromio(func, data, WIFI_C2H_FIFO | (r->port_seq & 3),
-				  pending * 512);
+	/* Factory FIFO reads use block mode even for exactly one block. */
+	error = mmc_io_rw_extended(func->card, 0, func->num,
+				  WIFI_C2H_FIFO | (r->port_seq & 3), 1,
+				  data, pending, 512);
 	if (error)
 		return error;
 	r->port_seq = (r->port_seq + 1) & 3;

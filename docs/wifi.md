@@ -360,7 +360,15 @@ the complete factory runtime has been reproduced. The first test applied the wri
 an incorrect latch-style readback check was applied to PMC_FSM+2, which
 returned live status 0x71 after a 0x3b write. That assumption and its earlier
 RF-control label have been removed; the status remains reported. RCR and
-command-register readbacks matched. The revised test is not yet qualified.
+command-register readbacks matched.
+
+The corrected image (SHA256
+`78d14ea766e33de245c486e9f4a5ebce18f26e1bab075df468b05bf21f4ee2fa`)
+passes setup stage 7 and all checked readbacks. Loopback still matches one
+event and times out on the second request. The error-report byte becomes
+`08` again after command 1; the earlier zero result is not stable across
+this changed setup. Kernel taint and failed-service counts remain zero.
+This qualifies the tested setup sequence, not repeated loopback commands.
 
 The factory firmware's command table and loopback handler were also traced.
 Its loopback event is explicitly 12 bytes, unlike the transformed structure

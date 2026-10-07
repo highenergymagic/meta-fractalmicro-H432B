@@ -28,6 +28,13 @@ class WifiCommand(unittest.TestCase):
             self.assertIn(text, C)
         self.assertIn("wifi_event_parse(data, pending * 512, &parsed)", C)
 
+    def test_c2h_single_block_is_not_byte_mode(self):
+        self.assertIn("mmc_io_rw_extended(func->card, 0, func->num", C)
+        self.assertIn("data, pending, 512", C)
+        self.assertNotIn("sdio_memcpy_fromio", C)
+        self.assertEqual((1 << 28) | (1 << 27) | (1 << 26) |
+                         (0x18e80 << 9) | 1, 0x1f1d0001)
+
     def test_reply_fields_and_bounds(self):
         for text in ("length == 12", "p[9] == 0x11 + seq * 0x10",
                      "r->command_seq <= (r->opmode ? 16 : 2)", "r->replies++", "r->batches >= 64",
