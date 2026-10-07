@@ -27,7 +27,8 @@ class WifiFirmware(unittest.TestCase):
 
     def test_completion_and_stale_flags(self):
         self.assertIn("r->initial & 0x35", FW)
-        for fragment in ("BIT(0), BIT(1)", "BIT(2), BIT(3)", "BIT(5), BIT(5)"):
+        for fragment in ("BIT(0), BIT(1)", "BIT(2), BIT(3)", "BIT(5), BIT(5)",
+                         "BIT(4), BIT(4)", "BIT(7), BIT(7)"):
             self.assertIn(fragment, FW)
         self.assertIn("? 0 : -EBADMSG", FW)
         self.assertIn("return -ETIMEDOUT", FW)
@@ -44,12 +45,22 @@ class WifiFirmware(unittest.TestCase):
         self.assertNotIn("request_firmware_nowait", DRIVER)
         self.assertIn('WIFI_FW_NAME "h432b/rtl8712s.bin"', FW)
 
-    def test_restore_and_no_radio_configuration(self):
+    def test_board_configuration_and_full_ready(self):
+        for fragment in ("memset(config, 0, 48)", "config[2] = 0x14",
+                         "config[6] = 0x12", "config[0x0e] = 1",
+                         "config[0x12] = 2", "config[0x13] = 2",
+                         "config[0x19] = 1", "packet, config, sizeof(config)",
+                         "60 : 30, 100000", "i <= tries", "if (i != tries)"):
+            self.assertIn(fragment, FW)
+        self.assertIn('sysfs_streq(buf, "full")', DRIVER)
+
+    def test_restore_and_no_network_interface(self):
         self.assertIn("sdio_set_block_size(func, saved_blksize)", FW)
         self.assertIn("sdio_disable_func(func)", FW)
         self.assertEqual(FW.count("sdio_claim_host(func)"), 1)
         self.assertEqual(FW.count("sdio_release_host(func)"), 1)
-        self.assertIn("DMEM configuration intentionally not sent", FW)
+        self.assertIn("if (!full)", FW)
+        self.assertIn("r->stage = 12", FW)
         self.assertNotIn("sdio_claim_irq", FW + DRIVER)
         self.assertNotIn("alloc_netdev", FW + DRIVER)
 

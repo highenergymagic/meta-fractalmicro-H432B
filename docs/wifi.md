@@ -157,9 +157,32 @@ This qualifies the tested block-mode upload and CPU-ready handshake, not
 the final firmware-ready flag or networking. The private firmware used for
 qualification remains outside the public source and build inputs.
 
+## Full firmware-start test
+
+Alternatively, writing `full` to `firmware_load` runs the same code upload
+and then sends a generated 48-byte SDIO configuration. The configuration
+matches the factory board registry, including its virtual carrier-sense
+override. It is not copied from the firmware file's USB private block.
+
+Stages 9–12 mean DMEM transfer, DMEM completion, final readiness polling,
+and full firmware readiness respectively. The final check uses TCR bit 7,
+distinct from CPU readiness at bit 5. The boot-source register selects a
+bounded three- or six-second readiness wait. The diagnostic reports DMEM
+and final TCR values separately.
+
+The full path passed on hardware with bundle SHA256
+`1cb7b490aa5e087a4351fa14ad05d7c5a69453e38f6545a8b4fb31704fa134dd`.
+It transferred 129,736 payload bytes in five packets, with transfer and
+cleanup errors both zero. TCR reached `003f` after DMEM and `02ff` at final
+readiness. A duplicate request was rejected; kernel taint remained zero and
+no systemd units failed.
+
+This qualifies firmware startup on the tested cold initialization path,
+not interrupt delivery, scan, association or network traffic. The prototype
+still has no network interface.
+
 ## Remaining milestones
 
-- Resolve board radio configuration, upload DMEM and qualify final firmware readiness.
 - Qualify the warm chip initialization path and repeated power cycles.
 - Qualify interrupt acknowledgement and packet FIFO traffic; firmware block uploads pass.
 - Integrate a maintained wireless userspace interface, then scan and association.

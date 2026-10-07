@@ -215,7 +215,7 @@ static ssize_t firmware_load_store(struct device *dev, struct device_attribute *
 	u32 imem, emem;
 	int error;
 
-	if (!sysfs_streq(buf, "memory"))
+	if (!sysfs_streq(buf, "memory") && !sysfs_streq(buf, "full"))
 		return -EINVAL;
 	mutex_lock(&sample->lock);
 	if (r->attempted) {
@@ -234,7 +234,8 @@ static ssize_t firmware_load_store(struct device *dev, struct device_attribute *
 	if (!error) {
 		r->attempted = true;
 		r->version = get_unaligned_le16(fw->data + 2);
-		error = wifi_fw_memory(func, fw, r, imem, emem);
+		error = wifi_fw_memory(func, fw, r, imem, emem,
+				       sysfs_streq(buf, "full"));
 		r->error = error;
 		dev_info(dev, "firmware memory: error=%d cleanup=%d stage=%u bytes=%u cpu=%04x\n",
 			 error, r->cleanup, r->stage, r->bytes, r->cpu);
@@ -262,9 +263,10 @@ static ssize_t firmware_result_show(struct device *dev, struct device_attribute 
 		size = sysfs_emit(buf, "idle\n");
 	else
 		size = sysfs_emit(buf,
-			"error=%d cleanup=%d stage=%u bytes=%u packets=%u version=%04x initial=%04x imem=%04x emem=%04x cpu=%04x\n",
+			"error=%d cleanup=%d stage=%u bytes=%u packets=%u version=%04x initial=%04x imem=%04x emem=%04x cpu=%04x dmem=%04x ready=%04x boot_source=%02x\n",
 			r->error, r->cleanup, r->stage, r->bytes, r->packets,
-			r->version, r->initial, r->imem, r->emem, r->cpu);
+			r->version, r->initial, r->imem, r->emem, r->cpu,
+			r->dmem, r->ready, r->boot_source);
 	mutex_unlock(&sample->lock);
 	return size;
 }

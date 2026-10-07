@@ -48,7 +48,9 @@ available through explicit diagnostic profiles.
 
 Important work remains:
 
-- The internal Wi-Fi device enumerates over SDIO but has no working driver.
+- Internal Wi-Fi enumeration, SDIO transfers and full firmware startup are
+  qualified in the optional test kernel. A working network driver is still
+  pending; scanning and association are not supported.
 - Linux braille, keyboard, battery management and suspend support are incomplete.
 - The normal kernel uses a minimal initramfs to mount the separate NAND
   SquashFS systembase. Writable state is volatile; persistent userdata and
@@ -70,7 +72,7 @@ The loader firmware itself remains in this BSP layer.
 - [NAND support](docs/nand.md): storage layout, protection boundaries and validation.
 - [Internal SD](docs/internal-sd.md): controller identity, read-only baseline and opt-in write testing.
 - [External SD](docs/external-sd.md): removable-slot configuration and read-only qualification.
-- [Internal Wi-Fi](docs/wifi.md): SDIO identity, source investigation, transport qualification and power-stage diagnostics.
+- [Internal Wi-Fi](docs/wifi.md): SDIO identity, source investigation, transport, power and firmware-start qualification.
 - [GPS receiver](docs/gps.md): UART mapping, shared runtime power control and assistance qualification.
 - [Fastboot support](docs/fastboot.md): RAM download and boot workflow.
 - [Boot performance](docs/boot-performance.md): measured bottlenecks and profiling limits.
