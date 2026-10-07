@@ -1,6 +1,6 @@
 # External SD slot
 
-The external slot is being qualified on the S5PV210 controller at
+The opt-in external-SD profile enables the S5PV210 controller at
 `0xeb200000` (`sdhci2`). Factory-driver analysis identifies GPH3[1] as
 the card-detect input with internal pulls disabled. The active-low GPIO configuration has passed physical removal and
 reinsertion testing without a reset.
@@ -30,7 +30,7 @@ the end. It neither mounts the card nor writes to it. Matching repeated
 reads establish repeatability, not comparison against an independent
 known-good copy or a whole-card capacity test.
 
-The pinned build and 109 source checks passed. The RAM image enumerated
+The RAM image enumerated
 an SDHC card on the external controller, reporting 61,071,360 sectors.
 All three pairs of 4 MiB direct reads matched, with individual transfers
 around 6.3–6.8 MB/s. Both SD devices and NAND remained read-only.
@@ -41,7 +41,6 @@ again, with hashes identical to the pre-removal samples and transfers around
 7.6 MB/s. This establishes boot-time detection, bounded repeatable reads,
 and one removal/reinsertion cycle with the tested card. Mechanical write
 protection sensing and writes remain unqualified.
-No persistent firmware was changed.
 
 ## Device-only suspend/resume
 

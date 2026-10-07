@@ -10,7 +10,7 @@
 
 The OS layer supplies `openh432-nand-b`, the minimal
 `openh432-early-b` root handoff, and `openh432-systembase-b`.
-The tiny initramfs is part of normal boot, not leftover early bring-up code.
+The minimal initramfs performs the normal root-filesystem handoff.
 
 ## Installation and recovery
 
@@ -28,15 +28,15 @@ forensic acquisition environment.
 
 These targets are deliberately separate from normal deployment:
 
-| Kernel suffix / matching OS image suffix | Reason retained |
+| Kernel suffix / matching OS image suffix | Purpose |
 | --- | --- |
-| `wifi-test` | Explicit RTL8712 SDIO transport and chip power-stage diagnostics; not a network driver. |
+| `wifi-test` | Runtime Wi-Fi driver with explicit transport and power-stage diagnostics. |
 | `power-test` | Read-only-storage PMIC bus inspection baseline. |
 | `battery-test` | Battery telemetry driver not yet integrated into the runtime. |
 | `input-test` | Key, switch and vibration qualification. |
 | `resume-test` | Suspend bridge and USB power-lifecycle work. |
 | `external-sd-test` | Removable SD and USB-host qualification. |
-| `sd-rw-test` | Explicit removable-SD write qualification. |
+| `sd-rw-test` | Bounded internal-SD filesystem write qualification. |
 | `gps-test` | GPS qualification with the extended peripheral profile. |
 
 Kernel recipes use the prefix `linux-h432b-`; image recipes use
@@ -48,16 +48,9 @@ The optional `u-boot-h432b-nand`, `-nand-profile`, `-nand-timer` and
 `-nand-subpage` targets retain NAND inspection and performance experiments.
 Building one does not promote its behavior into the persistent carrier.
 
-## Retired targets
+## Compatibility
 
-The standalone `linux-h432b` and `linux-h432b-reboot-test` kernels,
-`openh432-reboot-test` image, and `u-boot-h432b-ram`,
-`u-boot-h432b-nand-auto`, `u-boot-h432b-reboot-test` and
-`u-boot-h432b-chain` intermediate loaders are no longer selectable recipes.
-Their applicable code is shared through `.inc` files or superseded by the
-runtime/maintenance targets. Old source and qualification records remain
-recoverable from Git history.
-
-Patch ordering and established deploy-directory identifiers remain stable
-where external tools depend on them. Recipe cleanup is not a firmware upgrade,
-and no new hardware qualification is implied by an include-file refactor.
+Deploy-directory identifiers are stable where host tools depend on them.
+Use the recipe and ROLE.txt for the selected revision, not an artifact's
+historical numeric prefix, to determine its role. Retired intermediate targets
+remain available only by checking out their matching historical revision.

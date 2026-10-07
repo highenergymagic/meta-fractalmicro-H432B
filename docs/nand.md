@@ -22,9 +22,12 @@ A reserved tail is not itself an installed BBT.
 
 Profiles selected by the build launcher are:
 
-- readonly (default): no program/erase operation can pass the controller guard.
+- readonly (diagnostic default): no program/erase operation can pass the controller guard.
 - scratch: only physical 0x1fee0000..0x1ff00000, one 128 KiB block.
 - ubi: only physical 0x00400000..0x1ff00000, the shared Linux pool.
+
+The normal runtime explicitly selects Linux-pool writability; the read-only
+profile is not its storage policy.
 
 Building a profile never deploys, erases, formats, or accesses USB.
 The whole NAND operation is validated before controller accesses, including
@@ -59,48 +62,28 @@ ubiblock is a block-device view of a static UBI volume, not a separate NAND
 partition. SquashFS base images belong on static volumes; mutable state
 belongs in UBIFS/dynamic volumes or the separately planned SD layout.
 
-## Evidence, not assumptions
+## Validation scope
 
-The first Linux scratch erase/program/readback passed for all 64 pages,
-with no ECC failures or corrected bits. Raw inspection confirmed the bad
-markers were unchanged. The protected 4 MiB prefix remained byte-identical,
-including OOB. A full raw+OOB backup exists privately; it is not redistributed.
+Qualification on one device includes scratch-block erase/program/readback,
+unchanged bad-block markers, protected-prefix comparison including OOB, UBI
+provisioning and complete kernel/base-volume hashes. Linux and U-Boot BCH8
+parity agreed for all four page sectors; injected one-through-eight-bit RAM
+errors per sector were corrected.
 
-Independent U-Boot BCH qualification passed: parity matched Linux for all
-four sectors; 1–8 injected bit errors per sector were repaired in RAM; a full
-128 KiB corrected NAND read matched the host CRC. Its heap/stack layout has a
-build-time overlap guard, including a regression for the initially bad layout.
+The persistent CE-carried bootstrap has booted Linux on repeated normal
+resets without host uploads. Normal boot uses a minimal root-handoff initramfs
+and the separate SquashFS systembase, not a full development initramfs.
+See [boot performance](boot-performance.md) for measurements and limits.
 
-UBI provisioning and full kernel/base-volume SHA256 readbacks passed on the
-test device. Seven bounded volumes exist with 138 additional free PEBs beyond
-UBI's internal reserves. Boot prefix plus OOB stayed byte-identical to backup.
-A missing SquashFS parent Kconfig option was fixed and is now a fatal build
-check; the corrected kernel has been written and verified.
+Build checks cover image/heap/stack overlap, carrier format and required
+filesystem configuration. U-Boot NAND writes remain disabled at both MTD
+callbacks and the controller command interface. Persistent Linux-volume
+updates use the Linux UBI path; fastboot has no flash/erase backend.
 
-Interactive NAND boot passed: U-Boot read the static kernel volume and
-launched Linux; independent full SHA256 readbacks, SquashFS mount, RT,
-zero-taint and systemd-health checks passed. The automatic high-RAM NAND
-reader also passed those checks without a host kernel upload. Host-observed
-time from its launch to the Linux shell was 136.261 seconds, of which
-Linux/systemd startup was 28.696 seconds. The reader remains a development implementation. The first automatic attempt exposed two integration bugs:
-mtdparts defaults were not applied to the volatile environment, and the
-USB error fallback attempted double registration. Both are fixed.
+No coordinated A/B activation, power-loss update recovery, NAND endurance
+qualification or complete stock-CE restoration is implemented. Preserve each
+device's actual raw+OOB backup; a vendor EBOOT download is not a substitute.
 
-The CE-carried two-stage NAND bootstrap (artifact prefix `nand56`)
-was installed on the qualification device. Its full 392,060-byte
-NAND payload readback matches the built carrier at physical 0x000c0800.
-StepLoader/EBOOT through 0x000a0000, including OOB, stayed byte-identical.
-Both the factory-assisted launch and a subsequent plain Reset booted kernel_a
-and passed the same full hash/mount/health checks, without host image uploads
-on Reset. The normal-reset test took about 138 seconds to the Linux shell;
-Linux/systemd accounted for 28.731 seconds. Reader optimization remains work.
-
-Image/heap/stack checks run in the build, and the CE packager also reproduces
-the legacy carrier byte-for-byte. Those static checks complement, not replace,
-hardware tests. The kernel bundle still contains a DEBUG initramfs, not
-production root-switch logic. No A/B rollback policy is implemented.
-
-U-Boot NAND writes are disabled at both MTD callbacks and the controller
-command interface. Factory bootloader backups and the prior USB-shell bootstrap were retained
-privately for the qualification device; they are not public recovery downloads. Never substitute a vendor EBOOT download for the actual device's
-backup; they are not necessarily identical.
+See the [installation guide](https://github.com/highenergymagic/openh432-tools/blob/main/docs/installation.md)
+for provisioning prerequisites and the [update command reference](https://github.com/highenergymagic/openh432-tools/blob/main/docs/commands.md#guarded-slot-b-updates)
+for bounded existing-volume updates.

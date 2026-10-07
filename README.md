@@ -83,6 +83,9 @@ The loader firmware itself remains in this BSP layer.
 - [NAND support](docs/nand.md): storage layout, protection boundaries and validation.
 - [Internal SD](docs/internal-sd.md): controller identity, read-only baseline and opt-in write testing.
 - [External SD](docs/external-sd.md): removable-slot configuration and read-only qualification.
+- [Ethernet](docs/ethernet.md): bus configuration, networking and factory identity.
+- [USB host](docs/usb-host.md): diagnostic support and socket topology.
+- [Power management](docs/power-control.md): switch, PMIC and sleep/wake limits.
 - [FM receiver](docs/fm.md): tuning, signal scanning and audio qualification limits.
 - [Internal Bluetooth](docs/bluetooth.md): transport, tested scope and initialization gaps.
 - [Internal Wi-Fi](docs/wifi.md): current support, firmware requirements and optional diagnostics.

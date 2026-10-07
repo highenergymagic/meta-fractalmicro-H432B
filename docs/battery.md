@@ -1,6 +1,12 @@
 # Battery interface
 
-## Recovered hardware interface
+## Availability
+
+Battery telemetry is available only in the opt-in battery-test profile, not
+the normal NAND runtime. It exposes read-only Linux power_supply measurements;
+charger control, full suspend and low-battery policy are not implemented.
+
+## Hardware interface
 
 The stock battery driver uses a separate standard-speed 1-Wire-style
 fuel-gauge connection, not the PMIC I2C bus or a voltage-only ADC estimator.
@@ -118,79 +124,23 @@ stale-data handling, negative GPIO errors and out-of-range capacity. Static
 tests separately check the read-only property list, polling, cleanup and
 default-image isolation.
 
-## Validation
+## Validation scope
 
-A controlled USB-removal test preserved the key-authenticated Ethernet
-session. The secondary-power input changed from asserted to deasserted,
-status became Discharging on the next polling interval, and instantaneous
-current changed from near zero to approximately -240 to -360 mA in the
-first samples. Voltage fell from approximately 4.18 to 4.15 V. This qualifies
-the secondary input as USB-present and the negative-current discharge
-interpretation on the tested board. The average-current register updates more
-slowly and must not be interpreted as instantaneous current. AC and active
-charging transitions remain separate tests.
+RAM-profile tests verified CRC-valid family-0x32 identification, capacity and
+all six power_supply properties. A controlled USB-removal test deasserted the
+secondary-source input and changed status to Discharging, with approximately
+240–360 mA discharge and a voltage change from about 4.18 to 4.15 V.
+This establishes the USB-present mapping and current-sign interpretation.
 
+Repeated fixed-window reads had matching parameter shadows and valid ROM
+CRCs. Gauge readings use pack-stored calibration; they are not independently
+calibrated measurements. Near-zero current must be interpreted against sensor
+offset accuracy. Sticky status flags describe prior conditions and do not
+alone establish present undervoltage or an observed full charge cycle.
 
-The engineering-unit revision passed a RAM boot with all six power_supply
-properties. Three samples six seconds apart had read-only attributes,
-approximately 4.17–4.18 V, 27.0–27.1 degrees C and near-zero instantaneous
-current while externally powered. Standard uevents included voltage,
-temperature and both current values. Kernel taint stayed zero and UBI
-read-only. An authenticated Ethernet SSH session read the same interface.
-
-Validation includes 88 hardware-layer checks, 2,424 compiled status-policy
-matrix cases, 65,534 signed-current conversion cases and additional conversion
-boundary tests. The shared host test also guards against Linux's `current`
-macro colliding with helper parameter names. Full kernel/image builds passed.
-These checks do not establish independent sensor calibration or long-term
-battery health.
-
-
-The fixed-window register diagnostic also passed a RAM boot. Four snapshots
-(eight read passes) had matching parameter blocks and valid ROM CRCs.
-The documented conversion gave approximately 4.18 V and 26.9 degrees C,
-with programmed conductance 50 inverse ohms (20 milliohms). Instantaneous
-current was approximately +0.3 to +0.4 mA, below the significance of the
-specified offset accuracy. Average current briefly indicated about -8.8 mA
-after boot, so it must not be confused with the instantaneous sample.
-
-The gauge's latched charge-termination flag was set. Together with 100
-percent and near-zero current this is consistent with a charged battery on
-external power, not proof of a complete observed charging cycle. A historical
-undervoltage flag was also set; it is sticky until explicitly cleared and
-does not indicate that the measured cell voltage is currently low. No flags
-were cleared. Exact model, external voltage scaling and independent physical
-calibration remain unverified.
-
-The register revision passed 87 hardware-layer tests and all 2,003 build
-tasks. Live systemd had no failed units; kernel taint was zero and UBI was
-read-only. This is still opt-in RAM qualification, not a NAND deployment.
-
-
-The power_supply revision built successfully with the pinned toolchain.
-The 86 hardware-layer and 24 OS-layer tests passed, and the container executed
-2,424 C status-policy matrix cases plus range/error checks. A RAM launch
-exposed type Battery, capacity 100 and status Not charging through standard
-sysfs and uevent properties. Three readings six seconds apart agreed.
-Capacity/status attributes were read-only; unverified measurement and identity
-attributes were absent. UBI stayed read-only and the kernel untainted.
-This is a RAM qualification, not a NAND installation or a source-transition test.
-
-Initial transport qualification:
-
-The opt-in image built with the pinned OE toolchain in Docker. The hardware
-and OS layer suites passed 105 tests, including six static scope checks.
-A RAM boot using the installed slot-B root succeeded. Two snapshots five
-seconds apart returned matching CRC-valid ROMs, family code0x32 and capacity
-100 percent. With USB as the sole connected source, the secondary input was
-asserted and the primary input deasserted. This supports, but does not yet
-fully qualify, the secondary-input USB interpretation. The kernel remained
-untainted and UBI read-only.
-
-This qualifies communication and capacity reads on one device. Family0x32
-does not distinguish DS2780, DS2784 and DS2788. Voltage/current scaling and
-controlled source transitions are still unverified. No charger or calibration
-settings were changed, and the image was not written to NAND.
+Compiled tests cover status/GPIO combinations, stale/error handling and signed
+conversion boundaries. Active charging transitions, the AC input, exact gauge
+model, long-term pack health and NAND-runtime integration remain unqualified.
 
 ## References
 

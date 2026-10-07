@@ -36,7 +36,7 @@ is deliberately unlocked and retains a privileged physical USB shell.
 ## Boot image contract
 
 The OS layer's `openh432-fastboot-ram` target creates
-`openh432-ram-boot.img`, an Android header-v2 envelope containing our Linux
+`openh432-ram-boot.img`, an Android header-v2 envelope containing the Linux
 zImage, XZ initramfs and DTB. Android userspace is not needed.
 
 - Header page 2048 bytes, version 2, size 1660.
@@ -66,7 +66,7 @@ EBOOT uploader as a CE/NAND carrier.
 
 ## Validation and remaining work
 
-On a real U2, standard fastboot 35.0.2 enumerated RAM53, downloaded a
+On a real U2, standard fastboot 35.0.2 enumerated the fastboot RAM loader, downloaded a
 10,100,632-byte rootfs in 8.14 s with matching CRC, and transferred the complete
 13,735,936-byte boot envelope in about 11 s. Linux reached the systemd USB
 console and passed the baseline health/read-only hardware checks. Eleven

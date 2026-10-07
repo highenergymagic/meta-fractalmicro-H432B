@@ -17,7 +17,7 @@ boot path. A failed clear stays in USB maintenance. A fastboot request skips
 NAND initialization and enters the maintenance loop. It does not enable
 fastboot flash or erase.
 
-Linux uses the upstream syscon-reboot-mode driver. The intended interface is
+Linux uses the upstream syscon-reboot-mode driver. The userspace interface is
 `systemctl reboot --reboot-argument=bootloader` (or `fastboot`), not an
 arbitrary userspace register writer. The nonzero normal value matters because
 the pinned Linux notifier does not invoke its writer for zero magic.
@@ -58,8 +58,6 @@ not reboot or access NAND. It is not installed by default.
 
 Consumer tests cover known and unknown requests, one-shot consumption and
 clear failure. Build and unit-test success are not hardware qualification.
-Historical experimental artifacts and their source revisions remain in Git
-history; they are not additional supported installation targets.
 
 See [boot contracts](boot-contract.md) for carrier packaging and
 [Ethernet support](ethernet.md) for the factory identity handoff.

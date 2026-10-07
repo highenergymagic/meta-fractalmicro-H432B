@@ -1,6 +1,13 @@
 # Internal Bluetooth
 
-## Hardware evidence
+## Availability
+
+The normal runtime includes the BCSP transport and BlueZ packages, but
+FMBluetoothTransport.service is disabled by default. Factory radio parameters
+and device identity require manual initialization. Discovery, pairing and
+L2CAP traffic are verified; automatic startup and audio are not implemented.
+
+## Hardware configuration
 
 The factory Bluetooth BuiltIn transport selects CSR BCSP on COM1. The serial
 registry maps COM1 to S5PV210 UART0 at `0xe2900000`; COM2/UART1 is the separate
@@ -29,15 +36,14 @@ sets the nonstandard baud rate with Linux termios2/BOTHER and verifies the
 readback; BCSP framing and link establishment remain in upstream BlueZ/Linux.
 
 The OS layer packages BlueZ and `FMBluetoothTransport.service`. The transport
-service is initially disabled for explicit hardware qualification. It waits
+service is disabled by default. It waits
 five seconds, uses 8E1 through BlueZ's BCSP setup, and has no automatic restart
 loop. GPS, Wi-Fi and other power rails are not modified by this service.
 
-A NAND-booted kernel and base image have established BCSP communication and
-returned the controller version and address. Bench initialization in volatile
+BCSP controller-version and address queries have passed on the NAND runtime. Bench initialization in volatile
 PSRAM restored the recovered factory address; a controller warm reset and
 reattachment retained it. Automatic factory-identity provisioning and startup
-configuration are not yet integrated. Hardware testing with a Noxgear 39g speaker has now passed BR/EDR discovery,
+configuration are not yet integrated. Hardware testing with a Noxgear 39g speaker has passed BR/EDR discovery,
 legacy pairing/bonding, SDP service discovery and ten L2CAP echo exchanges
 (10/10 replies). The audio backend is not included, so this does not qualify
 A2DP playback. Repeat NAND boot with automatic initialization, persistent

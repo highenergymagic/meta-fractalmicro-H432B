@@ -11,7 +11,7 @@ Its factory layout contains a FAT32 logical partition starting at sector 2.
 This capacity and layout are observations from one device, not universal
 requirements for replacement cards.
 
-## Baseline
+## Runtime configuration
 
 The historical base device tree retains `hims,read-only-probe` on the
 internal controller. A board-scoped MMC block-layer guard prevents writes
@@ -59,9 +59,8 @@ No MMC or FAT errors were reported during the test. The kernel remained
 untainted, no systemd services were failed, NAND remained read-only, and
 the SD filesystem was unmounted after test-file cleanup. Existing partitions
 were retained. That diagnostic test did not alter the NAND image. Internal
-SD write support was subsequently enabled in the normal NAND runtime.
+SD writes are also enabled in the normal NAND runtime.
 
-The pinned build and 106 source tests passed. A fresh cross-host bit-for-bit
-comparison has not been performed for this new diagnostic image. Whole-card
-capacity verification, sustained workloads, higher clocks, and power-loss
-behavior remain unqualified.
+Whole-card capacity verification, sustained workloads, higher clocks and
+power-loss behavior remain unqualified. Existing partitions are retained;
+normal boot does not provision the planned system-extension/data layout.

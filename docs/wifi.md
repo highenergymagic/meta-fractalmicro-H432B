@@ -150,7 +150,7 @@ Check operation and cleanup errors; cleanup does not undo volatile chip setup.
 | `loopback` | Historical first-reply/second-timeout failure, not acceptance |
 
 Normal-command replies in these diagnostics are exact factory debug events,
-not generic protocol acknowledgements. An earlier intermittent error-report
+not generic protocol acknowledgements. An intermittent diagnostic error-report
 value `08` remains unexplained; it was also observed in successful scans.
 
 ## Tests

@@ -6,7 +6,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 GUIDE = (ROOT / "docs/wifi.md").read_text()
-HISTORY = (ROOT / "docs/wifi-qualification.md").read_text()
+RECORD = (ROOT / "docs/wifi-qualification.md").read_text()
 DRIVER = (ROOT / "recipes-kernel/linux/files/h432b-wifi-transport.c").read_text()
 
 
@@ -20,10 +20,12 @@ class WifiDocumentation(unittest.TestCase):
         documented = set(re.findall(r"^\| `([^`]+)` \|", table, re.MULTILINE))
         self.assertEqual(accepted, documented)
 
-    def test_guide_and_history_are_separate(self):
+    def test_guide_and_validation_are_separate(self):
         self.assertIn("(wifi-qualification.md)", GUIDE)
-        self.assertIn("(wifi.md)", HISTORY)
-        self.assertIn("not current operating instructions", HISTORY)
+        self.assertIn("(wifi.md)", RECORD)
+        for section in ("## Scope and artifacts", "## Results", "## Limits"):
+            self.assertIn(section, RECORD)
+        self.assertNotIn("## Pending firmware-event inspection", RECORD)
         self.assertNotIn("SHA256", GUIDE)
 
     def test_limitations_remain_explicit(self):

@@ -1,6 +1,13 @@
 # Wired Ethernet
 
-## Hardware evidence
+## Availability
+
+Wired Ethernet is included in the normal runtime. The systembase configures
+DHCP through systemd-networkd. Network access and key-authenticated maintenance
+SSH have been exercised on hardware; standalone power sequencing and suspend
+remain unqualified.
+
+## Hardware configuration
 
 The H432B's wired controller was identified by live register reads as an
 SMSC LAN9220: BYTE_TEST is `0x87654321`, ID_REV is `0x92200000`.
@@ -12,11 +19,6 @@ The inherited SROM_BW bank5 nibble is `0xd`; SROM_BC5 is `0x040e1460`.
 CE's board initialization selects function 2 on MP01 pins 5, 6 and 7,
 uses GPH1[1]/EINT9 with low-level signaling and a pull-up, and drives an
 active-low controller reset on GPH1[2].
-
-A live transient test changed only MP01[5] from function 5 to function 2.
-That changed the byte-test result from all ones to its correct signature.
-The original pinmux nibble was then restored and read back successfully.
-The test did not reset the controller, write its EEPROM, or write NAND.
 
 ## Linux configuration
 
@@ -51,11 +53,10 @@ Diagnostics and device logs stay out of the source repository.
 
 ## Validation status
 
-Chip identity, byte ordering, chip-select correction and restoration are
-hardware-verified. All 54 layer source tests pass. The enabled Ethernet kernel, device tree
-and RAM boot envelope compiled successfully through the pinned Docker/OE build
-(2,840-task graph). Native metadata CI passed. These are not yet boot-tested;
-PHY discovery, IRQ self-test, cable link, DHCP and packet transfers remain pending. No networking configuration or network-accessible shell is added.
+The LAN9220 identity and register byte ordering have been verified. Ethernet
+has provided network access and maintenance SSH on the NAND system, including
+a session maintained while USB was disconnected. Performance, broad PHY/link
+interoperability and suspend/resume are not qualified.
 
 Upstream references:
 [Linux binding](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/Documentation/devicetree/bindings/net/smsc,lan9115.yaml?h=linux-6.12.y),
@@ -86,9 +87,7 @@ boot name and a removable battery's identity are not suitable system serials.
 Per-device addresses and identifiers must never be embedded in published
 sources or generic firmware artifacts.
 
-Validation: native parser tests and 90 hardware-layer integration tests pass.
-Both the standalone fastboot stage and the NAND maintenance carrier compile in
-the pinned builder. On the tested unit, recovery-assisted launch and an
+On the qualification device, recovery-assisted launch and an
 independent plain-Reset NAND boot expose the same factory address and derived
 board ID. Linux reports address assignment type 0, and systemd preserves the
 address. This does not qualify other firmware revisions or establish a

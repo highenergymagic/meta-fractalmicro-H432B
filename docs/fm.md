@@ -1,66 +1,61 @@
-# Internal FM receiver
+# FM receiver
 
-## Hardware
+## Availability
 
-A normal NAND boot read device ID `0x1242` and powered-down chip ID
-`0x1000`, identifying a Silicon Labs Si4702 revision C. This part has no RDS.
-The control interface is I2C address `0x10`, carried on GPIO-emulated I2C:
-GPD1[0] is SDA and GPD1[1] is SCL. These are separate from the PMIC bus.
+The normal runtime exposes the internal Si4702-C19 as V4L2 `/dev/radio0`.
+Tuning and muted signal scanning are verified, with peaks corroborated against
+local broadcasts. Audible FM output and stereo reception remain unverified.
+The Si4702 has no RDS decoder; station names and programme text are unavailable.
 
-Board startup uses GPE0[4] power enable, active-low GPH3[2] reset and
-GPH1[4] held high as in the factory initialization. The tuner-side function
-of the last signal has not been independently established. Identity readback
-has validated this power/reset sequence; no enclosure access is needed.
+## Hardware configuration
 
-## Linux integration
+| Resource | Configuration |
+| --- | --- |
+| Control bus | GPIO I2C, seven-bit address 0x10 |
+| SDA / SCL | GPD1[0] / GPD1[1], separate from the PMIC bus |
+| Enable | GPE0[4], active high |
+| Reset | GPH3[2], active low |
+| Additional control | GPH1[4] held high; tuner-side role not independently established |
 
-The runtime includes the upstream Si470x I2C driver with board sequencing,
-crystal startup and bounded tune-completion polling. No interrupt pin is
-assumed. The board path defaults to muted audio, retains reserved register
-values and does not expose RDS or hardware seek. It uses 100 kHz spacing and
-50 microsecond de-emphasis over 87.5--108 MHz.
+The upstream Si470x I2C driver is extended with board sequencing, crystal
+startup and bounded tune-completion polling. No interrupt pin is assumed.
+The configured band is 87.5–108 MHz, with 100 kHz spacing and 50 microsecond
+de-emphasis. Startup defaults to muted audio and preserves reserved values.
+Hardware seek and suspend are not qualified.
 
-The standard interface is V4L2 `/dev/radio0`, not PCM audio. Audio is an
-analogue path into the WM8983 codec and requires separate ALSA routing.
-Codec routing, audible reception, automatic seeking and power-management
-qualification remain incomplete. Hiss alone is not evidence of receiving a
-station. A wired headphone lead is used as the antenna in the factory design.
+## Audio and antenna
 
-The optional `h432b-fm-check` recipe builds an explicit, muted V4L2 tuning
-test client. An explicit `--listen` option unmutes the tuner at 87.5 MHz
-for ten seconds after the tuning checks. It remutes before closing, including
-on handled interruption; it does not configure the codec or speaker. It is not started automatically or installed in the default
-systembase. The `--scan` option instead scans 87.5–108 MHz in 100 kHz
-steps, remains muted, waits 200 ms after tuning, and reports V4L2 signal,
-stereo and AFC-rail indicators. Signal is the driver's scaled 0–65535 value,
-not a percentage or a calibrated field-strength measurement. By default it selects five frequencies and requires matching readback and
-mute enabled; it does not claim broadcast reception.
+Audio is analogue into the WM8983 codec, not a PCM stream from the tuner.
+It requires separate ALSA input/line-bypass routing and output enablement.
+The codec path has been powered during a bounded test, but no listening
+confirmation establishes end-to-end FM audio.
 
-## Qualification
+The factory antenna uses the headphone lead. An unterminated compatible audio
+cable may provide reception, but connector wiring and cable geometry affect
+performance. A signal peak alone is not decoded station identity, and hiss
+does not establish reception of a broadcast.
 
-- NAND identity-only driver: device/chip IDs read successfully; kernel untainted.
-- Standard V4L2 driver: normal NAND boot registered `/dev/radio0` and read
-  powered-up chip ID `0x1053` (Si4702-C19).
-- Two open/tune/close cycles each selected 87.5, 90.5, 99.5, 107.9 and
-  87.5 MHz. All ten frequency readbacks matched, with mute remaining enabled.
-  Signal readings were zero without a headphone antenna. No failed systemd
-  units or kernel taint were reported.
-- Kernel bundle SHA-256:
-  `cce985f4bb928c739d99473d48630b61d55287ac362835882bab1da14d9f19a3`.
-  Slot-B readback passed and kernel A was unchanged. The systembase and
-  bootloader were not replaced. This is hardware qualification of a local-layer
-  build, not a clean-build or cross-architecture reproducibility result.
-- Analogue route test: ALSA powered the input PGA, boost mixer, line bypass,
-  output stages and internal speaker without a PCM stream. A ten-second
-  tuner-unmute test completed at reduced output gain, and the complete ALSA
-  control readback afterward matched its saved baseline. Audible output was inconclusive because the listener was not in a position
-  to hear the test; RF station reception remains unqualified.
-- With a 3.5 mm/composite adapter used as an improvised antenna, a muted
-  206-point scan completed with every tuning readback correct. Weak peaks
-  appeared around 90.1 and 94.1 MHz (maximum V4L2 signal 4369/65535), but
-  no stereo indication. The operator corroborated the peak frequencies against known local broadcasts.
-  This supports RF station detection, not decoded station identity or audio
-  qualification. The Si4702 cannot provide RDS station names.
-  Mixer controls were unchanged after the scan.
+## Diagnostic client
 
-Factory firmware, disassembly and device logs remain private.
+Build the optional target from the build repository:
+
+```sh
+python3 scripts/bsp.py build h432b-fm-check
+```
+
+The deployed `h432b-fm-check` executable is not installed or started by the
+default systembase. After explicit transfer to the target:
+
+| Invocation | Behavior |
+| --- | --- |
+| No arguments | Five muted tuning/readback checks |
+| `--scan` | 206 muted points across the band, 200 ms settling after each tune |
+| `--listen` | Checks, then ten seconds of unmuted tuner output at 87.5 MHz |
+
+Listening does not configure codec routing. The client remutes before closing,
+including handled termination. Scan output reports frequency, V4L2 signal,
+stereo, mute and AFC-rail state. Signal is the driver's scaled 0–65535 value,
+not a percentage or calibrated field-strength measurement.
+
+See [FM validation](https://github.com/highenergymagic/openh432-build/blob/main/docs/hardware-validation.md#fm)
+for the tested artifact, scan results and qualification limits.

@@ -17,13 +17,12 @@ and source timestamps remain in effect.
 
 ## Qualification
 
-Switching toolchains changes generated code. Passing unit tests, compilation
-or cross-host hash comparison does not inherit the old artifacts' device
-qualification. Retain the working boot artifacts, verify memory-layout limits,
-then qualify replacement images through the recovery/RAM path before any
-persistent installation.
+Compiler changes require renewed memory-layout checks, artifact comparisons
+and device qualification. Build success and equal hashes do not establish
+hardware behavior.
 
-A newer U-Boot port is a separate migration after this toolchain baseline.
-It must retain the factory boot-image contract, recovery access, accessible
-startup feedback and tested memory/NAND layout. Do not combine the compiler
-migration with a persistent bootloader replacement.
+The measured native amd64/ARM64 comparison and its exact input revisions are
+recorded in [cross-host validation](https://github.com/highenergymagic/openh432-build/blob/main/docs/cross-host-validation.md).
+A newer U-Boot port must preserve the factory image contract, recovery access,
+accessible startup feedback and memory/NAND layout independently of compiler
+qualification.
