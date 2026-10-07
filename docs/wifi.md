@@ -7,9 +7,16 @@ function 1, class 07, on the controller at `eb300000`. Its function CIS
 advertises 512-byte maximum blocks. MMC host numbers are asynchronous; do
 not identify the radio or internal storage by an assumed `mmc0` number.
 
+The optional test kernel has device-qualified power initialization, firmware
+startup, native power-state acknowledgement, repeated normal commands, and
+passive scanning on channels 1, 6 and 11. It still has **no Linux wireless
+network interface**: association, encryption and data traffic are not yet
+implemented or qualified. The factory firmware used for testing is private
+and is not distributed by the BSP.
+
 Board power, clock selection and the narrowly scoped malformed-CIS workaround
-are implemented. Enumeration alone does not establish firmware loading,
-interrupt delivery, packet transfer or Wi-Fi connectivity.
+are implemented. The sections below distinguish current capabilities from
+historical intermediate tests; enumeration alone does not prove connectivity.
 
 ## Source investigation
 
@@ -435,10 +442,57 @@ or cleanup errors, kernel taint or failed services. The unexplained `08` report
 appeared in the successful survey; the normal-command run's sampled reports
 were zero. This change does not resolve that report's meaning.
 
+## Native firmware-event diagnostic
+
+The opt-in `opmode-irq` and `survey-irq` command actions use a native SDIO
+completion callback instead of polling for command responses. The callback
+masks all device sources before reading status and wakes the requester; only
+C2H bit 1 is armed between reads. It does not write a guessed status-clear value
+or enable RX and miscellaneous sources without handlers.
+
+The requester releases the MMC host while waiting, validates the event stream
+with the existing parser, and removes the interrupt handler on every exit.
+Timeouts fail the test: there is no polling fallback. Callback, empty-wakeup,
+status and error counts are reported independently. This implementation is
+qualified for the bounded tests below, not a complete runtime interrupt policy.
+
+Bundle SHA256
+`0bebbf1cd34088222fa7e253b7a10323b5124fb5b86936d9ab012edd08dfa1d4`
+passed sixteen normal commands with sixteen native callbacks, sixteen exact
+replies and zero empty wakeups. A separate fresh boot completed a passive
+survey with one validated report and matching count. That run had twenty
+callbacks, **eleven with no new FIFO data**. No polling fallback was used;
+request, handler and cleanup errors were zero, kernel taint was zero and no
+services failed. This establishes notification delivery and bounded event
+consumption, not efficient acknowledgement or freedom from redundant IRQs.
+The repeated empty notifications require further investigation.
+
+The `stress-irq` action sends 256 normal commands using an independent loop
+counter and a seven-bit wire sequence. Bundle SHA256
+`57a2e2a16470fb79f1113da5595bcba5ade7f743eca3f72e1a8d9e8d3c7729d6`
+passed all 256 requests with 256 exact replies and 256 native callbacks, zero
+empty wakeups and zero request/handler/cleanup errors. The 276-event stream
+remained continuous across sequence wraparound, and command pages remained
+available. Sampled error reports, kernel taint and failed-service counts were
+zero. This qualifies repeated execution of this command across wraparound,
+not arbitrary command coverage or wireless data transfer.
+
+The `survey-repeat-irq` action sends two normal commands followed by three
+passive surveys without resetting the radio. Per-survey record counts are
+reset and independently checked; completed-survey and aggregate-report counts
+are reported separately. A separate fresh boot of the same bundle passed all
+three surveys: nineteen validated reports in aggregate (not nineteen unique
+networks), each survey's completion count matching its reports, and six reports
+in the final survey. The event stream remained continuous, with no request,
+handler or cleanup errors, kernel taint or failed services. There were 56 native
+callbacks, including 26 empty wakeups, so the redundant-notification limitation
+remains. No association or data transmission was requested.
+
 ## Remaining milestones
 
 - Qualify the warm chip initialization path and repeated power cycles.
-- Resolve additional status flags; qualify subsequent C2H sequences and event interrupts.
+- Resolve additional status flags and empty C2H notifications; implement an
+  efficient continuous event-processing policy.
 - Extend the qualified command subset and implement RX packet handling.
 - Integrate a maintained wireless userspace interface, then qualify association
   and data transmission.

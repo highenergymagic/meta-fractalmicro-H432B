@@ -282,7 +282,10 @@ static void h432b_wifi_irq(struct sdio_func *func)
 {
 	struct h432b_wifi_sample *sample = sdio_get_drvdata(func);
 
-	wifi_ack_irq(func, &sample->ack);
+	if (sample->command.irq_mode)
+		wifi_command_irq(func, &sample->command);
+	else
+		wifi_ack_irq(func, &sample->ack);
 }
 
 static ssize_t power_ack_store(struct device *dev, struct device_attribute *attr,
@@ -398,7 +401,9 @@ static ssize_t command_test_store(struct device *dev, struct device_attribute *a
 	int error;
 
 	if (!sysfs_streq(buf, "loopback") && !sysfs_streq(buf, "opmode") &&
-	    !sysfs_streq(buf, "survey"))
+	    !sysfs_streq(buf, "survey") && !sysfs_streq(buf, "opmode-irq") &&
+	    !sysfs_streq(buf, "survey-irq") && !sysfs_streq(buf, "stress-irq") &&
+	    !sysfs_streq(buf, "survey-repeat-irq"))
 		return -EINVAL;
 	mutex_lock(&sample->lock);
 	if (r->attempted || sample->event.attempted) {
@@ -412,9 +417,14 @@ static ssize_t command_test_store(struct device *dev, struct device_attribute *a
 		goto out;
 	}
 	r->attempted = true;
-	r->survey = sysfs_streq(buf, "survey");
-	r->opmode = r->survey || sysfs_streq(buf, "opmode");
-	error = wifi_command_test(func, r, sample->firmware.c2h_base);
+	r->stress = sysfs_streq(buf, "stress-irq");
+	r->survey_repeat = sysfs_streq(buf, "survey-repeat-irq");
+	r->irq_mode = r->stress || r->survey_repeat ||
+		      sysfs_streq(buf, "opmode-irq") || sysfs_streq(buf, "survey-irq");
+	r->survey = r->survey_repeat || sysfs_streq(buf, "survey") ||
+		    sysfs_streq(buf, "survey-irq");
+	r->opmode = r->survey || r->irq_mode || sysfs_streq(buf, "opmode");
+	error = wifi_command_test(func, r, sample->firmware.c2h_base, h432b_wifi_irq);
 	r->error = error;
 	if (!error)
 		error = r->cleanup;
@@ -449,6 +459,15 @@ static ssize_t command_result_show(struct device *dev,
 			r->mac_stage, r->mac_before[0], r->mac_after[0],
 			r->mac_before[1], r->mac_after[1], r->pmc_after,
 			r->pause_after, r->debug_after);
+	if (r->attempted)
+		size += sysfs_emit_at(buf, size,
+			"commands_done=%u survey_runs=%u survey_total=%u\n",
+			r->commands_done, r->survey_runs, r->survey_total);
+	if (r->irq_mode)
+		size += sysfs_emit_at(buf, size,
+			"irq_native=%d irq_callbacks=%u irq_empty=%u irq_error=%d irq_status=%04x\n",
+			r->irq_native, r->irq_callbacks, r->irq_empty,
+			r->irq_error, r->irq_status);
 	if (r->survey)
 		size += sysfs_emit_at(buf, size,
 			"survey_sent=%d survey_done=%d survey_events=%u survey_count=%u\n",

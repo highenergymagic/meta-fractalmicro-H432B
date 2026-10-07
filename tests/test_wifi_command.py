@@ -37,7 +37,7 @@ class WifiCommand(unittest.TestCase):
 
     def test_reply_fields_and_bounds(self):
         for text in ("length == 12", "p[9] == 0x11 + seq * 0x10",
-                     "r->survey ? 3 : (r->opmode ? 16 : 2)", "r->replies++", "r->batches >= (r->survey ? 256 : 64)",
+                     "r->survey ? 3 : (r->opmode ? 16 : 2)", "r->replies++", "r->batches >= (r->stress ? 512 : (r->survey ? 256 : 64))",
                      "i < 32", "i < tries && !r->matched"):
             self.assertIn(text, C)
         self.assertIn("!r->sent || r->matched", C)
@@ -107,6 +107,45 @@ class WifiCommand(unittest.TestCase):
         power = (ROOT / "h432b-wifi-power.h").read_text()
         self.assertIn("func->tmpbuf", power)
         self.assertIn("sdio_f0_readb", (ROOT / "h432b-wifi-firmware.h").read_text())
+
+    def test_native_c2h_interrupt_mode(self):
+        for token in ("opmode-irq", "survey-irq", "wifi_command_irq(func",
+                      "irq_callbacks=%u", "irq_empty=%u"):
+            self.assertIn(token, D)
+        for token in ("sdio_claim_irq(func, handler)", "sdio_release_irq(func)",
+                      "reinit_completion", "wait_for_completion_timeout",
+                      "r->irq_status & BIT(1)", "r->irq_empty++",
+                      "time_after_eq(jiffies, deadline)"):
+            self.assertIn(token, C)
+        callback = C.split("static void wifi_command_irq", 1)[1].split("static int wifi_command_arm", 1)[0]
+        self.assertLess(callback.index("sdio_writew(func, 0, WIFI_HIMR"),
+                        callback.index("sdio_readw(func, WIFI_HISR"))
+        self.assertNotIn("mutex_lock", callback)
+        wait = C.split("static int wifi_command_wait", 1)[1].split("static void wifi_command_snapshot", 1)[0]
+        self.assertLess(wait.index("sdio_release_host(func)"),
+                        wait.index("wait_for_completion_timeout"))
+        self.assertLess(wait.index("wait_for_completion_timeout"),
+                        wait.index("sdio_claim_host(func)"))
+        self.assertNotIn("wifi_command_drain", wait)
+
+    def test_sequence_wrap_and_repeated_survey(self):
+        for token in ("r->stress ? 256", "r->survey_repeat ? 5",
+                      "command < commands", "(command + 1) & 0x7f",
+                      "r->survey && command >= 2", "r->commands_done++",
+                      "r->survey_runs++", "r->survey_total += r->survey_count"):
+            self.assertIn(token, C)
+        sequence = [(command + 1) & 0x7f for command in range(256)]
+        self.assertEqual(sequence[:2], [1, 2])
+        self.assertEqual(sequence[126:130], [127, 0, 1, 2])
+        self.assertEqual(sequence[-1], 0)
+        self.assertEqual(sequence.count(0), 2)
+        self.assertNotIn("r->command_seq <= commands", C)
+        reset = C.split("r->scanning = r->survey", 1)[1].split("tries =", 1)[0]
+        for token in ("r->survey_events = 0", "r->survey_count = 0",
+                      "r->survey_done = false"):
+            self.assertIn(token, reset)
+        self.assertIn('sysfs_streq(buf, "stress-irq")', D)
+        self.assertIn('sysfs_streq(buf, "survey-repeat-irq")', D)
 
     def test_exclusive_stream_owner(self):
         self.assertIn("r->attempted || sample->event.attempted", D)

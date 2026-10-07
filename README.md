@@ -48,9 +48,11 @@ available through explicit diagnostic profiles.
 
 Important work remains:
 
-- Internal Wi-Fi enumeration, firmware startup, native-host power acknowledgements
-  and an initial firmware-event FIFO read are qualified in the optional test kernel. A working network driver is still
-  pending; scanning and association are not supported.
+- Internal Wi-Fi firmware startup, native SDIO notifications, normal commands
+  and passive scanning are qualified in the optional test kernel. There is no
+  Linux wireless network interface yet; association and data traffic remain
+  unsupported. Firmware redistribution and redundant interrupt handling are
+  unresolved. See the [Wi-Fi qualification guide](docs/wifi.md).
 - Linux braille, keyboard, battery management and suspend support are incomplete.
 - The normal kernel uses a minimal initramfs to mount the separate NAND
   SquashFS systembase. Writable state is volatile; persistent userdata and
