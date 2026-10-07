@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
-require linux-h432b-reboot-test_6.12.111.bb
+require linux-h432b-platform.inc
 SUMMARY = "H432B runtime kernel with writable Linux storage and GPS"
-# Unlike its historical diagnostic parent, this is the default provider.
+# The runtime is the sole default kernel provider.
 H432B_KERNEL_PROVIDER_REMOVE = ""
 KERNEL_PACKAGE_NAME = "kernel"
 KERNEL_DEPLOYSUBDIR = "kernel-runtime"

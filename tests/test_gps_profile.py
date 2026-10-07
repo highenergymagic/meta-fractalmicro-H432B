@@ -24,7 +24,7 @@ class GpsProfileTests(unittest.TestCase):
         self.assertIn("devm_add_action_or_reset",text)
     def test_nand_and_diagnostic_share_gps(self):
         recipes=ROOT/"recipes-kernel/linux"
-        recipe=(recipes/"linux-h432b-reboot-test_6.12.111.bb").read_text()
+        recipe=(recipes/"linux-h432b-platform.inc").read_text()
         self.assertIn("0014-h432b-gps-power.patch",recipe)
         self.assertIn("u2-gps.config",recipe)
         self.assertNotIn("external-sd",recipe)

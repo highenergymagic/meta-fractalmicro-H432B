@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-RECIPE = ROOT / "recipes-kernel/linux/linux-h432b_6.12.111.bb"
+RECIPE = ROOT / "recipes-kernel/linux/linux-h432b-base.inc"
 
 
 class KernelRecipe(unittest.TestCase):

@@ -10,7 +10,7 @@ class TimerRecipe(unittest.TestCase):
         self.assertIn('H432B_UBOOT_ROLE = "ram-nand-timer"', recipe)
         self.assertIn("${BUILD_CC}", recipe)
         self.assertIn("test-timer", recipe)
-        for name in ("u-boot-h432b.inc", "u-boot-h432b-chain_2012.10.bb"):
+        for name in ("u-boot-h432b.inc", "u-boot-h432b-chain.inc"):
             self.assertNotIn("timer/u2timer", (BOOT / name).read_text())
 
     def test_state_and_register_scope(self):

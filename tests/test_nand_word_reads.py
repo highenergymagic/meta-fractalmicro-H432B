@@ -7,7 +7,7 @@ PATCH = ROOT / "recipes-kernel/linux/files/0015-nand-word-reads.patch"
 
 class NandWordReads(unittest.TestCase):
     def test_patch_is_in_common_kernel_series(self):
-        recipe = (ROOT / "recipes-kernel/linux/linux-h432b_6.12.111.bb").read_text()
+        recipe = (ROOT / "recipes-kernel/linux/linux-h432b-base.inc").read_text()
         self.assertLess(recipe.index("0008-nand-bch-window.patch"),
                         recipe.index(PATCH.name))
 

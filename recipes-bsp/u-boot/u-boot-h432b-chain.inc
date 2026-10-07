@@ -3,12 +3,8 @@ require u-boot-h432b.inc
 SUMMARY = "H432B CE-address NAND bootstrap with verified high-RAM second stage"
 SRC_URI += "file://0006-nand-chain.patch file://chain/u2chain.c \
             file://chain/u2stage.S file://chain/stage-header.py file://chain/ce-carrier.py file://nand/check-memory.py"
-H432B_UBOOT_ROLE = "nand56-chain-raw"
 H432B_UBOOT_ENTRY = "40021000"
-H432B_UBOOT_WARNING = "Raw NAND56 bootstrap at 0x40021000. Must use validated CE carrier; never flash this raw binary."
-H432B_CHAIN_STAGE_RECIPE ?= "u-boot-h432b-nand-auto"
-H432B_CHAIN_STAGE_DIR ?= "ram55-nand-autoboot"
-H432B_CHAIN_CARRIER_DIR ?= "nand56-ce-carrier"
+# The concrete carrier recipe supplies its stage, output paths and role.
 do_configure[depends] += "${H432B_CHAIN_STAGE_RECIPE}:do_deploy"
 do_configure:prepend() {
     install -m 0644 ${UNPACKDIR}/chain/u2chain.c ${S}/board/hims/u2/

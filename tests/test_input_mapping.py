@@ -41,7 +41,7 @@ class InputMapping(unittest.TestCase):
             self.assertNotIn(forbidden, source)
         self.assertIn("module_platform_driver(h432_input_driver)", source)
         self.assertNotIn("module_platform_driver(driver)", source)
-        self.assertNotIn("h432b-input.c", (ROOT / "recipes-kernel/linux/linux-h432b_6.12.111.bb").read_text())
+        self.assertNotIn("h432b-input.c", (ROOT / "recipes-kernel/linux/linux-h432b-base.inc").read_text())
 
     def test_motor_opt_in(self):
         source = (ROOT / "recipes-support/h432b-vibrator-test/files/vibrator-test.c").read_text()

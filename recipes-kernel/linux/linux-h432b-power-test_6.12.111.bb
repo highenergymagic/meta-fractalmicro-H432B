@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-require linux-h432b-reboot-test_6.12.111.bb
+require linux-h432b-platform.inc
 SUMMARY = "Opt-in H432B PMIC bus inventory kernel"
 KERNEL_PACKAGE_NAME = "kernel-power-test"
 KERNEL_DEVICETREE = "samsung/s5pv210-hims-u2-power-test.dtb"

@@ -11,11 +11,10 @@ not hardware revisions or a request to install successive versions.
 | Recipe | Deploy directory | Role and link address |
 | --- | --- | --- |
 | `u-boot-h432b` | `nand51-raw` | USB-shell bootstrap at 0x40021000; raw binary requires CE packaging. |
-| `u-boot-h432b-ram` | `ram52-only` | Diagnostic second stage at 0x46000000. |
 | `u-boot-h432b-fastboot` | `ram53-fastboot-only` | Fastboot RAM loader at 0x46000000. |
 | `u-boot-h432b-nand` | `ram54-nand-reader` | Interactive read-only NAND loader at 0x46000000. |
-| `u-boot-h432b-nand-auto` | `ram55-nand-autoboot` | Automatic NAND reader at 0x46000000. |
-| `u-boot-h432b-chain` | `nand56-chain-raw` and `nand56-ce-carrier` | Low-address bootstrap carrying the automatic reader. |
+| `u-boot-h432b-maintenance` | `ram-maintenance-b` | Current kernel-B reader and one-shot fastboot stage at 0x46000000. |
+| `u-boot-h432b-maintenance-chain` | `nand-maintenance-chain-raw` and `nand-maintenance-ce-carrier` | Persistent low-address bootstrap containing the maintenance stage. |
 | `u-boot-h432b-nand-profile` | `ram57-nand-profile` | RAM-only NAND timing and instruction-cache experiment. |
 | `u-boot-h432b-nand-timer` | `ram-nand-timer` | RAM-only PWM4 clock and NAND timing tests. |
 | `u-boot-h432b-nand-subpage` | `ram-nand-subpage` | RAM-only BCH partial-page read experiment. |
@@ -45,9 +44,12 @@ Linux uses zImage, DTB and compressed initramfs. Fastboot and NAND readers
 use a bounded Android-v2 envelope; the compressed root slot is limited to
 16 MiB. NAND kernel volumes have a 132 x 124 KiB capacity.
 
-Qualified NAND boot loads a kernel and development initramfs. It does not
-switch the production root to SquashFS or implement A/B selection/rollback.
-Base SquashFS has separately passed mount tests on ubiblock.
+Normal NAND boot loads the runtime kernel and a minimal root-handoff initramfs.
+It mounts the separate slot-B SquashFS systembase through ubiblock and switches
+root to systemd, with a volatile writable overlay. The standalone RAM recovery
+bundle uses the same runtime kernel with a complete RAM root filesystem and
+can boot without a provisioned UBI pool. Neither path implements automatic
+A/B selection or rollback.
 
 The [NAND documentation](nand.md) describes ECC and bounded UBI layout.
 The factory prefix uses a different ECC format and must not be rewritten by

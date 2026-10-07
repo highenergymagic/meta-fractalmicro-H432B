@@ -64,6 +64,8 @@ The loader firmware itself remains in this BSP layer.
 
 ## Technical documentation
 
+- [Build targets](docs/targets.md): normal deployment, recovery and optional diagnostics.
+
 - [Boot contract](docs/boot-contract.md): boot stages, image roles and deployment constraints.
 - [NAND support](docs/nand.md): storage layout, protection boundaries and validation.
 - [Internal SD](docs/internal-sd.md): controller identity, read-only baseline and opt-in write testing.

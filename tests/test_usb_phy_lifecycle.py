@@ -26,7 +26,7 @@ class UsbPhyLifecycleTests(unittest.TestCase):
         recipe = ROOT / "recipes-kernel/linux"
         patch = "0011-usb-host-phy-lifecycle.patch"
         self.assertIn(patch, (recipe / "linux-h432b-resume-test_6.12.111.bb").read_text())
-        self.assertNotIn(patch, (recipe / "linux-h432b_6.12.111.bb").read_text())
+        self.assertNotIn(patch, (recipe / "linux-h432b-base.inc").read_text())
 
 if __name__ == "__main__":
     unittest.main()

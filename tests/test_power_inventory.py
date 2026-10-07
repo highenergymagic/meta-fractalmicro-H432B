@@ -10,7 +10,7 @@ class PowerInventoryTests(unittest.TestCase):
     def test_separate_kernel(self):
         text = (ROOT / "recipes-kernel/linux/linux-h432b-power-test_6.12.111.bb").read_text()
         self.assertIn('KERNEL_PACKAGE_NAME = "kernel-power-test"', text)
-        self.assertIn('require linux-h432b-reboot-test_', text)
+        self.assertIn('require linux-h432b-platform.inc', text)
 
     def test_only_established_bus_pins(self):
         text = (FILES / "s5pv210-hims-u2-pmic-bus.dtsi").read_text()

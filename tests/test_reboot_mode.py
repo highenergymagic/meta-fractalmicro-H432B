@@ -6,15 +6,15 @@ ROOT = Path(__file__).resolve().parents[1]
 UB = ROOT / "recipes-bsp/u-boot"
 
 class RebootModeContract(unittest.TestCase):
-    def test_experimental_role(self):
-        recipe = (UB / "u-boot-h432b-reboot-test_2012.10.bb").read_text()
-        self.assertIn('H432B_UBOOT_ROLE = "ram-reboot-test"', recipe)
-        self.assertIn("RAM ONLY", recipe)
+    def test_shared_boot_mode_support(self):
+        recipe = (UB / "u-boot-h432b-boot-mode.inc").read_text()
+        self.assertIn("0005-nand-autoboot.patch", recipe)
+        self.assertNotIn("H432B_UBOOT_ROLE =", recipe)
         self.assertIn("test-bootmode", recipe)
 
     def test_normal_recipe_does_not_enable_test(self):
-        for name in ("u-boot-h432b-nand-auto_2012.10.bb",
-                     "u-boot-h432b-chain_2012.10.bb"):
+        for name in ("u-boot-h432b_2012.10.bb",
+                     "u-boot-h432b-chain.inc"):
             self.assertNotIn("reboot-mode-test", (UB / name).read_text())
 
     def test_consumed_before_nand(self):
@@ -39,13 +39,12 @@ class RebootModeContract(unittest.TestCase):
         self.assertIn("H432B_MODE_NORMAL 0x48344e4dU", header)
         self.assertIn("H432B_MODE_FASTBOOT 0x48344642U", header)
 
-    def test_kernel_is_isolated(self):
-        recipe = (ROOT / "recipes-kernel/linux/linux-h432b-reboot-test_6.12.111.bb").read_text()
-        self.assertIn('H432B_KERNEL_PROVIDER_REMOVE ?= "virtual/kernel"', recipe)
-        self.assertIn('PROVIDES:remove = "${H432B_KERNEL_PROVIDER_REMOVE}"', recipe)
-        self.assertIn('KERNEL_PACKAGE_NAME = "kernel-reboot-test"', recipe)
-        normal = (ROOT / "recipes-kernel/linux/linux-h432b_6.12.111.bb").read_text()
-        self.assertNotIn("reboot-test", normal)
+    def test_reboot_support_is_shared_with_runtime(self):
+        recipe = (ROOT / "recipes-kernel/linux/linux-h432b-platform.inc").read_text()
+        self.assertIn("require linux-h432b-base.inc", recipe)
+        self.assertIn("u2-reboot-test.config", recipe)
+        runtime = (ROOT / "recipes-kernel/linux/linux-h432b-runtime_6.12.111.bb").read_text()
+        self.assertIn("require linux-h432b-platform.inc", runtime)
 
     def test_retention_guard(self):
         probe = (ROOT / "recipes-support/h432b-reboot-probe/files/reboot-retention.c").read_text()

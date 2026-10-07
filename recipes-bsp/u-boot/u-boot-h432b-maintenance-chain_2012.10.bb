@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-require u-boot-h432b-chain_2012.10.bb
+require u-boot-h432b-chain.inc
 SUMMARY = "H432B CE carrier with one-shot fastboot and fixed kernel-B selection"
 H432B_CHAIN_STAGE_RECIPE = "u-boot-h432b-maintenance"
 H432B_CHAIN_STAGE_DIR = "ram-maintenance-b"

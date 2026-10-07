@@ -13,7 +13,7 @@ class FastbootIntegration(unittest.TestCase):
         self.assertIn('H432B_UBOOT_ENTRY = "46000000"', text)
         self.assertIn("0001-ram-loader-rev52.patch", text)
         self.assertIn("test-fastboot", text)
-        for name in ("u-boot-h432b_2012.10.bb", "u-boot-h432b-ram_2012.10.bb"):
+        for name in ("u-boot-h432b_2012.10.bb",):
             self.assertNotIn("fastboot", (BASE / name).read_text())
 
     def test_descriptor_and_teardown_hooks(self):

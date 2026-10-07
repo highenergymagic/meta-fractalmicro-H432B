@@ -17,7 +17,7 @@ class EthernetProbeContract(unittest.TestCase):
         self.assertIn('"mp01-5", "mp01-6", "mp01-7"', dts)
         config = (ROOT / "recipes-kernel/linux/files/u2-ethernet.config").read_text()
         self.assertIn("CONFIG_SMSC911X=y", config)
-        recipe = (ROOT / "recipes-kernel/linux/linux-h432b_6.12.111.bb").read_text()
+        recipe = (ROOT / "recipes-kernel/linux/linux-h432b-base.inc").read_text()
         self.assertIn("${UNPACKDIR}/u2-ethernet.config", recipe)
     def test_read_only(self):
         source = (BASE / "files/ethernet-probe.c").read_text()

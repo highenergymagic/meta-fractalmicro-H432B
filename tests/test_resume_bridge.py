@@ -48,7 +48,7 @@ class ResumeBridgeTests(unittest.TestCase):
         text = (FILES / "s5pv210-hims-u2.dts").read_text()
         self.assertNotIn("hims,factory-resume-test;", text)
         self.assertIn("reg = <0x40000000 0x10000000>", text)
-        recipe = (ROOT / "recipes-kernel/linux/linux-h432b_6.12.111.bb").read_text()
+        recipe = (ROOT / "recipes-kernel/linux/linux-h432b-base.inc").read_text()
         self.assertNotIn("0009-factory-resume-test", recipe)
 
     def test_guarded_device_diagnostic(self):

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-require linux-h432b-reboot-test_6.12.111.bb
+require linux-h432b-platform.inc
 SUMMARY = "Opt-in read-only H432B battery power_supply telemetry"
 KERNEL_PACKAGE_NAME = "kernel-battery-test"
 KERNEL_DEVICETREE = "samsung/s5pv210-hims-u2-battery-test.dtb"
