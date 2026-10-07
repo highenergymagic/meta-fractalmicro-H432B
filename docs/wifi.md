@@ -181,10 +181,73 @@ This qualifies firmware startup on the tested cold initialization path,
 not interrupt delivery, scan, association or network traffic. The prototype
 still has no network interface.
 
+## Active-state interrupt test
+
+After full firmware startup, root can write `1` to `power_ack` and inspect
+`power_ack_result`. This optional diagnostic requests the active state with
+an acknowledgement and a changed request toggle. It arms only the SDIO CPWM
+source; receive and firmware-event queues remain disabled.
+
+The handler masks the source, records status and acknowledgement, and wakes
+the waiting request. The request releases the MMC host during its bounded
+two-second wait, then removes the handler and restores the saved interrupt
+mask and function-enable state. A reply must have a changed toggle and the
+requested active-state value. A duplicate request is rejected.
+
+The `native` field reports host SDIO interrupt capability. A callback on a
+polling-only host would not prove native interrupt delivery. Cleanup errors
+are separate from request errors; returning bus settings does not reverse
+the firmware's requested active state. No suspend request is issued.
+
+The acknowledgement test passed with bundle SHA256
+`ad2024d15624d8649b02b307e757b9c753973adf5c664bd11b6f04c842ef5750`:
+one callback on a native-capable host, request `cc`, reply `8c` from a
+`00` baseline, and no request, handler or cleanup errors. The original
+interrupt mask was zero. Duplicate requests were rejected; kernel taint and
+failed-service counts remained zero.
+
+HISR was `04fe` before and after cleanup. This includes other flags,
+including the documented C2H and CPU-error bits, which remain unexplained.
+The acknowledgement result does not establish general firmware health or
+prove that reading HCPWM clears HISR.
+
+Register definitions and SDIO acknowledgement semantics are documented
+in the pinned [vendor power-control source](https://github.com/ronangaillard/rtl8712-driver-src/blob/2237e98dacd8421b38beb2d1aad88aa2b9f79dd8/pwrctrl/rtl871x_pwrctrl.c).
+The USB implementation does not request acknowledgements in the same way.
+
+## Pending firmware-event inspection
+
+The optional `event_read` request inspects the C2H FIFO once after a cold
+firmware startup. `event_result` reports the pre-upload counter baseline,
+current and final cumulative block counts, transfer size, packet validation
+result and first-event metadata. It also exposes the first 64 bytes for
+diagnosis; treat such device output as private data.
+
+The reader requires an empty interrupt mask and no registered handler.
+It accepts at most 32 new 512-byte blocks and transfers them with one CMD53
+using the initial two-bit FIFO sequence. It validates descriptor markers,
+packet lengths, event lengths and aligned strides before advancing.
+Warm initialization, repeated reads and concurrent consumers are unsupported.
+An empty queue returns `ENODATA`, not a successful FIFO-transfer result.
+
+The first-batch path passed on hardware with bundle SHA256
+`3ecc3ef3821f488f702bad4657326c5132191e54c96ba2590aecfd78f41cd654`.
+The counter baseline was zero; four pending blocks produced a 2,048-byte
+transfer containing four valid events. The first event had code 19
+(firmware debug), sequence zero and a 15-byte payload. The cumulative
+counter had advanced to eight after the read, so this was not a full drain.
+
+Transfer and cleanup errors were zero. Full firmware startup and the native
+CPWM acknowledgement also passed on this second fresh boot, with no kernel
+taint or failed services. This qualifies one first-sequence FIFO read, not
+continuous reception, C2H interrupt delivery or host-command responses.
+No host scan or association command was sent.
+
 ## Remaining milestones
 
 - Qualify the warm chip initialization path and repeated power cycles.
-- Qualify interrupt acknowledgement and packet FIFO traffic; firmware block uploads pass.
+- Resolve additional status flags; qualify subsequent C2H sequences and event interrupts.
+- Implement host-command round trips and RX packet handling.
 - Integrate a maintained wireless userspace interface, then scan and association.
 - Validate security capabilities, regulatory behavior, RT locking and power saving.
 

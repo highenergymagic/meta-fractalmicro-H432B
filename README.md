@@ -48,8 +48,8 @@ available through explicit diagnostic profiles.
 
 Important work remains:
 
-- Internal Wi-Fi enumeration, SDIO transfers and full firmware startup are
-  qualified in the optional test kernel. A working network driver is still
+- Internal Wi-Fi enumeration, firmware startup, native-host power acknowledgements
+  and an initial firmware-event FIFO read are qualified in the optional test kernel. A working network driver is still
   pending; scanning and association are not supported.
 - Linux braille, keyboard, battery management and suspend support are incomplete.
 - The normal kernel uses a minimal initramfs to mount the separate NAND

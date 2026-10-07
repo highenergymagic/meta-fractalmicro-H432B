@@ -24,6 +24,7 @@ struct h432b_fw_result {
 	unsigned int packets;
 	u16 version;
 	u16 initial;
+	u16 c2h_base;
 	u16 imem;
 	u16 emem;
 	u16 cpu;
@@ -164,6 +165,9 @@ static int wifi_fw_memory(struct sdio_func *func, const struct firmware *fw,
 	}
 	block_attempted = true;
 	error = sdio_set_block_size(func, 512);
+	if (error)
+		goto out;
+	r->c2h_base = sdio_readw(func, 0x48, &error);
 	if (error)
 		goto out;
 	r->initial = wifi_read(func, 2, 0x44, &error);

@@ -17,6 +17,8 @@
 
 #include "h432b-wifi-power.h"
 #include "h432b-wifi-firmware.h"
+#include "h432b-wifi-irq.h"
+#include "h432b-wifi-events.h"
 
 #define SAMPLE_BYTES 4
 
@@ -25,6 +27,8 @@ struct h432b_wifi_sample {
 	bool attempted;
 	struct h432b_power_result power;
 	struct h432b_fw_result firmware;
+	struct h432b_ack_result ack;
+	struct h432b_event_result event;
 	int error;
 	int cleanup_error;
 	u8 before[SAMPLE_BYTES];
@@ -272,7 +276,122 @@ static ssize_t firmware_result_show(struct device *dev, struct device_attribute 
 }
 static DEVICE_ATTR_RO(firmware_result);
 
+static void h432b_wifi_irq(struct sdio_func *func)
+{
+	struct h432b_wifi_sample *sample = sdio_get_drvdata(func);
+
+	wifi_ack_irq(func, &sample->ack);
+}
+
+static ssize_t power_ack_store(struct device *dev, struct device_attribute *attr,
+			       const char *buf, size_t count)
+{
+	struct sdio_func *func = dev_to_sdio_func(dev);
+	struct h432b_wifi_sample *sample = sdio_get_drvdata(func);
+	struct h432b_ack_result *r = &sample->ack;
+	int error;
+
+	if (!sysfs_streq(buf, "1"))
+		return -EINVAL;
+	mutex_lock(&sample->lock);
+	if (r->attempted) {
+		error = -EALREADY;
+		goto out;
+	}
+	if (sample->firmware.stage != 12 || sample->firmware.error ||
+	    sample->firmware.cleanup) {
+		error = -EAGAIN;
+		goto out;
+	}
+	r->attempted = true;
+	error = wifi_ack_test(func, r, h432b_wifi_irq);
+	r->error = error;
+	if (!error)
+		error = r->cleanup;
+out:
+	mutex_unlock(&sample->lock);
+	return error ? error : count;
+}
+static DEVICE_ATTR_WO(power_ack);
+
+static ssize_t power_ack_result_show(struct device *dev,
+				     struct device_attribute *attr, char *buf)
+{
+	struct h432b_wifi_sample *sample = sdio_get_drvdata(dev_to_sdio_func(dev));
+	struct h432b_ack_result *r = &sample->ack;
+	ssize_t size;
+
+	mutex_lock(&sample->lock);
+	if (!r->attempted)
+		size = sysfs_emit(buf, "idle\n");
+	else
+		size = sysfs_emit(buf,
+			"error=%d cleanup=%d irq_error=%d native=%d callbacks=%u saved_mask=%04x armed_mask=%04x status=%04x final_status=%04x old_request=%02x request=%02x before=%02x reply=%02x final_reply=%02x\n",
+			r->error, r->cleanup, r->irq_error, r->native, r->callbacks,
+			r->saved_mask, r->armed_mask, r->status, r->final_status,
+			r->old_request, r->request, r->before, r->reply, r->final_reply);
+	mutex_unlock(&sample->lock);
+	return size;
+}
+static DEVICE_ATTR_RO(power_ack_result);
+
+static ssize_t event_read_store(struct device *dev, struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct sdio_func *func = dev_to_sdio_func(dev);
+	struct h432b_wifi_sample *sample = sdio_get_drvdata(func);
+	struct h432b_event_result *r = &sample->event;
+	int error;
+
+	if (!sysfs_streq(buf, "1"))
+		return -EINVAL;
+	mutex_lock(&sample->lock);
+	if (r->attempted) {
+		error = -EALREADY;
+		goto out;
+	}
+	if (sample->firmware.stage != 12 || sample->firmware.error ||
+	    sample->firmware.cleanup || sample->power.warm) {
+		error = -EAGAIN;
+		goto out;
+	}
+	r->attempted = true;
+	error = wifi_event_test(func, r, sample->firmware.c2h_base);
+	r->error = error;
+	if (!error)
+		error = r->cleanup;
+out:
+	mutex_unlock(&sample->lock);
+	return error ? error : count;
+}
+static DEVICE_ATTR_WO(event_read);
+
+static ssize_t event_result_show(struct device *dev,
+				 struct device_attribute *attr, char *buf)
+{
+	struct h432b_wifi_sample *sample = sdio_get_drvdata(dev_to_sdio_func(dev));
+	struct h432b_event_result *r = &sample->event;
+	ssize_t size;
+
+	mutex_lock(&sample->lock);
+	if (!r->attempted)
+		size = sysfs_emit(buf, "idle\n");
+	else
+		size = sysfs_emit(buf,
+			"error=%d cleanup=%d baseline=%04x blocks=%04x after=%04x status=%04x final_status=%04x bytes=%u events=%u first_code=%u first_seq=%u first_length=%u head=%*ph\n",
+			r->error, r->cleanup, r->baseline, r->blocks, r->after,
+			r->status, r->final_status, r->bytes, r->events,
+			r->first_code, r->first_seq, r->first_length, 64, r->head);
+	mutex_unlock(&sample->lock);
+	return size;
+}
+static DEVICE_ATTR_RO(event_result);
+
 static struct attribute *h432b_wifi_attrs[] = {
+	&dev_attr_event_read.attr,
+	&dev_attr_event_result.attr,
+	&dev_attr_power_ack.attr,
+	&dev_attr_power_ack_result.attr,
 	&dev_attr_sample.attr,
 	&dev_attr_result.attr,
 	&dev_attr_power_init.attr,
