@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+DRIVER_CODE = h4
+DRIVER_NAME = H432B
+DRIVER_USAGE = internal GPIO display with Linux evdev input
+DRIVER_VERSION = 1
+DRIVER_DEVELOPERS = Fractal Microsystems
+include $(SRC_TOP)braille.mk
+braille.$O: $(SRC_DIR)/braille.c $(SRC_DIR)/h432b-keys.h
+	$(CC) $(DRIVER_CFLAGS) -c $(SRC_DIR)/braille.c

@@ -26,6 +26,7 @@ is not a promise of availability in the normal runtime.
 
 ## Controls and power
 
+- [Braille display](braille.md)
 - [Input devices](input.md)
 - [Battery telemetry](battery.md)
 - [Power management](power-control.md)

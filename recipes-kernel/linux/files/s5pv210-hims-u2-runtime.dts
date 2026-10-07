@@ -5,6 +5,7 @@
 #include "s5pv210-hims-u2-bluetooth.dtsi"
 #include "s5pv210-hims-u2-fm.dtsi"
 #include "s5pv210-hims-u2-input.dtsi"
+#include "s5pv210-hims-u2-braille.dtsi"
 #include "s5pv210-hims-u2-battery.dtsi"
 #include "s5pv210-hims-u2-usb-host-test.dtsi"
 #include "s5pv210-hims-u2-external-sd.dtsi"

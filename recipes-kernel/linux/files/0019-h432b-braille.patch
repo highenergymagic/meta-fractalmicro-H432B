@@ -1,0 +1,7 @@
+Subject: Build H432B GPIO braille display transport
+Upstream-Status: Inappropriate [board-specific interface pending qualification]
+
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -1,0 +2,1 @@
++obj-y += h432b-braille.o

@@ -1,0 +1,13 @@
+Subject: Register H432B internal display backend
+Upstream-Status: Inappropriate [board-specific backend pending qualification]
+
+--- a/configure.ac
++++ b/configure.ac
+@@ -1659,6 +1659,7 @@
+ BRLTTY_BRAILLE_DRIVER([fs], [FreedomScientific])
+ BRLTTY_BRAILLE_DRIVER([hd], [Hedo])
+ BRLTTY_BRAILLE_DRIVER([hm], [HIMS])
++BRLTTY_BRAILLE_DRIVER([h4], [H432B])
+ BRLTTY_BRAILLE_DRIVER([ht], [HandyTech])
+ BRLTTY_BRAILLE_DRIVER([hw], [HumanWare])
+ BRLTTY_BRAILLE_DRIVER([ir], [Iris])

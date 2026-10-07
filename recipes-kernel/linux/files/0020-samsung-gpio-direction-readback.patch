@@ -1,0 +1,58 @@
+From: Fractal Microsystems <opensource@fractalmicro.org>
+Subject: [PATCH] pinctrl: samsung: expose GPIO direction readback
+
+Read FUNC under the bank lock and peripheral clock, including split
+configuration registers. Consumers can validate inherited outputs without
+rewriting their direction or value. Treat interrupt/peripheral muxes as
+non-GPIO-output states so gpiolib can lock external interrupts.
+
+Upstream-Status: Pending
+Signed-off-by: Fractal Microsystems <opensource@fractalmicro.org>
+---
+--- a/drivers/pinctrl/samsung/pinctrl-samsung.c
++++ b/drivers/pinctrl/samsung/pinctrl-samsung.c
+@@ -655,3 +655,36 @@
++/* Read the hardware mux without changing an inherited GPIO output. */
++static int samsung_gpio_get_direction(struct gpio_chip *gc, unsigned int offset)
++{
++	struct samsung_pin_bank *bank = gpiochip_get_data(gc);
++	const struct samsung_pin_bank_type *type = bank->type;
++	struct samsung_pinctrl_drv_data *drvdata = bank->drvdata;
++	void __iomem *reg = bank->pctl_base + bank->pctl_offset
++			 + type->reg_offset[PINCFG_TYPE_FUNC];
++	unsigned int width = type->fld_width[PINCFG_TYPE_FUNC];
++	unsigned int shift = offset * width;
++	unsigned long flags;
++	u32 function;
++	int ret;
++
++	if (shift >= 32) {
++		shift -= 32;
++		reg += 4;
++	}
++	ret = clk_enable(drvdata->pclk);
++	if (ret)
++		return ret;
++	raw_spin_lock_irqsave(&bank->slock, flags);
++	function = (readl(reg) >> shift) & ((1U << width) - 1);
++	raw_spin_unlock_irqrestore(&bank->slock, flags);
++	clk_disable(drvdata->pclk);
++
++	if (function == PIN_CON_FUNC_OUTPUT)
++		return 0;
++	/* Peripheral/interrupt muxes are not GPIO outputs. In particular,
++	 * gpiolib must recognize an EINT mux as an input when locking IRQs. */
++	return 1;
++}
++
+ /* gpiolib gpio_direction_input callback function. */
+ static int samsung_gpio_direction_input(struct gpio_chip *gc, unsigned offset)
+ {
+@@ -1065,6 +1098,7 @@
+ 	.set = samsung_gpio_set,
+ 	.get = samsung_gpio_get,
++	.get_direction = samsung_gpio_get_direction,
+ 	.direction_input = samsung_gpio_direction_input,
+ 	.direction_output = samsung_gpio_direction_output,
+ 	.to_irq = samsung_gpio_to_irq,
+ 	.add_pin_ranges = samsung_add_pin_ranges,
