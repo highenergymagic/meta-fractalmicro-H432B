@@ -15,7 +15,8 @@ struct h432b_command_snapshot {
 };
 
 struct h432b_command_result {
-	bool attempted, sent, matched, opmode;
+	bool attempted, sent, matched, opmode, survey, scanning, survey_done;
+	unsigned int survey_events, survey_count;
 	int error, cleanup;
 	unsigned int batches, events, debug_events, bytes, replies, reply_length;
 	u8 command_seq;
@@ -160,6 +161,22 @@ static void wifi_opmode_packet(u8 *packet, u8 seq)
 	packet[40] = 1; /* infrastructure mode; no scan or association */
 }
 
+static void wifi_survey_packet(u8 *packet, u8 seq)
+{
+	u8 *p = packet + 40;
+
+	memset(packet, 0, 512);
+	put_unaligned_le32(0x8c200060, packet); /* 8 + ALIGN(84, 8) */
+	put_unaligned_le32(0x1300, packet + 4);
+	put_unaligned_le32(0x00120058 | ((u32)seq << 24), packet + 32);
+	/* passive_mode=0, no SSID: never request probe transmission. */
+	put_unaligned_le32(48, p + 4);
+	/* Packed DriverCtrl begins at 46, not 48. No timeout override. */
+	p[50] = 1;
+	p[51] = 1; p[52] = 6; p[53] = 11;
+	p[83] = 3;
+}
+
 /* Factory firmware reply observed on hardware: command header + four bytes.
  * Require the exact length, sequence and distinct request tags. This differs
  * from the transformed 28-byte response documented in the vendor header.
@@ -189,7 +206,7 @@ static int wifi_command_drain(struct sdio_func *func,
 	pending = (u16)(count - r->consumed);
 	if (!pending)
 		return 0;
-	if (pending > WIFI_EVENT_MAX / 512 || r->batches >= 64)
+	if (pending > WIFI_EVENT_MAX / 512 || r->batches >= (r->survey ? 256 : 64))
 		return -EOVERFLOW;
 	/* Factory FIFO reads use block mode even for exactly one block. */
 	error = mmc_io_rw_extended(func->card, 0, func->num,
@@ -219,15 +236,36 @@ static int wifi_command_drain(struct sdio_func *func,
 			memcpy(r->debug_head, data + offset + 32,
 			       min_t(unsigned int, length, sizeof(r->debug_head)));
 		}
-		if (r->opmode && code == 19 && r->sent &&
-		    length == sizeof("set opmode: 1\n") &&
-		    !memcmp(data + offset + 32, "set opmode: 1\n", length)) {
+		if (r->opmode && !r->scanning && code == 19 && r->sent &&
+		    length == sizeof("set opmode: 00000001\n") &&
+		    !memcmp(data + offset + 32, "set opmode: 00000001\n", length)) {
 			if (r->matched)
 				return -EPROTO;
 			r->reply_length = length;
 			memcpy(r->reply, data + offset + 32, length);
 			r->matched = true;
 			r->replies++;
+		}
+		if (r->scanning && code == 8) {
+			const u8 *bss = data + offset + 32;
+
+			/* BSSID_EX fixed portion; never expose nearby identifiers. */
+			if (length < 116 || get_unaligned_le32(bss) < 116 ||
+			    get_unaligned_le32(bss) > length ||
+			    get_unaligned_le32(bss + 12) > 32 ||
+			    get_unaligned_le32(bss + 112) > length - 116 ||
+			    r->survey_events >= 64 || r->survey_done)
+				return -EBADMSG;
+			r->survey_events++;
+		}
+		if (r->scanning && code == 9) {
+			if (length != 4 || r->survey_done)
+				return -EBADMSG;
+			r->survey_count = get_unaligned_le32(data + offset + 32);
+			if (r->survey_count != r->survey_events)
+				return -EBADMSG;
+			r->survey_done = true;
+			r->matched = true;
 		}
 		if (code == 18) {
 			if (r->opmode)
@@ -251,7 +289,7 @@ static int wifi_command_test(struct sdio_func *func,
 			     struct h432b_command_result *r, u16 baseline)
 {
 	struct mmc_host *host = func->card->host;
-	unsigned int saved = func->cur_blksize, i;
+	unsigned int saved = func->cur_blksize, i, commands, tries;
 	bool enabled = false, blocks = false;
 	u8 *data, *packet, ioex;
 	int error = 0, restore, drain;
@@ -308,7 +346,8 @@ static int wifi_command_test(struct sdio_func *func,
 		error = -EBUSY;
 		goto out;
 	}
-	for (r->command_seq = 1; r->command_seq <= (r->opmode ? 16 : 2); r->command_seq++) {
+	commands = r->survey ? 3 : (r->opmode ? 16 : 2);
+	for (r->command_seq = 1; r->command_seq <= commands; r->command_seq++) {
 		r->public_pages = sdio_readb(func, 1, &error);
 		if (error)
 			goto out;
@@ -321,7 +360,11 @@ static int wifi_command_test(struct sdio_func *func,
 			goto out;
 		}
 		wifi_command_snapshot(func, r, r->command_seq * 2 - 1);
-		if (r->opmode)
+		r->scanning = r->survey && r->command_seq == 3;
+		tries = r->scanning ? 750 : 100; /* 15 s scan, 2 s command */
+		if (r->scanning)
+			wifi_survey_packet(packet, r->command_seq);
+		else if (r->opmode)
 			wifi_opmode_packet(packet, r->command_seq);
 		else
 			wifi_loopback_packet(packet, r->command_seq);
@@ -335,7 +378,7 @@ static int wifi_command_test(struct sdio_func *func,
 		if (error)
 			goto out;
 		r->sent = true;
-		for (i = 0; i < 100 && !r->matched; i++) {
+		for (i = 0; i < tries && !r->matched; i++) {
 			drain = wifi_command_drain(func, r, data);
 			if (drain < 0) {
 				error = drain;

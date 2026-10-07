@@ -397,7 +397,8 @@ static ssize_t command_test_store(struct device *dev, struct device_attribute *a
 	struct h432b_command_result *r = &sample->command;
 	int error;
 
-	if (!sysfs_streq(buf, "loopback") && !sysfs_streq(buf, "opmode"))
+	if (!sysfs_streq(buf, "loopback") && !sysfs_streq(buf, "opmode") &&
+	    !sysfs_streq(buf, "survey"))
 		return -EINVAL;
 	mutex_lock(&sample->lock);
 	if (r->attempted || sample->event.attempted) {
@@ -411,7 +412,8 @@ static ssize_t command_test_store(struct device *dev, struct device_attribute *a
 		goto out;
 	}
 	r->attempted = true;
-	r->opmode = sysfs_streq(buf, "opmode");
+	r->survey = sysfs_streq(buf, "survey");
+	r->opmode = r->survey || sysfs_streq(buf, "opmode");
 	error = wifi_command_test(func, r, sample->firmware.c2h_base);
 	r->error = error;
 	if (!error)
@@ -447,6 +449,10 @@ static ssize_t command_result_show(struct device *dev,
 			r->mac_stage, r->mac_before[0], r->mac_after[0],
 			r->mac_before[1], r->mac_after[1], r->pmc_after,
 			r->pause_after, r->debug_after);
+	if (r->survey)
+		size += sysfs_emit_at(buf, size,
+			"survey_sent=%d survey_done=%d survey_events=%u survey_count=%u\n",
+			r->scanning, r->survey_done, r->survey_events, r->survey_count);
 	for (i = 0; i < r->snapshots; i++) {
 		struct h432b_command_snapshot *s = &r->snapshot[i];
 

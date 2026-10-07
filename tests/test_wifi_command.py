@@ -37,8 +37,8 @@ class WifiCommand(unittest.TestCase):
 
     def test_reply_fields_and_bounds(self):
         for text in ("length == 12", "p[9] == 0x11 + seq * 0x10",
-                     "r->command_seq <= (r->opmode ? 16 : 2)", "r->replies++", "r->batches >= 64",
-                     "i < 32", "i < 100 && !r->matched"):
+                     "r->survey ? 3 : (r->opmode ? 16 : 2)", "r->replies++", "r->batches >= (r->survey ? 256 : 64)",
+                     "i < 32", "i < tries && !r->matched"):
             self.assertIn(text, C)
         self.assertIn("!r->sent || r->matched", C)
 
@@ -76,12 +76,27 @@ class WifiCommand(unittest.TestCase):
 
     def test_normal_command_diagnostic(self):
         for text in ("0x8c200010", "0x00110008 | ((u32)seq << 24)",
-                     "packet[40] = 1", "r->opmode && code == 19 && r->sent",
-                     'sizeof("set opmode: 1\\n")', "if (r->opmode)"):
+                     "packet[40] = 1", "r->opmode && !r->scanning && code == 19 && r->sent",
+                     'sizeof("set opmode: 00000001\\n")', "if (r->opmode)"):
             self.assertIn(text, C)
         self.assertIn('sysfs_streq(buf, "opmode")', D)
         self.assertNotIn("r->pmc_after != 0x3b", C)
         self.assertNotIn("rf_after", C + D)
+
+    def test_passive_survey_bounds(self):
+        for text in ("0x8c200060", "0x00120058", "p[50] = 1",
+                     "p[51] = 1; p[52] = 6; p[53] = 11", "p[83] = 3",
+                     "r->scanning ? 750 : 100", "length < 116",
+                     "get_unaligned_le32(bss + 12) > 32",
+                     "get_unaligned_le32(bss + 112) > length - 116",
+                     "r->survey_count != r->survey_events",
+                     "r->survey_events >= 64"):
+            self.assertIn(text, C)
+        packet = C.split("static void wifi_survey_packet", 1)[1].split("/* Factory firmware reply", 1)[0]
+        self.assertIn("memset(packet, 0, 512)", packet)
+        self.assertNotIn("p[0] = 1", packet)
+        self.assertIn('sysfs_streq(buf, "survey")', D)
+        self.assertIn("survey_done=%d", D)
 
     def test_exclusive_stream_owner(self):
         self.assertIn("r->attempted || sample->event.attempted", D)

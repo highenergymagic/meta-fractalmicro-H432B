@@ -385,8 +385,35 @@ C2H event sequence remains continuous. This observable handler trace is not
 a protocol-level command acknowledgement or evidence of working networking.
 
 The test shares the one-shot stream ownership and bounded waits with
-loopback. Reboot between actions. The image builds and offline tests pass;
-hardware qualification is pending.
+loopback. Reboot between actions. The image builds and offline tests pass. The corrected hardware result is
+recorded below.
+
+The first normal-command test observed the firmware handler executing, but
+its exact-text matcher expected an unpadded hexadecimal value. The firmware
+reports eight hex digits. The matcher now requires the exact padded string
+and terminating NUL.
+
+The corrected image (SHA256
+`3d66ab89f409570fec5a88f0d57a299d5b1ec5e8a1250e294cc87f8e199a8f67`)
+passed all sixteen requests: sixteen exact 22-byte debug replies, 36
+continuously sequenced events across 21 FIFO batches, zero transfer/cleanup
+errors, and unchanged command-page counts. All five sampled SDIO error
+reports remained zero. MAC setup readbacks passed, kernel taint was zero,
+and no services failed. This qualifies repeated execution of the tested
+normal command, not general command coverage, scan or association.
+
+An additional opt-in `survey` action first verifies two normal commands,
+then requests one passive scan on channels 1, 6 and 11. It sets no SSID,
+does not request probe transmission or association, and bounds the wait to
+15 seconds. BSSID record lengths and final report counts are validated;
+nearby network identifiers are not retained in the diagnostic result.
+A separate fresh boot of the same image passed: eight validated BSSID
+reports and a matching completion count, 38 continuously sequenced events
+across 15 FIFO batches, zero transfer/cleanup errors, no kernel taint and
+no failed services. This establishes passive RF reception and the tested
+firmware survey path, not association or data transmission. The unexplained
+`08` error-report value appeared during this successful run too; it must
+not be treated as sufficient evidence of a fatal command-channel fault.
 
 ## Remaining milestones
 
