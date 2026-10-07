@@ -20,8 +20,8 @@ class WifiPower(unittest.TestCase):
         self.assertIn("0x8000 | offset", POWER)
         self.assertIn("sdio_writeb(func, 0, 0x80, &error)", POWER)
         self.assertNotIn("sdio_claim_irq", POWER + DRIVER)
-        self.assertNotIn("request_firmware", POWER + DRIVER)
-        self.assertNotIn("sdio_memcpy_toio", POWER + DRIVER)
+        self.assertNotIn("request_firmware", POWER)
+        self.assertNotIn("sdio_memcpy_toio", POWER)
 
     def test_power_register_allowlist(self):
         offsets = {int(x, 16) for x in re.findall(r"P(?:8|16|32)\((0x[0-9a-f]+),", POWER)}

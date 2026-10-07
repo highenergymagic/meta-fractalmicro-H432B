@@ -5,7 +5,7 @@
  * Reference: Realtek rtl8712_sdio_regdef.h, vendor tree commit
  * 2237e98dacd8421b38beb2d1aad88aa2b9f79dd8.
  * Power initialization is a separate explicit one-shot action after sampling.
- * No FIFO, IRQ handling, firmware download or network interface.
+ * Firmware memory upload is separately requested; no IRQ or network interface.
  */
 #include <linux/device.h>
 #include <linux/mmc/sdio.h>
@@ -16,6 +16,7 @@
 #include <linux/slab.h>
 
 #include "h432b-wifi-power.h"
+#include "h432b-wifi-firmware.h"
 
 #define SAMPLE_BYTES 4
 
@@ -23,6 +24,7 @@ struct h432b_wifi_sample {
 	struct mutex lock;
 	bool attempted;
 	struct h432b_power_result power;
+	struct h432b_fw_result firmware;
 	int error;
 	int cleanup_error;
 	u8 before[SAMPLE_BYTES];
@@ -203,11 +205,78 @@ static ssize_t power_result_show(struct device *dev, struct device_attribute *at
 }
 static DEVICE_ATTR_RO(power_result);
 
+static ssize_t firmware_load_store(struct device *dev, struct device_attribute *attr,
+				   const char *buf, size_t count)
+{
+	struct sdio_func *func = dev_to_sdio_func(dev);
+	struct h432b_wifi_sample *sample = sdio_get_drvdata(func);
+	struct h432b_fw_result *r = &sample->firmware;
+	const struct firmware *fw;
+	u32 imem, emem;
+	int error;
+
+	if (!sysfs_streq(buf, "memory"))
+		return -EINVAL;
+	mutex_lock(&sample->lock);
+	if (r->attempted) {
+		error = -EALREADY;
+		goto unlock;
+	}
+	if (!sample->power.attempted || sample->power.error || sample->power.cleanup) {
+		error = -EAGAIN;
+		goto unlock;
+	}
+	/* No userspace fallback, network fetch or firmware embedded in the kernel. */
+	error = request_firmware_direct(&fw, WIFI_FW_NAME, dev);
+	if (error)
+		goto unlock;
+	error = wifi_fw_validate(fw, &imem, &emem);
+	if (!error) {
+		r->attempted = true;
+		r->version = get_unaligned_le16(fw->data + 2);
+		error = wifi_fw_memory(func, fw, r, imem, emem);
+		r->error = error;
+		dev_info(dev, "firmware memory: error=%d cleanup=%d stage=%u bytes=%u cpu=%04x\n",
+			 error, r->cleanup, r->stage, r->bytes, r->cpu);
+	}
+	release_firmware(fw);
+	if (!error)
+		error = r->cleanup;
+unlock:
+	mutex_unlock(&sample->lock);
+	if (error)
+		return error;
+	return count;
+}
+static DEVICE_ATTR_WO(firmware_load);
+
+static ssize_t firmware_result_show(struct device *dev, struct device_attribute *attr,
+				     char *buf)
+{
+	struct h432b_wifi_sample *sample = sdio_get_drvdata(dev_to_sdio_func(dev));
+	struct h432b_fw_result *r = &sample->firmware;
+	ssize_t size;
+
+	mutex_lock(&sample->lock);
+	if (!r->attempted)
+		size = sysfs_emit(buf, "idle\n");
+	else
+		size = sysfs_emit(buf,
+			"error=%d cleanup=%d stage=%u bytes=%u packets=%u version=%04x initial=%04x imem=%04x emem=%04x cpu=%04x\n",
+			r->error, r->cleanup, r->stage, r->bytes, r->packets,
+			r->version, r->initial, r->imem, r->emem, r->cpu);
+	mutex_unlock(&sample->lock);
+	return size;
+}
+static DEVICE_ATTR_RO(firmware_result);
+
 static struct attribute *h432b_wifi_attrs[] = {
 	&dev_attr_sample.attr,
 	&dev_attr_result.attr,
 	&dev_attr_power_init.attr,
 	&dev_attr_power_result.attr,
+	&dev_attr_firmware_load.attr,
+	&dev_attr_firmware_result.attr,
 	NULL,
 };
 static const struct attribute_group h432b_wifi_group = {

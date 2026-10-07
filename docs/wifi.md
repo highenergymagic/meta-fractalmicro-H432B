@@ -115,11 +115,53 @@ This qualifies the implemented cold path, including its CMD52 byte accesses.
 The warm path is implemented but untested. Neither result establishes
 firmware readiness, interrupt delivery or wireless connectivity.
 
+## Explicit firmware memory test
+
+After a successful power test, writing `memory` to `firmware_load` requests
+the external file `h432b/rtl8712s.bin` through Linux's direct firmware loader.
+The BSP does not distribute or fetch that file. Operators must establish
+provenance and verify the chosen firmware separately; a matching file header
+alone does not establish compatibility or redistribution rights.
+
+The diagnostic validates section lengths before I/O. It sends IMEM and EMEM
+through the SDIO firmware FIFO, using zero-padded 512-byte transfers and the
+chip's 32-byte download descriptor. Host limits must permit each packet in
+one CMD53 transaction. It checks each section's completion and checksum bits,
+enables the Wi-Fi CPU, and waits for instruction-memory readiness.
+
+`firmware_result` reports errors, bus cleanup, stage, payload bytes, packet
+count, version and readiness registers. Stage 8 means both code sections and
+CPU readiness passed. It does **not** mean fully initialized wireless firmware:
+the test deliberately stops before DMEM radio configuration. No interrupt
+handler, scan, association or network interface is added.
+
+Stages 1–7 identify setup, IMEM transfer, IMEM check, EMEM transfer, EMEM check,
+CPU enable and CPU-ready polling respectively. A transfer attempt is one-shot;
+reboot after success or failure. As with the power test, restoring the SDIO
+function settings does not undo volatile chip state.
+
+The memory stage passed on hardware with test bundle SHA256
+`dd988aa6780329437591382cbda975ec9468af7492ac5e594993178b29f9116f`.
+It transferred 129,688 payload bytes in four packets, with transfer and cleanup
+errors both zero. TCR progressed from `000a` to `000b` (IMEM checked),
+`000f` (EMEM checked), and `002f` (CPU instruction-memory ready).
+Kernel taint remained zero, no systemd units failed, and a duplicate request
+was rejected.
+
+The initial `000a` is important: checksum-result bits 1 and 3 are already set
+before upload. The stale-state check therefore rejects DONE/READY bits
+0, 2, 4 and 5, not the initial checksum-result bits. The first test exposed
+this distinction and stopped before sending any firmware.
+
+This qualifies the tested block-mode upload and CPU-ready handshake, not
+the final firmware-ready flag or networking. The private firmware used for
+qualification remains outside the public source and build inputs.
+
 ## Remaining milestones
 
-- Implement and qualify SDIO firmware loading; the cold power path is qualified.
+- Resolve board radio configuration, upload DMEM and qualify final firmware readiness.
 - Qualify the warm chip initialization path and repeated power cycles.
-- Qualify interrupt acknowledgement and block-mode FIFO transfers.
+- Qualify interrupt acknowledgement and packet FIFO traffic; firmware block uploads pass.
 - Integrate a maintained wireless userspace interface, then scan and association.
 - Validate security capabilities, regulatory behavior, RT locking and power saving.
 
