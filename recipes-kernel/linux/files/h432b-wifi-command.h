@@ -7,6 +7,13 @@
  */
 #include "sdio_ops.h"
 
+/* Non-atomic, ordered snapshots; reads do not acknowledge or drain RX. */
+struct h432b_command_snapshot {
+	u8 phase, tx_ctrl, public_pages, command_pages, errors[3];
+	u16 status, rx_blocks, c2h_blocks;
+	int error;
+};
+
 struct h432b_command_result {
 	bool attempted, sent, matched;
 	int error, cleanup;
@@ -16,7 +23,46 @@ struct h432b_command_result {
 	u8 port_seq, event_seq, public_pages, command_pages;
 	u8 reply[28];
 	u8 debug_head[32];
+	unsigned int snapshots;
+	struct h432b_command_snapshot snapshot[5];
 };
+
+/* Host held. Keep failures visible separately from the command result. */
+static void wifi_command_snapshot(struct sdio_func *func,
+				  struct h432b_command_result *r, u8 phase)
+{
+	struct h432b_command_snapshot *s;
+	unsigned int i;
+
+	if (r->snapshots >= ARRAY_SIZE(r->snapshot))
+		return;
+	s = &r->snapshot[r->snapshots++];
+	s->phase = phase;
+	s->status = sdio_readw(func, WIFI_HISR, &s->error);
+	if (s->error)
+		return;
+	s->rx_blocks = sdio_readw(func, 0x40, &s->error);
+	if (s->error)
+		return;
+	s->c2h_blocks = sdio_readw(func, WIFI_C2H_COUNT, &s->error);
+	if (s->error)
+		return;
+	s->tx_ctrl = sdio_readb(func, 0, &s->error);
+	if (s->error)
+		return;
+	s->public_pages = sdio_readb(func, 1, &s->error);
+	if (s->error)
+		return;
+	s->command_pages = sdio_readb(func, 3, &s->error);
+	if (s->error)
+		return;
+	/* Vendor SDIOERR_RPT, CMD_ERRCNT, DATA_ERRCNT; no clear write. */
+	for (i = 0; i < ARRAY_SIZE(s->errors); i++) {
+		s->errors[i] = sdio_readb(func, 0xc0 + i, &s->error);
+		if (s->error)
+			return;
+	}
+}
 
 static void wifi_loopback_packet(u8 *packet, u8 seq)
 {
@@ -153,6 +199,7 @@ static int wifi_command_test(struct sdio_func *func,
 	r->status_before = sdio_readw(func, WIFI_HISR, &error);
 	if (error)
 		goto out;
+	wifi_command_snapshot(func, r, 0);
 	/* Drain boot events before sending; every loop has a fixed bound. */
 	for (i = 0; i < 32; i++) {
 		drain = wifi_command_drain(func, r, data);
@@ -179,6 +226,7 @@ static int wifi_command_test(struct sdio_func *func,
 			error = -ENOSPC;
 			goto out;
 		}
+		wifi_command_snapshot(func, r, r->command_seq * 2 - 1);
 		wifi_loopback_packet(packet, r->command_seq);
 		r->matched = false;
 		/* Factory H2C is one 512-byte, incrementing, BYTE-mode CMD53.
@@ -201,6 +249,7 @@ static int wifi_command_test(struct sdio_func *func,
 			msleep(20);
 			sdio_claim_host(func);
 		}
+		wifi_command_snapshot(func, r, r->command_seq * 2);
 		if (!r->matched) {
 			error = -ETIMEDOUT;
 			goto out;

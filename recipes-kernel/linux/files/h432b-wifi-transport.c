@@ -426,6 +426,7 @@ static ssize_t command_result_show(struct device *dev,
 {
 	struct h432b_wifi_sample *sample = sdio_get_drvdata(dev_to_sdio_func(dev));
 	struct h432b_command_result *r = &sample->command;
+	unsigned int i;
 	ssize_t size;
 
 	mutex_lock(&sample->lock);
@@ -439,6 +440,14 @@ static ssize_t command_result_show(struct device *dev,
 			r->events, r->debug_events, r->bytes, r->consumed,
 			r->port_seq, r->event_seq, r->public_pages, r->command_pages,
 			r->status_before, r->status_after, 28, r->reply, 32, r->debug_head);
+	for (i = 0; i < r->snapshots; i++) {
+		struct h432b_command_snapshot *s = &r->snapshot[i];
+
+		size += sysfs_emit_at(buf, size,
+			"phase=%u error=%d status=%04x rx=%04x c2h=%04x txctrl=%02x pages=%u,%u bus_errors=%*ph\n",
+			s->phase, s->error, s->status, s->rx_blocks, s->c2h_blocks,
+			s->tx_ctrl, s->public_pages, s->command_pages, 3, s->errors);
+	}
 	mutex_unlock(&sample->lock);
 	return size;
 }

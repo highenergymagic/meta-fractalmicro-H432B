@@ -34,6 +34,17 @@ class WifiCommand(unittest.TestCase):
         self.assertIn("sdio_disable_func(func)", C)
         self.assertIn("kfree(data)", C)
 
+    def test_queue_snapshots_are_bounded_and_read_only(self):
+        snapshot = C.split("static void wifi_command_snapshot", 1)[1].split("static void wifi_loopback_packet", 1)[0]
+        for text in ("ARRAY_SIZE(r->snapshot)", "0x40", "WIFI_C2H_COUNT",
+                     "0xc0 + i", "if (s->error)", "sdio_readw", "sdio_readb"):
+            self.assertIn(text, snapshot)
+        self.assertNotIn("sdio_write", snapshot)
+        self.assertIn("snapshot[5]", C)
+        self.assertIn("r->command_seq * 2 - 1", C)
+        self.assertIn("r->command_seq * 2);", C)
+        self.assertIn("sysfs_emit_at", D)
+
     def test_exclusive_stream_owner(self):
         self.assertIn("r->attempted || sample->event.attempted", D)
         self.assertIn("r->attempted || sample->command.attempted", D)

@@ -284,6 +284,42 @@ Kernel taint and failed-service counts remained zero. This establishes one
 correlated command response, **not a repeatable command channel**. No scan,
 association or wireless networking has been qualified.
 
+## Queue/error snapshots
+
+The command diagnostic records five ordered snapshots: before the startup
+drain (phase 0), before/after command 1 (phases 1/2), and before/after
+command 2 (phases 3/4). Each includes SDIO interrupt status, cumulative RX
+and C2H block counts, TX control, public/command free-page counts, and
+SDIO error report/command-error/data-error bytes. Snapshot read errors
+are reported independently; an incomplete snapshot must not be interpreted
+as zero-valued successful reads.
+
+These are sequential register reads, not an atomic hardware snapshot.
+They add timing overhead but no RX drain or status-clear writes. The
+instrumented image is qualified separately below.
+
+The [vendor SDIO bit definitions](https://github.com/ronangaillard/rtl8712-driver-src/blob/2237e98dacd8421b38beb2d1aad88aa2b9f79dd8/include/rtl8712_spec/sdio_reg/rtl8712_sdio_bitdef.h)
+name bit 8 RX overflow. Its appearance in the previous failing test is a
+diagnostic clue, not proof that unread RX caused the command timeout.
+The factory interrupt path services both RX and C2H; this prototype only
+drains C2H. No explicit overflow-clear operation was found in the inspected
+factory interrupt dispatcher.
+
+The instrumented bundle SHA256
+`c5b4e1479094ab6879aec22dd0e8f7a938df23514764c88baf44fd605f55bfb3`
+reproduced the first matching echo and second-command timeout. All five
+snapshots succeeded. RX count stayed zero; C2H advanced from 4 to 20 before
+the first command and to 21 after its reply, then stopped advancing.
+Command free pages fell from 203 to 202 to 201 while public pages stayed 196.
+The error-report byte changed from `00` to `08` after command 1, before the
+final HISR change to `05fe`. Command/data error counters remained zero.
+TX control remained `24`; kernel taint and failed-service counts were zero.
+
+This does not support a growing unread RX queue during the observed interval.
+The error-report bit's meaning is not established: do not label it a CRC
+error or apply HISR bit definitions to it. Next investigate command framing,
+queue consumption and the factory SDIO transfer/error-report path.
+
 ## Remaining milestones
 
 - Qualify the warm chip initialization path and repeated power cycles.
