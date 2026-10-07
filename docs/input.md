@@ -2,11 +2,11 @@
 
 ## Availability
 
-KEY_POWER is available in the normal runtime. The remaining keyboard,
-routing keys and selectors use the opt-in `linux-h432b-input-test` profile
-and a provisional evdev ABI. Chord translation, keypad locking and notification
-policy are not implemented. Vibration is available only through an explicit
-bounded diagnostic.
+The normal NAND kernel includes KEY_POWER, the keyboard, routing keys and
+selectors. The `linux-h432b-input-test` profile uses the same shared driver and
+wiring. The evdev ABI remains provisional; chord translation, keypad locking
+and notification policy are not implemented. The normal systembase includes
+a bounded vibration command, not an automatic haptics service.
 
 Raw GPIO recorders must not run alongside the input driver or while changing
 the braille display. The scan circuitry shares GPIO banks with the display;
@@ -80,7 +80,7 @@ implemented. Lock transitions must release or cancel held chords.
 
 ## Provisional Linux ABI
 
-The diagnostic driver scans at approximately 10 ms plus scan overhead and
+The input driver scans at approximately 10 ms plus scan overhead and
 requires two matching samples. There is no autorepeat. GPIO errors and
 suspend/unbind release held keys and return rows high. No wake source is declared.
 
@@ -115,11 +115,11 @@ Power-switch observation is available separately through
 
 ## Vibration
 
-GPE1[4] is the active-high motor control. The optional
+GPE1[4] is the active-high motor control. The
 `h432b-vibrator-test` validates the board, claims only that line, starts low
 and accepts `--pulse-100ms` or `--pulse-300ms`. It reports output readback
 and returns low on completion, handled errors, SIGINT and SIGTERM.
-It is neither included nor started by the normal image.
+It is installed in the normal systembase but never started automatically.
 
 A 300 ms pulse with pulls disabled was physically confirmed. A 100 ms
 test was not perceptible, but pulse duration and pull configuration differed,

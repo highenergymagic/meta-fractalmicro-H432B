@@ -21,7 +21,7 @@ class InputMapping(unittest.TestCase):
         self.assertIn("s->row[i / 16] & BIT(i % 16)", source)
 
     def test_gpio_scope_and_polarity(self):
-        text = (FILES / "s5pv210-hims-u2-input-test.dts").read_text()
+        text = (FILES / "s5pv210-hims-u2-input.dtsi").read_text()
         groups = {}
         for name, value in re.findall(r"(\w+)-gpios = (.*?);", text, re.S):
             groups[name] = re.findall(r"<&(\w+) (\d+) (GPIO_ACTIVE_\w+)>", value)

@@ -48,7 +48,7 @@ class BatterySupplyTests(unittest.TestCase):
         self.assertIn("gpiod_set_value(b->pull_low, 0)", SOURCE)
 
     def test_compiled_policy_tests(self):
-        recipe = (ROOT / "recipes-kernel/linux/linux-h432b-battery-test_6.12.111.bb").read_text()
+        recipe = (ROOT / "recipes-kernel/linux/h432b-battery.inc").read_text()
         self.assertIn("${BUILD_CC}", recipe)
         self.assertIn("${B}/test-battery-policy", recipe)
         self.assertIn("-Wall -Wextra -Werror", recipe)

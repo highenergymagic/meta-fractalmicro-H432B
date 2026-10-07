@@ -6,14 +6,15 @@ FILES=ROOT/"recipes-kernel/linux/files"
 
 class ExternalSdTests(unittest.TestCase):
     def test_controller_and_detect(self):
-        text=(FILES/"s5pv210-hims-u2-external-sd-test.dts").read_text()
+        text=(FILES/"s5pv210-hims-u2-external-sd.dtsi").read_text()
         for expected in ("&sdhci2", "hims,read-only-probe", "max-frequency = <25000000>",
                          "cd-gpios = <&gph3 1 GPIO_ACTIVE_LOW>", 'samsung,pins = "gph3-1"',
                          "samsung,pin-pud = <0>", "no-1-8-v", "&sd2_bus4"):
             self.assertIn(expected,text)
         for forbidden in ("/delete-property/", "non-removable", "broken-cd", "regulator-always-on"):
             self.assertNotIn(forbidden,text)
-        self.assertIn('#include "s5pv210-hims-u2-resume-test.dts"',text)
+        diagnostic=(FILES/"s5pv210-hims-u2-external-sd-test.dts").read_text()
+        self.assertIn('#include "s5pv210-hims-u2-external-sd.dtsi"',diagnostic)
 
     def test_nand_profile(self):
         recipe=(ROOT/"recipes-kernel/linux/linux-h432b-external-sd-test_6.12.111.bb").read_text()

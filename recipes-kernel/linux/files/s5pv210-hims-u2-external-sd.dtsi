@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: GPL-2.0
+/* Removable slot: qualified reads/hotplug; write support not yet qualified. */
+&pinctrl0 {
+    external_sd_detect: external-sd-detect {
+        samsung,pins = "gph3-1";
+        samsung,pin-function = <0>;
+        samsung,pin-pud = <0>;
+    };
+};
+&sdhci2 {
+    bus-width = <4>;
+    max-frequency = <25000000>;
+    no-1-8-v;
+    no-sdio;
+    no-mmc;
+    hims,read-only-probe;
+    /* Factory driver identifies this GPIO; verify polarity by hotplug. */
+    cd-gpios = <&gph3 1 GPIO_ACTIVE_LOW>;
+    disable-wp;
+    pinctrl-names = "default";
+    pinctrl-0 = <&sd2_clk &sd2_cmd &sd2_bus4 &external_sd_detect>;
+    status = "okay";
+};

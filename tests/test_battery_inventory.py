@@ -7,7 +7,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 FILES = ROOT / "recipes-kernel/linux/files"
 SOURCE = (FILES / "h432b-battery-inventory.c").read_text()
-DTS = (FILES / "s5pv210-hims-u2-battery-test.dts").read_text()
+DTS = (FILES / "s5pv210-hims-u2-battery.dtsi").read_text()
 
 class BatteryInventoryTests(unittest.TestCase):
     def test_board_pins(self):
@@ -65,12 +65,14 @@ class BatteryInventoryTests(unittest.TestCase):
         self.assertIn('devm_gpiod_get(dev, "pull-low", GPIOD_OUT_LOW)', SOURCE)
         self.assertIn("gpiod_set_value(b->pull_low, 0);", SOURCE)
 
-    def test_default_unchanged(self):
+    def test_diagnostic_and_runtime_share_driver(self):
         default = (FILES / "s5pv210-hims-u2.dts").read_text()
         self.assertNotIn("battery-inventory", default)
         recipe = (ROOT / "recipes-kernel/linux/linux-h432b-battery-test_6.12.111.bb").read_text()
         self.assertIn('KERNEL_PACKAGE_NAME = "kernel-battery-test"', recipe)
-        self.assertIn("# CONFIG_SUSPEND is not set", recipe)
+        self.assertIn("require h432b-battery.inc", recipe)
+        runtime = (ROOT / "recipes-kernel/linux/linux-h432b-runtime_6.12.111.bb").read_text()
+        self.assertIn("require h432b-battery.inc", runtime)
 
 if __name__ == "__main__":
     unittest.main()

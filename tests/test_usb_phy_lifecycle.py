@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Source guards for the opt-in host PHY lifecycle fix."""
+"""Source guards for the shared host PHY lifecycle fix."""
 from pathlib import Path
 import unittest
 
@@ -22,10 +22,12 @@ class UsbPhyLifecycleTests(unittest.TestCase):
             self.assertEqual(added.count("phy_power_off("), 2)
             self.assertIn("for (i = PHY_NUMBER - 1; i >= 0; i--)", added)
 
-    def test_experiment_only(self):
+    def test_runtime_and_resume_share_fix(self):
         recipe = ROOT / "recipes-kernel/linux"
         patch = "0011-usb-host-phy-lifecycle.patch"
-        self.assertIn(patch, (recipe / "linux-h432b-resume-test_6.12.111.bb").read_text())
+        self.assertIn(patch, (recipe / "h432b-usb-host.inc").read_text())
+        for name in ("runtime", "resume-test"):
+            self.assertIn("require h432b-usb-host.inc", (recipe / ("linux-h432b-" + name + "_6.12.111.bb")).read_text())
         self.assertNotIn(patch, (recipe / "linux-h432b-base.inc").read_text())
 
 if __name__ == "__main__":

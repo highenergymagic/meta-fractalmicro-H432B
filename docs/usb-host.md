@@ -2,10 +2,11 @@
 
 ## Availability
 
-External USB host support is qualified in the opt-in resume and external-SD
-diagnostic profiles, not the normal NAND runtime. All three physical sockets
-have enumerated a PL2303 adapter through the onboard hub. Descriptor transfers
-and driver binding are verified; serial TX/RX is not.
+The normal NAND kernel includes the onboard hub power/reset controls and
+host-PHY lifecycle integration. Resume and external-SD diagnostics consume
+the same h432b-usb-host.inc implementation. Earlier diagnostic tests enumerated
+a PL2303 adapter at all three physical sockets. Descriptor transfers and
+driver binding are verified; serial TX/RX is not.
 
 ## Hardware configuration
 
@@ -24,7 +25,7 @@ this implementation does not control it or program the PMIC.
 The onboard hub identifies as 0409:005a, high-speed, four ports. The standard
 `onboard-usb-dev` driver owns hub power and reset through the board DTS
 and an ID-table extension. USB12 and USB3 are separate always-on fixed
-regulators in the diagnostic profile; their physical supply grouping and
+regulators in the shared board configuration; their physical supply grouping and
 selective power policy are not established. No unmeasured voltage is specified.
 
 | Physical socket | Downstream hub port |

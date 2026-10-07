@@ -32,14 +32,16 @@ class UsbHubIntegrationTests(unittest.TestCase):
         self.assertIn('.supply_names = { "vdd" }',text)
         self.assertIn(".is_hub = true",text)
 
-    def test_experiment_and_builtin_driver(self):
+    def test_shared_builtin_driver(self):
         config=(FILES/"u2-usb-host-test.config").read_text()
         for option in ("USB_ONBOARD_DEV","REGULATOR_FIXED_VOLTAGE","USB_SERIAL_PL2303"):
             self.assertIn("CONFIG_"+option+"=y",config)
         self.assertIn("usb-host-test.dtsi",(FILES/"s5pv210-hims-u2-resume-test.dts").read_text())
         self.assertNotIn("usb-host-test.dtsi",(FILES/"s5pv210-hims-u2.dts").read_text())
         recipe=(ROOT/"recipes-kernel/linux/linux-h432b-resume-test_6.12.111.bb").read_text()
-        self.assertIn("0012-onboard-h432b-usb-hub.patch",recipe)
+        self.assertIn("require h432b-usb-host.inc",recipe)
+        shared=(ROOT/"recipes-kernel/linux/h432b-usb-host.inc").read_text()
+        self.assertIn("0012-onboard-h432b-usb-hub.patch",shared)
 
 if __name__=="__main__":
     unittest.main()

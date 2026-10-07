@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/* Read-only fuel-gauge telemetry; no charging control. */
+
+/ {
+	battery-inventory {
+		compatible = "fractal,h432b-battery-inventory";
+		pinctrl-names = "default";
+		pinctrl-0 = <&battery_inputs &battery_output>;
+		rx-gpios = <&gpc0 3 GPIO_ACTIVE_HIGH>;
+		pull-low-gpios = <&gpc0 4 GPIO_ACTIVE_HIGH>;
+		charging-gpios = <&gpc0 0 GPIO_ACTIVE_LOW>;
+		secondary-present-gpios = <&gpc0 1 GPIO_ACTIVE_LOW>;
+		ac-present-gpios = <&gpc0 2 GPIO_ACTIVE_LOW>;
+	};
+};
+
+&pinctrl0 {
+	battery_inputs: battery-inputs {
+		samsung,pins = "gpc0-0", "gpc0-1", "gpc0-2", "gpc0-3";
+		samsung,pin-function = <0>;
+		samsung,pin-pud = <0>;
+	};
+	battery_output: battery-output {
+		samsung,pins = "gpc0-4";
+		samsung,pin-pud = <0>;
+	};
+};

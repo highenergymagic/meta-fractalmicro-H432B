@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 require linux-h432b-platform.inc
-SUMMARY = "H432B runtime kernel with writable Linux storage and GPS"
+SUMMARY = "H432B integrated NAND runtime kernel"
 # The runtime is the sole default kernel provider.
 H432B_KERNEL_PROVIDER_REMOVE = ""
 KERNEL_PACKAGE_NAME = "kernel"
@@ -23,3 +23,8 @@ require h432b-wifi.inc
 require h432b-bluetooth.inc
 
 require h432b-fm.inc
+
+require h432b-input.inc
+require h432b-battery.inc
+require h432b-usb-host.inc
+require h432b-external-sd.inc

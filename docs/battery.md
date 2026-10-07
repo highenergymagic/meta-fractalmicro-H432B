@@ -2,8 +2,8 @@
 
 ## Availability
 
-Battery telemetry is available only in the opt-in battery-test profile, not
-the normal NAND runtime. It exposes read-only Linux power_supply measurements;
+Battery telemetry is included in the normal NAND runtime and shared with the
+opt-in battery-test profile. It exposes read-only Linux power_supply measurements;
 charger control, full suspend and low-battery policy are not implemented.
 
 ## Hardware interface
@@ -27,12 +27,13 @@ when USB power is removed. The primary input has not been qualified with an
 AC adapter. Stock polling uses a five-second interval and filters
 capacity samples; communication failure must not be assumed to mean no pack.
 
-## Read-only qualification image
+## Driver and diagnostic profile
 
-The separate linux-h432b-battery-test recipe and OS layer's
-openh432-battery-test bundle are opt-in experiments. They do not change the
-normal board image, enable suspend or alter charging settings. The bundle
-uses the installed slot-B NAND root through its minimal early handoff.
+The linux-h432b-runtime and linux-h432b-battery-test recipes consume the same
+h432b-battery.inc driver and configuration. Neither enables suspend nor
+alters charging settings. The optional openh432-battery-test bundle isolates
+telemetry testing and uses the installed slot-B root through its minimal
+handoff.
 
 The battery-inventory platform device exposes a root-readable snapshot
 attribute. Reading it initiates two CRC-checked ROM reads, then, for supported
@@ -40,13 +41,13 @@ family codes, two capacity reads with agreement and range checks.
 Transactions use the identified ROM, not broadcast register access.
 A family code is not necessarily an exact model identifier.
 
-The diagnostic has no EEPROM programming, charger control, generic register
+The driver has no EEPROM programming, charger control, generic register
 write interface. Pack serial numbers are not exposed.
 It reports GPIO levels and transport errors even when battery readings fail.
 
 ## Raw measurement snapshot
 
-The opt-in diagnostic also provides
+The driver also provides
 `/sys/devices/platform/battery-inventory/registers`, readable only by root.
 Each explicit read verifies the single-drop ROM twice and accepts family
 0x32 before selecting that device. It reads two passes of fixed windows
@@ -81,7 +82,7 @@ accuracy or pack health; retain the raw capture alongside any interpretation.
 
 ## Linux power_supply interface
 
-The opt-in driver registers `/sys/class/power_supply/h432b-battery` with type
+The driver registers `/sys/class/power_supply/h432b-battery` with type
 `Battery` and these read-only properties:
 
 - `capacity`: verified remaining capacity, from 0 to 100 percent.
@@ -115,14 +116,13 @@ is advertised.
 The driver has no writable power_supply properties. Device removal cancels
 polling before unregistering the supply and releasing GPIOs.
 Charging transitions, the AC source, low-battery policy and suspend remain
-separate work. The normal image and power-button policy
-are unchanged.
+separate work. Including telemetry does not enable a power-button action.
 
 The shared status/range policy is compiled and tested inside the pinned build
 container. It covers all valid capacities and GPIO combinations, error and
 stale-data handling, negative GPIO errors and out-of-range capacity. Static
 tests separately check the read-only property list, polling, cleanup and
-default-image isolation.
+shared runtime/diagnostic integration.
 
 ## Validation scope
 
@@ -140,7 +140,9 @@ alone establish present undervoltage or an observed full charge cycle.
 
 Compiled tests cover status/GPIO combinations, stale/error handling and signed
 conversion boundaries. Active charging transitions, the AC input, exact gauge
-model, long-term pack health and NAND-runtime integration remain unqualified.
+model and long-term pack health remain unqualified. The earlier RAM-profile
+results are not a combined NAND-runtime qualification; see the
+[validation record](https://github.com/highenergymagic/openh432-build/blob/main/docs/hardware-validation.md).
 
 ## References
 

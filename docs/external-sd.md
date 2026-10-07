@@ -1,21 +1,23 @@
 # External SD slot
 
-The opt-in external-SD profile enables the S5PV210 controller at
+The normal NAND kernel and opt-in external-SD profile enable the S5PV210 controller at
 `0xeb200000` (`sdhci2`). Factory-driver analysis identifies GPH3[1] as
 the card-detect input with internal pulls disabled. The active-low GPIO configuration has passed physical removal and
 reinsertion testing without a reset.
 
-## Diagnostic profile
+## Configuration
 
-`linux-h432b-external-sd-test` enables the controller with a four-bit bus,
+The shared `s5pv210-hims-u2-external-sd.dtsi` enables a four-bit bus,
 a 25 MHz frequency ceiling and no 1.8 V signaling. It uses the standard
 Samsung SDHCI driver and pin groups, with GPIO-based card detection.
 No additional power rail is inferred or switched.
 
-Both the internal and external SD block devices retain the board's
-read-only block/ioctl guard. The recipe rejects writable NAND profiles.
-Mechanical write-protect sensing is not yet qualified; the software guard
-remains active regardless of the card's lock tab.
+The external card retains the board's read-only block/ioctl guard in both
+profiles because writes and mechanical write-protect sensing remain
+unqualified. This guard remains active regardless of the card's lock tab.
+The normal runtime permits internal-SD and Linux UBI writes; the separate
+diagnostic additionally guards the internal card and rejects writable NAND
+profiles.
 
 `openh432-external-sd-test` packages this kernel for RAM boot using the
 installed read-only NAND root. Builds do not access the device or install
@@ -42,7 +44,7 @@ again, with hashes identical to the pre-removal samples and transfers around
 and one removal/reinsertion cycle with the tested card. Mechanical write
 protection sensing and writes remain unqualified.
 
-## Device-only suspend/resume
+## Diagnostic-only suspend/resume
 
 With the external card inserted, two guarded `pm_test=devices` cycles
 completed in approximately 5.9 seconds each, with SDIO still attached and

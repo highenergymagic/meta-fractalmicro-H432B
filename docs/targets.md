@@ -32,7 +32,7 @@ These targets are deliberately separate from normal deployment:
 | --- | --- |
 | `wifi-test` | Runtime Wi-Fi driver with explicit transport and power-stage diagnostics. |
 | `power-test` | Read-only-storage PMIC bus inspection baseline. |
-| `battery-test` | Battery telemetry driver not yet integrated into the runtime. |
+| `battery-test` | Isolated qualification of the shared runtime battery driver. |
 | `input-test` | Key, switch and vibration qualification. |
 | `resume-test` | Suspend bridge and USB power-lifecycle work. |
 | `external-sd-test` | Removable SD and USB-host qualification. |
@@ -41,8 +41,11 @@ These targets are deliberately separate from normal deployment:
 
 Kernel recipes use the prefix `linux-h432b-`; image recipes use
 `openh432-`. Shared drivers need not be duplicated to keep profiles isolated.
-Support tools under `recipes-support` are built explicitly, not installed
-automatically in the normal root filesystem.
+Support tools under `recipes-support` are generally opt-in. The bounded
+`h432b-vibrator-test` command is included in the normal systembase but never
+runs automatically. Input, battery, USB-host and external-SD diagnostics share
+implementation fragments with the normal runtime rather than owning separate
+driver copies.
 
 The optional `u-boot-h432b-nand`, `-nand-profile`, `-nand-timer` and
 `-nand-subpage` targets retain NAND inspection and performance experiments.

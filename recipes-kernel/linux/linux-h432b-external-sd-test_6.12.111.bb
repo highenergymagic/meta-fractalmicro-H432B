@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 require linux-h432b-resume-test_6.12.111.bb
+require h432b-external-sd.inc
 SUMMARY = "Opt-in read-only external SD slot qualification kernel"
 KERNEL_PACKAGE_NAME = "kernel-external-sd-test"
 KERNEL_DEVICETREE = "samsung/s5pv210-hims-u2-external-sd-test.dtb"
