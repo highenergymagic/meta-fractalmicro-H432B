@@ -1,0 +1,33 @@
+Subject: [PATCH] Measure target CRC work during H432B NAND boot
+
+Upstream-Status: Inappropriate [board profiling]
+
+--- a/lib/crc32.c
++++ b/lib/crc32.c
+@@ -13,3 +13,6 @@
+ #endif
++#if defined(CONFIG_H432B_NAND_TIMING) && !defined(USE_HOSTCC)
++#include <nand-timing.h>
++#endif
+ #include <compiler.h>
+ #include <u-boot/crc.h>
+@@ -219,4 +222,15 @@
+-uint32_t ZEXPORT crc32 (uint32_t crc, const Bytef *p, uInt len)
+-{
+-     return crc32_no_comp(crc ^ 0xffffffffL, p, len) ^ 0xffffffffL;
+-}
++uint32_t ZEXPORT crc32 (uint32_t crc, const Bytef *p, uInt len)
++{
++#if defined(CONFIG_H432B_NAND_TIMING) && !defined(USE_HOSTCC)
++     unsigned long long start;
++     uint32_t result;
++     if (!h432b_nand_timing_active())
++          return crc32_no_comp(crc ^ 0xffffffffL, p, len) ^ 0xffffffffL;
++     start = get_ticks();
++     result = crc32_no_comp(crc ^ 0xffffffffL, p, len) ^ 0xffffffffL;
++     h432b_nand_timing_add(H432B_CRC, get_ticks() - start, len);
++     return result;
++#else
++     return crc32_no_comp(crc ^ 0xffffffffL, p, len) ^ 0xffffffffL;
++#endif
++}

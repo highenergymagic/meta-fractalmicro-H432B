@@ -1,0 +1,24 @@
+Subject: [PATCH] H432B: reuse the selected Linux UBI attachment
+
+Upstream-Status: Inappropriate [H432B A/B boot contract]
+
+Slot-state access already attaches this partition. Preserve that attachment
+for the kernel read rather than tearing it down and rescanning all PEBs.
+Explicit ubi part commands retain their original reattach semantics.
+
+--- a/common/cmd_ubi.c
++++ b/common/cmd_ubi.c
+@@ -1,1 +1,12 @@
+-/* Dedicated dynamic environment copies, never a raw NAND offset. */
++int h432b_ubi_attach_linux(void)
++{
++	if (ubi_initialized && ubi && ubi_dev.selected &&
++	    !strcmp(ubi_dev.part_name, "linux"))
++		return 0;
++	if (run_command("mtdparts default", 0))
++		return -EINVAL;
++	return run_command("ubi part linux", 0);
++}
++
++
++/* Dedicated dynamic environment copies, never a raw NAND offset. */

@@ -6,6 +6,9 @@
 #include <errno.h>
 #include <asm/io.h>
 #include "u2fastboot.h"
+#ifdef CONFIG_H432B_NAND_TIMING
+#include <nand-timing.h>
+#endif
 
 #define REG(o) ((void __iomem *)(0xb0e00000U+(o)))
 #define U2_NAND_READ8() readb(REG(0x10))
@@ -14,7 +17,13 @@
 static void read_buf(struct mtd_info *mtd, u8 *buf, int len)
 {
  (void)mtd;
+#ifdef CONFIG_H432B_NAND_TIMING
+ unsigned long long start = get_ticks();
+#endif
  u2_nand_read_fifo(buf, len);
+#ifdef CONFIG_H432B_NAND_TIMING
+ h432b_nand_timing_add(H432B_FIFO, get_ticks() - start, len);
+#endif
 }
 static struct nand_chip u2_chip;
 static int blocked;
@@ -52,6 +61,31 @@ static int pool_markbad(struct mtd_info *mtd, loff_t off)
  ret=original_markbad(mtd,off);
  write_active=0;
  return ret;
+}
+#endif
+#ifdef CONFIG_H432B_NAND_TIMING
+static int (*timed_calculate)(struct mtd_info *, const u8 *, u8 *);
+static int (*timed_correct)(struct mtd_info *, u8 *, u8 *, u8 *);
+static void (*timed_command)(struct mtd_info *, unsigned, int, int);
+static int measure_calculate(struct mtd_info *m, const u8 *data, u8 *ecc)
+{
+ unsigned long long start = get_ticks();
+ int ret = timed_calculate(m, data, ecc);
+ h432b_nand_timing_add(H432B_ENCODE, get_ticks() - start, 512);
+ return ret;
+}
+static int measure_correct(struct mtd_info *m, u8 *data, u8 *read_ecc, u8 *calc_ecc)
+{
+ unsigned long long start = get_ticks();
+ int ret = timed_correct(m, data, read_ecc, calc_ecc);
+ h432b_nand_timing_add(H432B_CORRECT, get_ticks() - start, 512);
+ return ret;
+}
+static void measure_command(struct mtd_info *m, unsigned command, int column, int page)
+{
+ unsigned long long start = get_ticks();
+ timed_command(m, command, column, page);
+ h432b_nand_timing_add(H432B_COMMAND, get_ticks() - start, 0);
 }
 #endif
 static unsigned saved_cont;
@@ -163,6 +197,11 @@ static int do_u2nandinit(cmd_tbl_t *cmdtp,int flag,int argc,char *const argv[])
  mtd->write=ro_write; mtd->panic_write=ro_write; mtd->write_oob=ro_oob;
  mtd->erase=ro_erase; mtd->block_markbad=ro_bad;
 #endif
+#ifdef CONFIG_H432B_NAND_TIMING
+ timed_calculate=n->ecc.calculate; n->ecc.calculate=measure_calculate;
+ timed_correct=n->ecc.correct; n->ecc.correct=measure_correct;
+ timed_command=n->cmdfunc; n->cmdfunc=measure_command;
+#endif
  nand_register(0);
  initialized=1;
 #ifdef CONFIG_H432B_BOOTSTATE
@@ -203,8 +242,15 @@ static int do_u2nandboot(cmd_tbl_t *cmdtp,int flag,int argc,char *const argv[])
  if(mode!=3) {
  profile_attached=0;
 #endif
+#ifdef CONFIG_H432B_REUSE_UBI
+ {
+  extern int h432b_ubi_attach_linux(void);
+  if(h432b_ubi_attach_linux()) return CMD_RET_FAILURE;
+ }
+#else
  if(run_command("mtdparts default",0) ||
     run_command("ubi part linux",0)) return CMD_RET_FAILURE;
+#endif
 #ifdef CONFIG_U2_NAND_PROFILE
  profile_attached=1;
  }

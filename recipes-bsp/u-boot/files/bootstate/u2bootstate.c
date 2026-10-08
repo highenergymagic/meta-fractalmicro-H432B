@@ -4,10 +4,14 @@
 #include <libfdt.h>
 #define H432B_BOOTSTATE_UBOOT 1
 #include "bootstate.h"
+#ifdef CONFIG_H432B_NAND_TIMING
+#include <nand-timing.h>
+#endif
 extern int h432b_ubi_bootstate_read(unsigned, void *);
 extern int h432b_ubi_bootstate_replace(unsigned, const void *);
 static int boot_slot = -1;
 static unsigned boot_serial;
+static unsigned long attach_ms, kernel_started, boot_started;
 /* Called after image CRC checks and before bootz. RAM/manual boots carry no
  * successful-attempt claim. Preserve the image's normal kernel arguments. */
 int u2_bootstate_handoff(void *fdt)
@@ -23,9 +27,17 @@ int u2_bootstate_handoff(void *fdt)
         strstr(args, "rauc.slot=") || strstr(args, "openh432.attempt="))
         return -1;
     count = snprintf(commandline, sizeof(commandline),
-                     "%s rauc.slot=%c openh432.attempt=%u",
-                     args, 'A' + boot_slot, boot_serial);
+                     "%s rauc.slot=%c openh432.attempt=%u"
+                     " openh432.loader_attach_ms=%lu"
+                     " openh432.loader_kernel_ms=%lu"
+                     " openh432.loader_total_ms=%lu",
+                     args, 'A' + boot_slot, boot_serial, attach_ms,
+                     get_timer(kernel_started), get_timer(boot_started));
     if (count < 0 || count >= sizeof(commandline)) return -1;
+#ifdef CONFIG_H432B_NAND_TIMING
+    if (h432b_nand_timing_format(commandline + count,
+                                sizeof(commandline) - count) < 0) return -1;
+#endif
     return setenv("bootargs", commandline);
 }
 static unsigned char scratch[2 * H432B_ENV_BYTES];
@@ -47,8 +59,23 @@ static int do_u2bootstate(cmd_tbl_t *cmdtp, int flag, int argc, char *const argv
     (void)cmdtp; (void)flag;
     if (argc != 2 || (strcmp(argv[1], "inspect") &&
                      strcmp(argv[1], "consume") && strcmp(argv[1], "boot"))) return CMD_RET_USAGE;
+    boot_started = get_timer(0);
+#ifdef CONFIG_H432B_NAND_TIMING
+    h432b_nand_timing_reset();
+#endif
+#ifdef CONFIG_H432B_REUSE_UBI
+    {
+        extern int h432b_ubi_attach_linux(void);
+        if (h432b_ubi_attach_linux()) return CMD_RET_FAILURE;
+    }
+#else
     if (run_command("mtdparts default", 0) ||
         run_command("ubi part linux", 0)) return CMD_RET_FAILURE;
+#endif
+    attach_ms = get_timer(boot_started);
+#ifdef CONFIG_H432B_NAND_TIMING
+    h432b_nand_timing_kernel();
+#endif
     selected = h432b_bootstate_load(&store, scratch, &state);
     if (selected < 0) {
         puts("No valid bootstate; remain in maintenance, no default reset\n");
@@ -75,6 +102,7 @@ static int do_u2bootstate(cmd_tbl_t *cmdtp, int flag, int argc, char *const argv
         boot_slot = slot;
         boot_serial = state.serial;
         snprintf(command, sizeof(command), "u2nandboot %c", 'a' + slot);
+        kernel_started = get_timer(0);
         run_command(command, 0);
         boot_slot = -1;
         setenv("bootargs", NULL);

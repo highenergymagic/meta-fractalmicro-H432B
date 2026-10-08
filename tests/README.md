@@ -21,11 +21,18 @@ vectors and audio clock-lifetime tests; they are skipped when it is absent. Boot
 | Check | Scope |
 | --- | --- |
 | Boot state | CRC/schema checks, serial wrap, alternate-copy commit/readback failure, exhaustion, stale success and NAND write boundaries |
+| NAND loader timing | Hardware-tick counter phases, bounded reporting and retained I/O/check operations |
+| Fixed BCH | Build-time generic/fixed parity and decoding comparison using fetched upstream source |
 | Audio clock lifetime | Positive ALSA constraint results, startup errors and balanced clock references |
 | Suspend integration | Runtime recipe, wake-source, display-power and peripheral-retention contracts |
 | Source contracts | Recipe relationships, protocol constants, bounds and cleanup structure |
 | Wi-Fi receive vectors | Actual C parser: padding, lengths, truncation and CRC/ICV flags |
 | Wi-Fi station vectors | H2C framing, CCMP nonce/header construction and BSS-cache selection |
+
+The A/B loader build runs `check-bch-equivalence.py` with its pinned native
+compiler. It compiles the fetched BCH library twice (generic and M=13, T=8),
+then compares 8,448 deterministic corruption cases. The source-only unit suite
+checks the recipe contract; it does not substitute for that build-time test.
 
 Bootstate torn-write vectors model interrupted payloads and UBI update markers;
 they are not physical power-cut qualification.

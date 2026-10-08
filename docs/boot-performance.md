@@ -1,93 +1,151 @@
 # Boot and NAND performance
 
-## Operating conditions
+## Runtime configuration
 
-The normal runtime runs at 800 MHz, confirmed by the Linux clock tree.
-CPU-frequency scaling and 1 GHz operation are not qualified. Factory CE
-suspend/resume is not comparable to a full Linux reboot.
+The normal runtime runs at 800 MHz. CPU-frequency scaling and 1 GHz operation
+are unqualified. Factory CE suspend/resume is not comparable to a full reboot;
+no matched stock-CE cold-boot measurement is available.
 
-The persistent loader and Linux driver use aligned 32-bit FIFO reads with
-byte fallback. Status/ID accesses remain byte-sized. Software BCH8 and the
-installed OOB layout are unchanged; hardware ECC is not a drop-in replacement
+The standard boot path uses:
+
+- A/B U-Boot with instruction caching, aligned word FIFO reads, corrected BCH
+  subpage reads and one reusable Linux UBI attachment.
+- Software BCH8, specialized for M=13, T=8: 512-byte steps and 13 parity bytes.
+- A root-handoff initramfs with RAM-resident startup audio.
+- A gzip SquashFS systembase with full static-volume CRC verification.
+- Device-only udev coldplug with four workers and an early maintenance-tty event.
+
+Data caching remains disabled in U-Boot. On-flash parity, correction strength
+and image checks are unchanged. Hardware ECC is not a drop-in replacement
 without parity-compatibility qualification.
 
-## Measured baseline
+The distribution layer owns
+[runtime discovery policy](https://github.com/highenergymagic/meta-fractalmicro-openh432/blob/main/docs/runtime.md#device-discovery)
+and [startup audio](https://github.com/highenergymagic/meta-fractalmicro-openh432/blob/main/docs/system-sounds.md).
+Non-filesystem UBI image and bootstate volumes are excluded from generic udev
+filesystem probing; selected-root verification, block-device discovery and
+normal hotplug remain enabled.
 
-Measurements below are qualification samples, not performance guarantees.
-They describe the word-read implementation tested on one board, not every
-image produced by subsequent source revisions.
+## Qualified measurements
 
-| Measurement | Byte-read baseline | Word-read implementation |
-| --- | ---: | ---: |
-| Linux corrected 4 MiB MTD read | 1.993 s | 1.145 s |
-| Linux 4 MiB UBI volume read | 2.006 s | 1.162–1.163 s |
-| Comparable software reboot to executable USB-shell command | 121.476 s | 107.461 s |
-
-The Linux MTD change reduced read time by about 43% (throughput from about
-2.1 to 3.7 MB/s). The reboot comparison improved by about 14 seconds; it
-includes shutdown and host console handshake, not physical power-on timing.
+These are samples from one board, not performance guarantees. Exact image
+hashes and test scope are in the
+[hardware validation records](https://github.com/highenergymagic/openh432-build/blob/main/docs/hardware-validation.md).
 A complete boot below 30 seconds has not been demonstrated.
 
-Matched nanddump tests measured 1.02–1.05 seconds without correction and
-1.24–1.25 seconds with correction after the word-read change. ECC is not the
-sole bottleneck. These measurements do not authorize disabling correction.
+### Persistent loader
 
-A controlled-cache Python import sample improved from 9.40 to 8.30 seconds;
-warm imports remained about 3.8 seconds. A separate RAM XZ sample decoded
-1,390,508 compressed bytes to 4,763,296 bytes in 0.84 seconds with matching
-hash. Neither is an isolated measure of all boot-time SquashFS decompression.
+Instrumented ordinary NAND boots of the same 9,054,208-byte kernel bundle
+measured the following intervals. Both carriers used the same timing hooks.
 
-## Measurement procedure
+| Measurement | Generic BCH | Fixed M=13, T=8 |
+| --- | ---: | ---: |
+| UBI attachment | 15.496 s | 13.054 s |
+| Kernel load and checked handoff | 18.939 s | 16.808 s |
+| Total measured loader interval | 34.724 s | 30.118 s |
+| BCH calculation, scan plus load | 21.618 s | 17.093 s |
+| FIFO transfers, scan plus load | 4.290 s | 4.290 s |
+| CRC32, load interval | 3.861 s | 3.861 s |
 
-Use host monotonic time for bootloader command intervals and Linux timing
-for Linux operations. Record the exact image, start/end events, cache state,
-byte count and ECC policy. Unit durations overlap and must not be summed
-as CPU time. Compare identical payloads before attributing a timing difference
-to one implementation change.
+Specialization reduced the measured interval by 4.606 seconds (13.3%).
+Recovery-assisted launch measured 30.134 seconds. These intervals exclude
+factory boot, bootstrap initialization and final Linux entry.
+Software BCH calculation remains the dominant measured loader cost.
 
-The inherited persistent-loader timer is a software call counter, not elapsed
-milliseconds. Its readings are unsuitable for performance claims. Host timeout
-does not cancel a target command; retrieve the outstanding result before
-sending another operation.
+The A/B build compares the fetched upstream generic and specialized BCH
+implementations across 8,448 deterministic corruption cases, including parity
+equality and one-through-eight-bit repair. This is algorithmic regression
+coverage, not physical power-loss or NAND-aging qualification.
 
-## Optional loader experiments
+### Linux startup
 
-These are RAM-only profiles, not default persistent-loader behavior.
+The standard systembase trades image size for lower decompression cost.
+Two consecutive normal NAND boots with matched contents measured:
 
-| Recipe | Purpose and measured scope |
+| Measurement | XZ systembase | Gzip systembase |
+| --- | ---: | ---: |
+| Systembase bytes | 33,562,624 | 42,700,800 |
+| Selected-root block creation | 16.7 s | 19.4 s |
+| BRLTTY virtual input | 55.6 s | 42.9–43.4 s |
+| D-Bus startup duration | 14.8 s | 3.0–3.2 s |
+| Multi-user activation | 56.2 s | 53.2–53.7 s |
+
+Startup milestones are relative to Linux entry; D-Bus is a service duration.
+They must not be added together. The larger gzip image increases the full-root
+verification cost but reaches the braille input milestone earlier.
+
+Queuing the maintenance tty before bulk discovery moved its device-ready event
+to 36.4–36.5 seconds and shell activation to 40.3–40.4 seconds, from approximately
+50–52 and 53–54 seconds respectively. BRLTTY remained around 43 seconds; this
+did not demonstrate an overall multi-user speedup.
+
+Root handoff waits for the startup cue, which completes around 14 seconds
+after Linux entry. Removing the full-root scan alone therefore cannot reclaim
+its entire duration: at the measured 19.4-second block-creation milestone,
+audio would become the limiting wait after roughly five seconds of improvement.
+On-demand verified-root support is not implemented.
+
+### NAND transfer
+
+| Linux measurement | Byte reads | Aligned word reads |
+| --- | ---: | ---: |
+| Corrected 4 MiB MTD read | 1.993 s | 1.145 s |
+| 4 MiB UBI read | 2.006 s | 1.162–1.163 s |
+
+Subsequent matched nanddump samples measured 1.02–1.05 seconds without
+correction and 1.24–1.25 seconds with correction. These measurements do not
+authorize disabling ECC or establish the cost of bootloader BCH.
+
+## Loader instrumentation
+
+Linux receives `openh432.loader_attach_ms`, `openh432.loader_kernel_ms` and
+`openh432.loader_total_ms` in its command line. They use the PWM4 hardware clock:
+
+- Attach covers the boot-state command's UBI attachment.
+- Kernel covers the selected kernel command through checked handoff.
+- Total begins at the boot-state command and includes attempt persistence.
+
+With `CONFIG_H432B_NAND_TIMING`, `openh432.nand_scan` and
+`openh432.nand_load` each contain seven comma-separated values:
+
+1. FIFO bytes read, including spare-area transfers.
+2. FIFO-read milliseconds.
+3. NAND command-callback milliseconds, including ready waits.
+4. BCH calculation milliseconds.
+5. BCH correction milliseconds.
+6. Bytes passed through CRC32.
+7. CRC32 milliseconds.
+
+Scan covers UBI attachment; load begins immediately afterward and includes
+boot-state access and kernel handoff preparation. Callback timings can overlap,
+and sampling adds overhead. Do not sum them as independent CPU costs.
+Disabled instrumentation does not access the hardware timer from CRC32.
+
+## Measurement and diagnostic tools
+
+Record image hashes, start/end events, cache state, byte counts and ECC policy.
+Use Linux timing for Linux operations and host monotonic time for complete
+reboot/console intervals. Host timeouts do not cancel target commands.
+
+The A/B loader uses PWM4 elapsed time. Older bootstrap profiles inherit a
+software call counter; their nominal milliseconds are not elapsed-time evidence.
+PWM4 preserves channels 0–3 and the shared prescaler, uses a channel-local
+divide-by-16 clock and derives the inherited PSYS rate. Polling must extend
+counter wraps at least once per rollover (over 343 seconds at the maximum
+accepted rate).
+
+Opt-in profiles remain available for isolated tests:
+
+| Recipe | Interface |
 | --- | --- |
-| `u-boot-h432b-nand-profile` | Instruction-cache comparison; complete attach/read/check fell from 95.823 to 73.088 s for the same 15,509,504-byte development bundle |
-| `u-boot-h432b-nand-timer` | PWM4 hardware timing; requested 5 s measured 5.013 s with I-cache off and 5.012 s with it on |
-| `u-boot-h432b-nand-subpage` | Corrected partial-page BCH reads; attach fell from 34.981 to 22.178 s, with full bundle read/check about 37.37 s |
+| `u-boot-h432b-nand-profile` | `u2icache status/on/off`; separate attach/read/load operations |
+| `u-boot-h432b-nand-timer` | `u2timer status` and a five-second `u2timer test` |
+| `u-boot-h432b-nand-subpage` | Corrected partial-page reads and injected-error checks |
 
-The profile exposes `u2icache status/on/off` and separate
-`u2nandboot a attach|read|load` operations after NAND identification/ECC
-setup. Use the [boot contract](boot-contract.md) to select the correct
-high-RAM artifact.
-
-The timer uses PWM4 without an output pin or interrupt. It preserves channels
-0–3 and the shared prescaler, uses a channel-local divide-by-16 clock and
-derives the inherited PSYS rate. Polling must extend counter wraps at least
-once per rollover (over 343 seconds at the maximum accepted rate).
-`u2timer status` reports configuration; `u2timer test` requests a five-second
-delay. Data caching remains disabled.
-
-The partial-page profile permits the existing software BCH callback without
-partial writes or OOB changes. Fifteen corrected short reads matched full-page
-reads, and injected one-through-eight-bit repair tests passed. The measured
-59.546-second attach/read total excludes initialization and Linux startup.
-These results do not establish a faster persistent boot.
+Use the [boot contract](boot-contract.md) to select the correct high-RAM
+artifact. Profiles are not installers or authorization to overwrite a running
+stage. Explicit maintenance `ubi part` commands retain forced reattachment.
 
 Clock references:
 [Linux S5PV210 clock driver](https://github.com/torvalds/linux/blob/v6.12/drivers/clk/samsung/clk-s5pv210.c),
 [Samsung PWM clocksource](https://github.com/torvalds/linux/blob/v6.12/drivers/clocksource/samsung_pwm_timer.c).
-
-## Remaining limits
-
-The loader scans the UBI pool and performs software ECC and image checks.
-Storage access, decompression and service ordering all contribute to startup.
-Optimization must preserve bad-block handling, correction and integrity checks.
-
-Factory NK archive size is not the boot working set; applications and suspend
-state further complicate CE comparisons. No matched stock-CE cold-boot timing
-is available, so no overall CE/Linux speed ratio is established.

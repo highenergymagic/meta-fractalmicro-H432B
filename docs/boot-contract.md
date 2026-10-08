@@ -48,7 +48,8 @@ Linux uses zImage, DTB and compressed initramfs. Fastboot and NAND readers
 use a bounded Android-v2 envelope; the compressed root slot is limited to
 16 MiB. NAND kernel volumes have a 132 x 124 KiB capacity.
 
-Normal NAND boot loads the runtime kernel and a minimal root-handoff initramfs.
+Normal NAND boot loads the runtime kernel and a root-handoff initramfs with
+the startup cue, not the full userspace.
 The A/B stage selects a kernel volume and supplies `rauc.slot=A` or
 `rauc.slot=B` to Linux. The initramfs mounts the corresponding SquashFS
 systembase through ubiblock and switches root to systemd, with a volatile
@@ -81,9 +82,10 @@ prevents launch. Both invalid copies or exhausted slots lead to USB maintenance,
 not automatic reinitialization. Returned image-load failures consume further
 attempts; a hung kernel requires a reset before selection runs again.
 
-Linux receives the selected slot and attempt serial. After a 30-second health
-interval, `FMMarkBootSuccessful.service` checks the mounted slot, BRLTTY,
-the tty1 user session and service restart counts. It restores that slot to three
+Linux receives the selected slot and attempt serial. A timer schedules the
+health service without blocking the multi-user target. After a 30-second health
+interval following its console dependencies, `FMMarkBootSuccessful.service`
+checks the mounted slot, BRLTTY, the tty1 user session and service restart counts. It restores that slot to three
 attempts under the environment-library lock, only if the recorded attempt is
 still current. Network connectivity is not a success requirement.
 

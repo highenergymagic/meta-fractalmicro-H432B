@@ -29,8 +29,9 @@ have passed on the NAND runtime. Unsupported-format rejection leaves the clock
 reference balanced. Playback started after a power-button deep-sleep cycle
 completed successfully and was confirmed audibly at the correct speed.
 
-Boot-time playback has exhibited underruns under system load. Gap-free startup,
-a stream held open across suspend, capture, and broad format/routing support
-remain unqualified. These checks do not establish Bluetooth or FM audio support.
+The RAM-resident startup cue has completed without reported underruns on
+normal NAND boots and was confirmed audibly clean. The earlier systembase-only
+startup path exhibited underruns under load. A stream held open across suspend,
+capture, and broad format/routing support remain unqualified. These checks do not establish Bluetooth or FM audio support.
 See the [validation record](https://github.com/highenergymagic/openh432-build/blob/main/docs/hardware-validation.md#audio-request-clock-lifetime)
 for exact artifacts and scope.
