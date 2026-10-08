@@ -1,0 +1,70 @@
+Subject: [PATCH] net: smsc911x: reinitialize H432B Ethernet across deep sleep
+Upstream-Status: Inappropriate [H432B factory wake path]
+
+Close this board's non-wake interface before sleep, removing its IRQ handler
+and draining NAPI. Reset and reopen after wake instead of assuming controller
+state survived. Use the netdev lifecycle under RTNL so a failed reopen leaves
+a down interface, not an apparently running device with no handler.
+Other boards and wake-enabled configurations retain the existing path.
+
+--- a/drivers/net/ethernet/smsc/smsc911x.c
++++ b/drivers/net/ethernet/smsc/smsc911x.c
+@@ -34,1 +34,2 @@
+-#include <linux/regulator/consumer.h>
++#include <linux/regulator/consumer.h>
++#include <linux/rtnetlink.h>
+@@ -117,1 +118,2 @@
+-	u32 suspend_int_cfg;
++	u32 suspend_int_cfg;
++	bool h432b_reopen;
+@@ -2610,2 +2612,11 @@
+-	if (netif_running(ndev)) {
+-		netif_stop_queue(ndev);
++	pdata->h432b_reopen = of_machine_is_compatible("hims,braillesense-u2") &&
++		netif_running(ndev) && !device_may_wakeup(dev);
++	if (pdata->h432b_reopen) {
++		rtnl_lock();
++		dev_close(ndev);
++		netif_device_detach(ndev);
++		rtnl_unlock();
++	}
++
++	if (netif_running(ndev)) {
++		netif_stop_queue(ndev);
+@@ -2642,3 +2653,4 @@
+-	unsigned int to = 100;
+-
+-	pm_runtime_enable(dev);
++	unsigned int to = 100;
++	int ret;
++
++	pm_runtime_enable(dev);
+@@ -2659,4 +2671,24 @@
+-	if (to == 0)
+-		return -EIO;
+-
+-	if (netif_running(ndev)) {
++	if (to == 0)
++		return -EIO;
++
++	if (pdata->h432b_reopen) {
++		/* The reset GPIO is active low in the board description. */
++		if (pdata->reset_gpiod) {
++			gpiod_set_value_cansleep(pdata->reset_gpiod, 1);
++			usleep_range(1000, 2000);
++			gpiod_set_value_cansleep(pdata->reset_gpiod, 0);
++			msleep(100);
++		}
++		rtnl_lock();
++		netif_device_attach(ndev);
++		ret = dev_open(ndev, NULL);
++		if (ret)
++			netif_device_detach(ndev);
++		rtnl_unlock();
++		pdata->h432b_reopen = false;
++		if (ret)
++			netdev_err(ndev, "resume reinitialization failed: %d\n", ret);
++		return ret;
++	}
++
++	if (netif_running(ndev)) {

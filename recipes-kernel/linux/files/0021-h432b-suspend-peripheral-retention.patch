@@ -1,0 +1,56 @@
+Subject: [PATCH] ARM: H432B: restore external bus and SDHCI state after sleep
+Upstream-Status: Inappropriate [H432B-qualified suspend retention]
+
+Deep sleep resets SROM bank width/timing and SDHCI host registers even
+when the attached devices retain power. Restore the inherited SROM state
+before peripheral callbacks and use the SDHCI core host-off/card-on path.
+No firmware, bus timing policy or regulator voltage is changed.
+
+--- a/arch/arm/mach-s5pv210/pm.c
++++ b/arch/arm/mach-s5pv210/pm.c
+@@ -34,1 +34,4 @@
+-static bool h432b_power_button_only;
++static bool h432b_power_button_only;
++/* SROM bank width and six timing registers lose state in deep sleep. */
++static void __iomem *h432b_sromc;
++static u32 h432b_srom_save[7];
+@@ -48,2 +51,8 @@
+-	if (!h432b_resume_stub)
+-		return false;
++	if (!h432b_resume_stub)
++		return false;
++	h432b_sromc = ioremap(0xe8000000, sizeof(h432b_srom_save));
++	if (!h432b_sromc) {
++		iounmap(h432b_resume_stub);
++		h432b_resume_stub = NULL;
++		return false;
++	}
+@@ -58,1 +67,3 @@
+-		pr_err("H432B: resume bridge readback failed\n");
++		pr_err("H432B: resume bridge readback failed\n");
++		iounmap(h432b_sromc);
++		h432b_sromc = NULL;
+@@ -176,1 +187,4 @@
+-	s3c_pm_do_save(s5pv210_core_save, ARRAY_SIZE(s5pv210_core_save));
++	s3c_pm_do_save(s5pv210_core_save, ARRAY_SIZE(s5pv210_core_save));
++	if (h432b_sromc)
++		for (unsigned int i = 0; i < ARRAY_SIZE(h432b_srom_save); i++)
++			h432b_srom_save[i] = readl(h432b_sromc + 4 * i);
+@@ -251,1 +265,8 @@
+-	s3c_pm_do_restore_core(s5pv210_core_save, ARRAY_SIZE(s5pv210_core_save));
++	s3c_pm_do_restore_core(s5pv210_core_save, ARRAY_SIZE(s5pv210_core_save));
++	if (h432b_sromc) {
++		/* Restore timing before width, before peripheral resume callbacks. */
++		for (unsigned int i = 1; i < ARRAY_SIZE(h432b_srom_save); i++)
++			writel(h432b_srom_save[i], h432b_sromc + 4 * i);
++		writel(h432b_srom_save[0], h432b_sromc);
++		readl(h432b_sromc);
++	}
+--- a/drivers/mmc/host/sdhci-s3c.c
++++ b/drivers/mmc/host/sdhci-s3c.c
+@@ -576,1 +576,4 @@
+-	host->quirks2 = 0;
++	host->quirks2 = 0;
++	/* H432B keeps SDIO firmware powered while the host loses registers. */
++	if (of_machine_is_compatible("hims,braillesense-u2"))
++		host->quirks2 |= SDHCI_QUIRK2_HOST_OFF_CARD_ON;

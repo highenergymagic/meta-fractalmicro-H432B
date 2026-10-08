@@ -12,8 +12,8 @@ python3 -m unittest discover -s tests -v
 ```
 
 For compiled C vectors, run the tests inside the pinned build container with
-`WIFI_RX_NATIVE_CC=/usr/bin/gcc`. Without that setting, compiled Wi-Fi
-vectors are explicitly skipped. Bootstate C vectors use `BOOTSTATE_NATIVE_CC`
+`WIFI_RX_NATIVE_CC=/usr/bin/gcc`. This setting selects the compiler for Wi-Fi
+vectors and audio clock-lifetime tests; they are skipped when it is absent. Bootstate C vectors use `BOOTSTATE_NATIVE_CC`
 (or `cc` when available).
 
 ## Coverage
@@ -21,6 +21,8 @@ vectors are explicitly skipped. Bootstate C vectors use `BOOTSTATE_NATIVE_CC`
 | Check | Scope |
 | --- | --- |
 | Boot state | CRC/schema checks, serial wrap, alternate-copy commit/readback failure, exhaustion, stale success and NAND write boundaries |
+| Audio clock lifetime | Positive ALSA constraint results, startup errors and balanced clock references |
+| Suspend integration | Runtime recipe, wake-source, display-power and peripheral-retention contracts |
 | Source contracts | Recipe relationships, protocol constants, bounds and cleanup structure |
 | Wi-Fi receive vectors | Actual C parser: padding, lengths, truncation and CRC/ICV flags |
 | Wi-Fi station vectors | H2C framing, CCMP nonce/header construction and BSS-cache selection |

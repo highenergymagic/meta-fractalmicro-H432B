@@ -26,6 +26,7 @@ is not a promise of availability in the normal runtime.
 
 ## Controls and power
 
+- [Speaker audio](audio.md)
 - [Braille display](braille.md)
 - [Input devices](input.md)
 - [Battery telemetry](battery.md)

@@ -9,7 +9,8 @@ Grade 2 greeting and eight-dot patterns have been checked on one U2.
 The standard systembase enables BRLTTY at startup. Console output, braille
 key entry, Backspace, Enter, scrolling and cursor routing have been confirmed
 by the operator, along with the BRLTTY chords tried, including learn mode.
-Exhaustive chord/routing-key coverage and suspend/resume remain unqualified.
+Suspend removes cell drive power; resume restores the cached frame and console
+session. Exhaustive chord/routing-key coverage remains unqualified.
 
 This is not the existing HIMS USB/Bluetooth external-display protocol.
 It uses Linux GPIO and evdev interfaces on the Sense itself.
@@ -30,8 +31,10 @@ significant bit first, with the recovered alternating polarity convention.
 
 Enable state must already be active and configured as output by the retained
 boot chain. A Samsung GPIO readback patch exposes the hardware direction
-without rewriting the inherited output. The driver does not toggle that line, program a PMIC, or claim
-a qualified display-power-off sequence. Blanking cells is not rail removal.
+without rewriting the inherited output. During suspend, the driver shifts a neutral frame, waits 100 ms and drives
+the enable low. Resume drives it high, waits 100 ms and restores the cached
+frame. Tactile testing confirmed cell power removal and restoration. This is
+not a PMIC transaction or whole-board poweroff; blanking alone is not rail removal.
 The standard eight-dot mapping is implemented in the kernel. Qualification
 combined the established six-dot greeting, a dot-7 left-column extension,
 and an operator-confirmed full eight-dot cell.

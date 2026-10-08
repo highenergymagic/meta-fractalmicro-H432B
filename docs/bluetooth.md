@@ -18,8 +18,10 @@ revision/subversion `0x0c5c`; the controller reports the local name `CSR - bc4`.
 
 The board-control Bluetooth enable is GPE0[2], active high, followed by a
 300 ms delay. Its shutdown path coordinates with factory software state;
-that handshake is not a Linux power-management interface. Initial Linux
-integration holds this enable on and does not claim suspend or power cycling.
+that handshake is not a Linux power-management interface. The normal runtime
+holds this enable high during operation and deep sleep.
+Retaining the enable prevents loss of volatile controller parameters and identity;
+Bluetooth is not a wake source. Power cycling remains unqualified.
 
 The factory transport also applies five CSR parameter values before a warm
 reset: 0x0217=0xffff, 0x01f6=0x0017, 0x01fe=26000, 0x0254=0x770e and
@@ -40,14 +42,18 @@ service is disabled by default. It waits
 five seconds, uses 8E1 through BlueZ's BCSP setup, and has no automatic restart
 loop. GPS, Wi-Fi and other power rails are not modified by this service.
 
-BCSP controller-version and address queries have passed on the NAND runtime. Bench initialization in volatile
-PSRAM restored the recovered factory address; a controller warm reset and
-reattachment retained it. Automatic factory-identity provisioning and startup
-configuration are not yet integrated. Hardware testing with a Noxgear 39g speaker has passed BR/EDR discovery,
-legacy pairing/bonding, SDP service discovery and ten L2CAP echo exchanges
-(10/10 replies). The audio backend is not included, so this does not qualify
-A2DP playback. Repeat NAND boot with automatic initialization, persistent
-identity provisioning and Bluetooth power management remain unqualified.
+## Qualification and limits
+
+Controller-version queries, BR/EDR discovery, legacy pairing, SDP discovery
+and L2CAP echo traffic have passed on the NAND runtime. After manual factory
+initialization, one deep-sleep cycle retained the factory identity and all
+five radio parameters; HCI commands succeeded without UART reattachment.
+
+Automatic factory-identity provisioning and startup configuration are not
+integrated. The audio backend is absent. Connected-peer retention, Bluetooth
+audio, repeat-boot initialization and repeated suspend cycling remain
+unqualified. Artifact-specific results are in the
+[validation record](https://github.com/highenergymagic/openh432-build/blob/main/docs/hardware-validation.md#bluetooth-enable-retention).
 
 BlueZ references: [BCSP attachment](https://github.com/bluez/bluez/blob/5.86/tools/hciattach.c),
 [historical CSR parameter definitions](https://github.com/bluez/bluez/blob/5.50/tools/csr.h).

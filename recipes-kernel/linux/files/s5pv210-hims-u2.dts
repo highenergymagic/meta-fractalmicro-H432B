@@ -233,8 +233,10 @@
 		speaker-gpios = <&gpe0 0 GPIO_ACTIVE_HIGH>;
 		clocks = <&clocks FOUT_EPLL>, <&clk_audss CLK_MOUT_AUDSS>,
 			 <&clk_audss CLK_MOUT_I2S_A>,
-			 <&clk_audss CLK_DOUT_AUD_BUS>, <&clk_audss CLK_I2S>;
-		clock-names = "epll", "audmux", "i2smux", "bus", "i2s";
+			 <&clk_audss CLK_DOUT_AUD_BUS>, <&clk_audss CLK_I2S>,
+			 <&clocks CLK_PDMA0>;
+		clock-names = "epll", "audmux", "i2smux", "bus", "i2s",
+			      "dma-request";
 	};
 };
 

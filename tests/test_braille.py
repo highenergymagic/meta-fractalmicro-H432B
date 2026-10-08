@@ -20,7 +20,8 @@ class Braille(unittest.TestCase):
         source = (FILES / "h432b-braille.c").read_text()
         self.assertNotIn("writel", source)
         self.assertIn('"enable", GPIOD_ASIS', source)
-        self.assertNotIn("gpiod_set_value_cansleep(h->enable", source)
+        self.assertIn("gpiod_set_value_cansleep(h->enable, 0)", source)
+        self.assertIn("gpiod_set_value_cansleep(h->enable, 1)", source)
         dt = (FILES / "s5pv210-hims-u2-braille.dtsi").read_text()
         for bank, pin in (("gpj0", 3), ("gpj1", 5), ("gpj1", 4), ("gpj4", 1)):
             self.assertIn(f"<&{bank} {pin} GPIO_ACTIVE_HIGH>", dt)

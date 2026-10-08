@@ -11,7 +11,7 @@
 
 struct sample { uint32_t address; const char *name; };
 static const struct sample host[] = {
-    {0xe02002e0, "MP01CON"}, {0xeee10464, "CLK_GATE_IP1"},
+    {0xe02002e0, "MP01CON"}, {0xe0100464, "CLK_GATE_IP1"},
     {0xe8000000, "SROM_BW"}, {0xe8000018, "SROM_BC5"},
     {0xe0200c20, "GPH1CON"}, {0xe0200c24, "GPH1DAT"},
 };

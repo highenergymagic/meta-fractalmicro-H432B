@@ -1,0 +1,40 @@
+Subject: [PATCH] net: smsc911x: quiesce interrupt output before D1 sleep
+Upstream-Status: Pending
+
+Keep the shared host interrupt usable by other devices, but disable this
+controller's output before entering D1. Drain an already running handler
+and restore the output only after the device reports READY. A failed
+resume leaves the output masked; opening the interface resets INT_CFG.
+The separate PME wake signal is unchanged.
+
+--- a/drivers/net/ethernet/smsc/smsc911x.c
++++ b/drivers/net/ethernet/smsc/smsc911x.c
+@@ -116,1 +116,2 @@
+-	unsigned int software_irq_signal;
++	unsigned int software_irq_signal;
++	u32 suspend_int_cfg;
+@@ -2601,2 +2602,11 @@
+-		if (!device_may_wakeup(dev))
+-			phy_stop(ndev->phydev);
++		if (!device_may_wakeup(dev))
++			phy_stop(ndev->phydev);
++
++		/* Quiesce the chip, not the shared host IRQ. The handler must
++		 * not read INT_STS until PMT_CTRL_READY is set on resume.
++		 */
++		pdata->suspend_int_cfg = smsc911x_reg_read(pdata, INT_CFG);
++		smsc911x_reg_write(pdata, INT_CFG,
++			pdata->suspend_int_cfg & ~INT_CFG_IRQ_EN_);
++		smsc911x_reg_read(pdata, INT_CFG);
++		synchronize_irq(ndev->irq);
+@@ -2638,4 +2648,6 @@
+-	if (to == 0)
+-		return -EIO;
+-
+-	if (netif_running(ndev)) {
++	if (to == 0)
++		return -EIO;
++
++	if (netif_running(ndev)) {
++		/* Restore the IRQ output only after all registers are usable. */
++		smsc911x_reg_write(pdata, INT_CFG, pdata->suspend_int_cfg);

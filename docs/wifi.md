@@ -25,7 +25,10 @@ This is a limited development station profile, not a production-ready driver:
 - TX currently uses a fixed 1 Mb/s legacy rate. HT, aggregation, fragmentation,
   A-MSDU and rate adaptation are not enabled. Throughput is not a release claim.
 - Firmware or SDIO stream faults require a fresh boot. Warm initialization,
-  suspend/resume and long-duration operation remain unqualified.
+  radio power saving and long-duration operation remain unqualified.
+- Deep-sleep resume retains radio power and permits station reassociation.
+  Automatic WPA2 reassociation and interface-bound pings have passed; sustained
+  traffic across sleep and repeated-cycle endurance remain unqualified.
 - RSSI units are unqualified, so the driver does not invent signal-strength
   values. Some empty work invocations remain visible in diagnostic counters.
 

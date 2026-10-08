@@ -1,12 +1,12 @@
-Subject: [PATCH] ARM: s5pv210: opt-in H432B factory resume bridge
-Upstream-Status: Inappropriate [board bring-up experiment]
+Subject: [PATCH] ARM: s5pv210: H432B reserved factory resume bridge
+Upstream-Status: Inappropriate [board-specific factory boot contract]
 
 Keep the fixed factory wake entry out of Linux RAM and redirect it to
 upstream's INFORM0 resume entry. Refuse suspend for incompatible layouts.
 
 --- a/arch/arm/mach-s5pv210/pm.c
 +++ b/arch/arm/mach-s5pv210/pm.c
-@@ -1,214 +1,257 @@
+@@ -1,214 +1,267 @@
 -// SPDX-License-Identifier: GPL-2.0
 -//
 -// Copyright (c) 2010-2014 Samsung Electronics Co., Ltd.
@@ -251,15 +251,17 @@ upstream's INFORM0 resume entry. Refuse suspend for incompatible layouts.
 + * H432B factory BL1 resumes at a fixed physical entry, not INFORM0.
 + * This is opt-in and requires Linux to exclude the bottom 2 MiB.
 + * Keep the factory loader unchanged; the stub redirects to INFORM0.
-+ * No PMIC or braille-rail programming is performed by this bridge.
++ * No PMIC programming is performed here; the display owns its supply GPIO.
 + */
 +static void __iomem *h432b_resume_stub;
++static bool h432b_power_button_only;
 +
 +static bool __init h432b_prepare_resume_bridge(void)
 +{
 +	if (!of_machine_is_compatible("hims,braillesense-u2"))
 +		return true;
-+	if (!of_property_read_bool(of_root, "hims,factory-resume-test") ||
++	if ((!of_property_read_bool(of_root, "hims,factory-resume-test") &&
++	     !of_property_read_bool(of_root, "hims,factory-resume")) ||
 +	    memblock_start_of_DRAM() != 0x40200000 ||
 +	    memblock_is_region_memory(0x40020000, PAGE_SIZE)) {
 +		pr_err("H432B: refusing suspend without reserved resume layout\n");
@@ -281,6 +283,7 @@ upstream's INFORM0 resume entry. Refuse suspend for incompatible layouts.
 +		h432b_resume_stub = NULL;
 +		return false;
 +	}
++	h432b_power_button_only = true;
 +	pr_info("H432B: reserved factory resume bridge ready at 0x40020000\n");
 +	return true;
 +}
@@ -413,6 +416,13 @@ upstream's INFORM0 resume entry. Refuse suspend for incompatible layouts.
 +	    && eint_wakeup_mask == -1U) {
 +		pr_err("%s: No wake-up sources!\n", __func__);
 +		pr_err("%s: Aborting sleep\n", __func__);
++		return -EINVAL;
++	}
++
++	/* Fail before sleep if another device enabled an external wake source. */
++	if (h432b_power_button_only && eint_wakeup_mask != (u32)~BIT(22)) {
++		pr_err("H432B: refusing sleep with wake mask %08x (need EINT22 only)\n",
++		       eint_wakeup_mask);
 +		return -EINVAL;
 +	}
 +

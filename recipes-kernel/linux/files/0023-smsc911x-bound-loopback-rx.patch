@@ -1,0 +1,30 @@
+Subject: [PATCH] net: smsc911x: bound PHY loopback FIFO reads
+Upstream-Status: Pending
+
+The loopback receive length includes four FCS bytes, but the old buffer
+reserved only the transmitted frame length. Worse, length validation ran
+after the FIFO read. An unrelated queued frame could overwrite private
+driver state. Align both buffers, reserve the FCS, and drain unexpected
+lengths without copying them into the loopback receive buffer.
+
+--- a/drivers/net/ethernet/smsc/smsc911x.c
++++ b/drivers/net/ethernet/smsc/smsc911x.c
+@@ -120,2 +120,2 @@
+-	char loopback_tx_pkt[MIN_PACKET_SIZE];
+-	char loopback_rx_pkt[MIN_PACKET_SIZE];
++	char loopback_tx_pkt[MIN_PACKET_SIZE] __aligned(4);
++	char loopback_rx_pkt[MIN_PACKET_SIZE + 4] __aligned(4);
+@@ -785,1 +785,12 @@
+-		pdata->ops->rx_readfifo(pdata, (unsigned int *)bufp, rdsz);
++		if (pktlength != sizeof(pdata->loopback_rx_pkt)) {
++			/* Drain the FIFO without trusting the reported length as
++			 * a destination buffer size. Both buffers are word aligned.
++			 */
++			for (i = 0; i < rdsz; i++)
++				smsc911x_reg_read(pdata, RX_DATA_FIFO);
++			SMSC_WARN(pdata, hw, "Unexpected loopback size: %u",
++				  pktlength);
++			continue;
++		}
++
++		pdata->ops->rx_readfifo(pdata, (unsigned int *)bufp, rdsz);

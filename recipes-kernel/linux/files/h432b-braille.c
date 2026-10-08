@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* H432B 32-cell GPIO shift display. Wire sequence recovered from stock driver.
  * Individual GPIO descriptors preserve adjacent keyboard and USB controls.
- * Power is inherited; no PMIC or undocumented rail sequencing is performed.
+ * Cell supply GPIO follows the stock neutral-frame/delay/power-off sequence.
  */
 #include <linux/delay.h>
 #include <linux/fs.h>
@@ -12,6 +12,7 @@
 #include <linux/of.h>
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
+#include <linux/pm.h>
 #include <linux/uaccess.h>
 #include "h432b-braille-wire.h"
 
@@ -20,7 +21,8 @@ struct h432_braille {
 	struct gpio_desc *data, *clock, *latch, *enable;
 	struct mutex lock;
 	struct kref refs;
-	bool opened, dead;
+	bool opened, dead, suspended, frame_valid;
+	u8 frame[32];
 };
 static void free_display(struct kref *ref)
 {
@@ -87,12 +89,16 @@ static ssize_t display_write(struct file *file, const char __user *buf,
 		return ret;
 	if (h->dead)
 		ret = -ENODEV;
+	else if (h->suspended)
+		ret = -EHOSTDOWN;
 	else {
 		ret = gpiod_get_value_cansleep(h->enable);
 		if (ret == 0)
 			ret = -EHOSTDOWN;
 		else if (ret > 0) {
 			shift_frame(h, cells);
+			memcpy(h->frame, cells, sizeof(cells));
+			h->frame_valid = true;
 			ret = sizeof(cells);
 		}
 	}
@@ -131,6 +137,7 @@ static int display_probe(struct platform_device *pdev)
 		ret = ret < 0 ? ret : -EHOSTDOWN;
 		goto fail;
 	}
+	dev_info(dev, "cell supply GPJ0[3] inherited high; suspend control ready\n");
 	h->latch = devm_gpiod_get(dev, "latch", GPIOD_OUT_LOW);
 	if (IS_ERR(h->latch)) {
 		ret = PTR_ERR(h->latch);
@@ -170,6 +177,46 @@ static void display_remove(struct platform_device *pdev)
 	mutex_unlock(&h->lock);
 	kref_put(&h->refs, free_display);
 }
+static int display_suspend(struct device *dev)
+{
+	struct h432_braille *h = dev_get_drvdata(dev);
+	const u8 blank[32] = {0};
+	int ret = 0;
+
+	mutex_lock(&h->lock);
+	if (gpiod_get_direction(h->enable) != 0 ||
+	    gpiod_get_value_cansleep(h->enable) != 1) {
+		ret = -EIO;
+		goto out;
+	}
+	/* A zero dot mask produces stock's 0x55 neutral wire pattern. */
+	shift_frame(h, blank);
+	msleep(100);
+	gpiod_set_value_cansleep(h->enable, 0);
+	h->suspended = true;
+out:
+	mutex_unlock(&h->lock);
+	return ret;
+}
+
+static int display_resume(struct device *dev)
+{
+	struct h432_braille *h = dev_get_drvdata(dev);
+
+	mutex_lock(&h->lock);
+	if (h->suspended) {
+		gpiod_set_value_cansleep(h->enable, 1);
+		/* Conservative settling interval, pending electrical qualification. */
+		msleep(100);
+		if (h->frame_valid)
+			shift_frame(h, h->frame);
+		h->suspended = false;
+	}
+	mutex_unlock(&h->lock);
+	return 0;
+}
+static DEFINE_SIMPLE_DEV_PM_OPS(display_pm, display_suspend, display_resume);
+
 static const struct of_device_id display_matches[] = {
 	{ .compatible = "fractal,h432b-braille" }, {}
 };
@@ -180,6 +227,7 @@ static struct platform_driver display_driver = {
 	.driver = {
 		.name = "h432b-braille",
 		.of_match_table = display_matches,
+		.pm = pm_sleep_ptr(&display_pm),
 	},
 };
 module_platform_driver(display_driver);

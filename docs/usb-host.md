@@ -55,6 +55,7 @@ helper. Two device-only PM cycles returned with the hub and adapter bound.
 Disconnect/re-enumeration can occur; preservation of an open serial session
 is not guaranteed.
 
-Actual CPU sleep, late-suspend hub power removal, device power budgets,
-serial data transfer and broad USB peripheral compatibility remain unqualified.
-See [power management](power-control.md) for the diagnostic PM boundary.
+Hub and adapter re-enumeration have also passed after a runtime deep-sleep
+cycle. Device power budgets, serial payload continuity and broad peripheral
+compatibility remain unqualified. See [power management](power-control.md)
+and the artifact-specific validation record for the tested scope.

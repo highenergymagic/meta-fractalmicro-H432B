@@ -43,9 +43,8 @@ See [build configuration](https://github.com/highenergymagic/openh432-build/blob
 - [Tests](tests/README.md): offline checks and device-test procedures.
 
 The [support matrix](https://github.com/highenergymagic/openh432-build/blob/main/docs/status.md)
-defines runtime support and known limitations. The interactive braille console
-is integrated; application accessibility and power management remain incomplete.
-Diagnostic qualification does not imply inclusion in the normal image.
+defines runtime support, diagnostic-only configurations and known limitations.
+Consult it for the scope of peripheral and power-management qualification.
 
 Read the boot contract and
 [installation guide](https://github.com/highenergymagic/openh432-tools/blob/main/docs/installation.md)

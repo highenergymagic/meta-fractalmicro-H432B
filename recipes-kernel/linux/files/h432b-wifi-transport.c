@@ -13,6 +13,8 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
+#include <linux/pm.h>
+#include <linux/rtnetlink.h>
 #include <linux/slab.h>
 
 #include "h432b-wifi-power.h"
@@ -29,6 +31,7 @@ struct h432b_wifi_sample {
 	struct h432b_wifi_net *net;
 	struct mutex lock;
 	bool attempted;
+	bool resume_net;
 	struct h432b_power_result power;
 	struct h432b_fw_result firmware;
 	struct h432b_ack_result ack;
@@ -540,6 +543,65 @@ static void h432b_wifi_remove(struct sdio_func *func)
 	wifi_net_unregister(sdio_get_drvdata(func));
 }
 
+/*
+ * cfg80211 suspends the child wiphy first and disconnects the station. Keep
+ * firmware RAM powered, but stop traffic/work and release the SDIO IRQ. No
+ * wake-on-WLAN is requested: the front power key is the sole wake source.
+ */
+static int h432b_wifi_suspend(struct device *dev)
+{
+	struct sdio_func *func = dev_to_sdio_func(dev);
+	struct h432b_wifi_sample *owner = sdio_get_drvdata(func);
+	struct h432b_wifi_net *net = owner->net;
+	int error;
+
+	error = sdio_set_host_pm_flags(func, MMC_PM_KEEP_POWER);
+	if (error)
+		return error;
+
+	rtnl_lock();
+	owner->resume_net = net && netif_running(net->dev);
+	if (owner->resume_net) {
+		netif_device_detach(net->dev);
+		wifi_net_stop(net->dev);
+		if (net->faulted) {
+			error = net->last_error ? net->last_error : -EIO;
+			owner->resume_net = false;
+			netif_device_attach(net->dev);
+		}
+	} else if (owner->command.irq_owned) {
+		/* A diagnostic IRQ owner cannot survive system sleep. */
+		error = -EBUSY;
+	}
+	rtnl_unlock();
+	return error;
+}
+
+static int h432b_wifi_resume(struct device *dev)
+{
+	struct h432b_wifi_sample *owner = sdio_get_drvdata(dev_to_sdio_func(dev));
+	struct h432b_wifi_net *net = owner->net;
+	int error = 0;
+
+	rtnl_lock();
+	if (owner->resume_net && net && netif_running(net->dev)) {
+		error = wifi_net_open(net->dev);
+		if (!error)
+			netif_device_attach(net->dev);
+		else {
+			net->last_error = error;
+			WRITE_ONCE(net->faulted, true);
+			dev_err(dev, "cannot restart station after sleep: %d\n", error);
+		}
+	}
+	owner->resume_net = false;
+	rtnl_unlock();
+	return error;
+}
+
+static DEFINE_SIMPLE_DEV_PM_OPS(h432b_wifi_pm,
+			       h432b_wifi_suspend, h432b_wifi_resume);
+
 static const struct sdio_device_id h432b_wifi_ids[] = {
 	{ SDIO_DEVICE(0x024c, 0x8712) },
 	{ }
@@ -551,6 +613,7 @@ static struct sdio_driver h432b_wifi_driver = {
 	.id_table = h432b_wifi_ids,
 	.probe = h432b_wifi_probe,
 	.remove = h432b_wifi_remove,
+	.drv.pm = pm_sleep_ptr(&h432b_wifi_pm),
 };
 module_sdio_driver(h432b_wifi_driver);
 

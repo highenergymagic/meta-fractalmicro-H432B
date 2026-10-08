@@ -1,0 +1,73 @@
+Subject: [PATCH] ASoC: hims-u2: hold DMA request clock while a stream is open
+
+Upstream-Status: Inappropriate [H432B board-specific measured dependency]
+
+PDMA1 playback stalls when runtime PM gates PDMA0. Hold the board request
+clock for each open playback stream, and release it on close. Constraint
+helpers may return positive success: only negative values abort startup.
+Do not disable runtime PM or enable a suspend wake source.
+
+--- a/sound/soc/samsung/hims-u2-audio.c
++++ b/sound/soc/samsung/hims-u2-audio.c
+@@ -23,1 +23,2 @@
+-	struct gpio_desc *unmute, *speaker;
++	struct gpio_desc *unmute, *speaker;
++	struct clk *dma_request_clk;
+@@ -98,15 +99,30 @@
+-static int u2_startup(struct snd_pcm_substream *s)
+-{
+-	int ret;
+-
+-	ret = snd_pcm_hw_constraint_single(s->runtime,
+-			SNDRV_PCM_HW_PARAM_RATE, 44100);
+-	if (ret)
+-		return ret;
+-	ret = snd_pcm_hw_constraint_single(s->runtime,
+-			SNDRV_PCM_HW_PARAM_CHANNELS, 2);
+-	if (ret)
+-		return ret;
+-	return snd_pcm_hw_constraint_mask64(s->runtime,
+-			SNDRV_PCM_HW_PARAM_FORMAT, SNDRV_PCM_FMTBIT_S16_LE);
+-}
++static int u2_startup(struct snd_pcm_substream *s)
++{
++	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(s);
++	struct u2_audio *u2 = snd_soc_card_get_drvdata(rtd->card);
++	int ret;
++
++	ret = snd_pcm_hw_constraint_single(s->runtime,
++			SNDRV_PCM_HW_PARAM_RATE, 44100);
++	if (ret < 0)
++		return ret;
++	ret = snd_pcm_hw_constraint_single(s->runtime,
++			SNDRV_PCM_HW_PARAM_CHANNELS, 2);
++	if (ret < 0)
++		return ret;
++	ret = snd_pcm_hw_constraint_mask64(s->runtime,
++			SNDRV_PCM_HW_PARAM_FORMAT, SNDRV_PCM_FMTBIT_S16_LE);
++	if (ret < 0)
++		return ret;
++
++	/* On H432B, PDMA1 I2S requests stall if the PDMA0 gate is off. */
++	return clk_prepare_enable(u2->dma_request_clk);
++}
++
++static void u2_shutdown(struct snd_pcm_substream *s)
++{
++	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(s);
++	struct u2_audio *u2 = snd_soc_card_get_drvdata(rtd->card);
++
++	clk_disable_unprepare(u2->dma_request_clk);
++}
+@@ -146,1 +162,2 @@
+-	.startup = u2_startup,
++	.startup = u2_startup,
++	.shutdown = u2_shutdown,
+@@ -184,1 +201,6 @@
+-	epll = devm_clk_get(dev, "epll");
++	u2->dma_request_clk = devm_clk_get(dev, "dma-request");
++	if (IS_ERR(u2->dma_request_clk))
++		return dev_err_probe(dev, PTR_ERR(u2->dma_request_clk),
++				     "DMA request clock\n");
++
++	epll = devm_clk_get(dev, "epll");

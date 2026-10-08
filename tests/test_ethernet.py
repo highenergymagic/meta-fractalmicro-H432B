@@ -29,7 +29,7 @@ class EthernetProbeContract(unittest.TestCase):
     def test_fixed_register_allowlist(self):
         source = (BASE / "files/ethernet-probe.c").read_text()
         addresses = {int(x, 16) for x in re.findall(r'{(0x[0-9a-f]+), "', source)}
-        self.assertEqual(addresses, {0xe02002e0, 0xeee10464, 0xe8000000, 0xe8000018, 0xe0200c20,
+        self.assertEqual(addresses, {0xe02002e0, 0xe0100464, 0xe8000000, 0xe8000018, 0xe0200c20,
             0xe0200c24, 0xa8000064, 0xa8000050, 0xa8000054, 0xa800005c,
             0xa8000074, 0xa8000084})
         self.assertTrue(all(x % 4 == 0 for x in addresses))

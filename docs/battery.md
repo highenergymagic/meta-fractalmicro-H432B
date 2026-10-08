@@ -4,7 +4,8 @@
 
 Battery telemetry is included in the normal NAND runtime and shared with the
 opt-in battery-test profile. It exposes read-only Linux power_supply measurements;
-charger control, full suspend and low-battery policy are not implemented.
+charger control and low-battery policy are not implemented. System sleep policy
+is described in [power management](power-control.md).
 
 ## Hardware interface
 
@@ -30,8 +31,8 @@ capacity samples; communication failure must not be assumed to mean no pack.
 ## Driver and diagnostic profile
 
 The linux-h432b-runtime and linux-h432b-battery-test recipes consume the same
-h432b-battery.inc driver and configuration. Neither enables suspend nor
-alters charging settings. The optional openh432-battery-test bundle isolates
+h432b-battery.inc driver and configuration. Telemetry does not alter charging
+settings; the runtime's separate power-management integration enables suspend. The optional openh432-battery-test bundle isolates
 telemetry testing and uses the installed slot-B root through its minimal
 handoff.
 
@@ -115,8 +116,8 @@ is advertised.
 
 The driver has no writable power_supply properties. Device removal cancels
 polling before unregistering the supply and releasing GPIOs.
-Charging transitions, the AC source, low-battery policy and suspend remain
-separate work. Including telemetry does not enable a power-button action.
+Charging transitions, the AC source and low-battery policy remain unqualified.
+Power-button actions belong to the separate system sleep policy.
 
 The shared status/range policy is compiled and tested inside the pinned build
 container. It covers all valid capacities and GPIO combinations, error and

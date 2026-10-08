@@ -1,0 +1,12 @@
+Subject: [PATCH] rtc: s3c: keep H432B wake policy power-button-only
+Upstream-Status: Inappropriate [H432B appliance wake policy]
+
+Use the RTC for wall-clock and elapsed sleep time, not automatic wake.
+Other Samsung boards keep their existing alarm wake capability.
+
+--- a/drivers/rtc/rtc-s3c.c
++++ b/drivers/rtc/rtc-s3c.c
+@@ -459,1 +459,2 @@
+-	device_init_wakeup(&pdev->dev, 1);
++	device_init_wakeup(&pdev->dev,
++		!of_machine_is_compatible("hims,braillesense-u2"));

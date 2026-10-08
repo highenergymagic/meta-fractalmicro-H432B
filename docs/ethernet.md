@@ -4,8 +4,9 @@
 
 Wired Ethernet is included in the normal runtime. The systembase configures
 DHCP through systemd-networkd. Network access and key-authenticated maintenance
-SSH have been exercised on hardware; standalone power sequencing and suspend
-remain unqualified.
+SSH have been exercised on hardware. Deep-sleep recovery has passed DHCP,
+SSH and checksum-verified bidirectional transfers on one device cycle;
+long-duration and repeated-cycle qualification remain outstanding.
 
 ## Hardware configuration
 
@@ -31,9 +32,11 @@ The kernel fragment builds the controller and SMSC PHY drivers into the
 kernel. There is no out-of-tree Ethernet data-path driver.
 
 SROM bank timing is **inherited from the factory boot path**, not initialized
-by this Ethernet node. Standalone reset/power sequencing and suspend/resume
-remain unqualified. Do not infer an independently power-managed Ethernet
-subsystem from successful register identification.
+by this Ethernet node. The board PM bridge saves and restores those timings.
+For non-wake Ethernet, suspend closes the interface and drains its IRQ/NAPI
+work; resume pulses the known controller reset and reopens the interface.
+The normal systemd-networkd configuration reacquires DHCP. Wake-on-LAN is not
+enabled; only the power switch wakes this board.
 
 ## Diagnostics
 
@@ -56,7 +59,7 @@ Diagnostics and device logs stay out of the source repository.
 The LAN9220 identity and register byte ordering have been verified. Ethernet
 has provided network access and maintenance SSH on the NAND system, including
 a session maintained while USB was disconnected. Performance, broad PHY/link
-interoperability and suspend/resume are not qualified.
+interoperability and extended suspend-cycle reliability are not qualified.
 
 Upstream references:
 [Linux binding](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/Documentation/devicetree/bindings/net/smsc,lan9115.yaml?h=linux-6.12.y),
