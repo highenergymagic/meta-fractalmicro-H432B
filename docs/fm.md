@@ -21,7 +21,9 @@ The upstream Si470x I2C driver is extended with board sequencing, crystal
 startup and bounded tune-completion polling. No interrupt pin is assumed.
 The configured band is 87.5–108 MHz, with 100 kHz spacing and 50 microsecond
 de-emphasis. Startup defaults to muted audio and preserves reserved values.
-Hardware seek and suspend are not qualified.
+Muted reopening and tuning after deep sleep have passed. Hardware seek,
+reception across sleep and a tuner handle held open across suspend remain
+unqualified.
 
 ## Audio and antenna
 
@@ -40,7 +42,8 @@ does not establish reception of a broadcast.
 Build the optional target from the build repository:
 
 ```sh
-python3 scripts/bsp.py build h432b-fm-check
+python3 scripts/bsp.py fetch h432b-fm-check --without-wifi
+python3 scripts/bsp.py build h432b-fm-check --without-wifi
 ```
 
 The deployed `h432b-fm-check` executable is not installed or started by the
