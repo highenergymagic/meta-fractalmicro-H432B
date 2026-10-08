@@ -1,0 +1,13 @@
+Subject: [PATCH] Carry persisted slot identity into the kernel command line
+
+Upstream-Status: Inappropriate [board contract]
+
+--- a/board/hims/u2/u2probe.c
++++ b/board/hims/u2/u2probe.c
+@@ -1,1 +1,5 @@
+- snprintf(command,sizeof(command),"bootz 42000000 44400000:%x 44000000",slots[2].size);
++#ifdef CONFIG_H432B_BOOTSTATE
++ extern int u2_bootstate_handoff(void *);
++ if (u2_bootstate_handoff((void *)0x44000000)) return CMD_RET_FAILURE;
++#endif
++ snprintf(command,sizeof(command),"bootz 42000000 44400000:%x 44000000",slots[2].size);

@@ -1,0 +1,15 @@
+Subject: [PATCH] Select persisted NAND slot unless maintenance was requested
+
+Upstream-Status: Inappropriate [board contract]
+
+--- a/board/hims/u2/Makefile
++++ b/board/hims/u2/Makefile
+@@ -1,1 +1,2 @@
+-COBJS-y := u2.o u2probe.o u2fastboot.o u2nand.o u2bootstate.o
++COBJS-y := u2.o u2probe.o u2fastboot.o u2nand.o u2bootstate.o
++COBJS-y += u2bootmode.o
+--- a/include/configs/hims_u2.h
++++ b/include/configs/hims_u2.h
+@@ -1,1 +1,1 @@
+-#define CONFIG_BOOTCOMMAND		"u2 probe"
++#define CONFIG_BOOTCOMMAND "u2bootmode && u2nandinit ident && u2nandinit ecc && u2bootstate boot; u2 probe"

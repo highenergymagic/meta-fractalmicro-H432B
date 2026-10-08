@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-/* H432B Linux-format NAND reader. No program/erase commands reach NAND. */
+/* H432B Linux-format NAND reader; optional bounded bootstate write profile. */
 #include <common.h>
 #include <command.h>
 #include <nand.h>
@@ -18,6 +18,42 @@ static void read_buf(struct mtd_info *mtd, u8 *buf, int len)
 }
 static struct nand_chip u2_chip;
 static int blocked;
+#ifdef CONFIG_H432B_BOOTSTATE
+#include "nand-write-boundary.h"
+static int write_active;
+static int (*original_write)(struct mtd_info *, loff_t, size_t, size_t *, const u8 *);
+static int (*original_erase)(struct mtd_info *, struct erase_info *);
+static int (*original_markbad)(struct mtd_info *, loff_t);
+static int pool_write(struct mtd_info *mtd, loff_t off, size_t len,
+                      size_t *done, const u8 *buf)
+{
+ int ret;
+ *done=0;
+ if (!h432b_nand_write_allowed(off,len,2048)) return -EROFS;
+ write_active=1;
+ ret=original_write(mtd,off,len,done,buf);
+ write_active=0;
+ return ret;
+}
+static int pool_erase(struct mtd_info *mtd, struct erase_info *erase)
+{
+ int ret;
+ if (!h432b_nand_write_allowed(erase->addr,erase->len,131072)) return -EROFS;
+ write_active=1;
+ ret=original_erase(mtd,erase);
+ write_active=0;
+ return ret;
+}
+static int pool_markbad(struct mtd_info *mtd, loff_t off)
+{
+ int ret;
+ if (!h432b_nand_write_allowed(off,131072,131072)) return -EROFS;
+ write_active=1;
+ ret=original_markbad(mtd,off);
+ write_active=0;
+ return ret;
+}
+#endif
 static unsigned saved_cont;
 static int initialized, identified;
 #ifdef CONFIG_U2_NAND_PROFILE
@@ -48,6 +84,10 @@ static void control(struct mtd_info *mtd,int cmd,unsigned ctrl)
  if(cmd==NAND_CMD_NONE) return;
  if(ctrl&NAND_CLE) {
   blocked=!read_command(cmd);
+#ifdef CONFIG_H432B_BOOTSTATE
+  if (write_active && (cmd==0x80 || cmd==0x10 || cmd==0x60 || cmd==0xd0))
+   blocked=0;
+#endif
   if(!blocked) writeb(cmd,REG(8));
  } else if((ctrl&NAND_ALE) && !blocked) writeb(cmd,REG(12));
 }
@@ -55,7 +95,17 @@ static int ready(struct mtd_info *mtd) {
  if(u2probe_is_active()) usb_gadget_handle_interrupts();
  return !!(readl(REG(0x28))&1);
 }
-static void no_write_buf(struct mtd_info *mtd,const u8 *buf,int len) { blocked=1; }
+static void no_write_buf(struct mtd_info *mtd,const u8 *buf,int len)
+{
+#ifdef CONFIG_H432B_BOOTSTATE
+ int i;
+ if (write_active && !blocked) {
+  for (i=0;i<len;i++) writeb(buf[i],REG(0x10));
+  return;
+ }
+#endif
+ blocked=1;
+}
 static int ro_write(struct mtd_info *mtd,loff_t off,size_t len,size_t *done,const u8 *buf)
 { *done=0; return -EROFS; }
 static int ro_oob(struct mtd_info *mtd,loff_t off,struct mtd_oob_ops *ops)
@@ -71,7 +121,7 @@ static int do_u2nandinit(cmd_tbl_t *cmdtp,int flag,int argc,char *const argv[])
  struct nand_chip *n=&u2_chip;
  int ret;
  if(argc!=2) return CMD_RET_USAGE;
- if(initialized) { puts("NAND already registered read-only\n"); return 0; }
+ if(initialized) { puts("NAND already registered\n"); return 0; }
  if(!strcmp(argv[1],"ident")) {
   if(identified) return 0;
   saved_cont=readl(REG(4));
@@ -99,12 +149,27 @@ static int do_u2nandinit(cmd_tbl_t *cmdtp,int flag,int argc,char *const argv[])
  ret=nand_scan_tail(mtd);
  printf("NAND tail result=%d\n",ret);
  if(ret) return CMD_RET_FAILURE;
+#ifdef CONFIG_H432B_BOOTSTATE
+ original_write=mtd->write;
+ original_erase=mtd->erase;
+ original_markbad=mtd->block_markbad;
+ mtd->write=pool_write; mtd->panic_write=ro_write;
+ mtd->erase=pool_erase; mtd->block_markbad=pool_markbad;
+ /* Raw/OOB callers cannot bypass the pool wrapper. The original markbad
+  * implementation writes the marker internally inside its guarded call. */
+ mtd->write_oob=ro_oob;
+#else
  mtd->flags &= ~MTD_WRITEABLE;
  mtd->write=ro_write; mtd->panic_write=ro_write; mtd->write_oob=ro_oob;
  mtd->erase=ro_erase; mtd->block_markbad=ro_bad;
+#endif
  nand_register(0);
  initialized=1;
+#ifdef CONFIG_H432B_BOOTSTATE
+ puts("H432B NAND BCH8/512: bounded Linux-pool writes enabled\n");
+#else
  puts("H432B NAND BCH8/512: read-only, direct bad-block markers\n");
+#endif
  return 0;
 }
 U_BOOT_CMD(u2nandinit,2,0,do_u2nandinit,"qualify NAND initialization","ident|ecc");

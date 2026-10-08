@@ -5,12 +5,15 @@
 | Target | Purpose |
 | --- | --- |
 | `linux-h432b-runtime` | The default Linux CIP/RT kernel; also used for standalone RAM recovery. |
-| `u-boot-h432b-maintenance-chain` | Persistent CE carrier containing the fixed slot-B maintenance stage. |
-| `u-boot-h432b-maintenance` | High-RAM NAND reader and one-shot fastboot stage, embedded by the carrier. |
+| `u-boot-h432b-ab-chain` | Persistent CE carrier with redundant bootstate and A/B slot selection. |
+| `u-boot-h432b-ab` | High-RAM A/B reader and one-shot fastboot stage, embedded by the carrier. |
 
 The OS layer supplies `openh432-nand-b`, the minimal
 `openh432-early-b` root handoff, and `openh432-systembase-b`.
-The minimal initramfs performs the normal root-filesystem handoff.
+The minimal initramfs mounts the loader-selected systembase. The historical
+`-b` target names do not restrict the new image pair to slot B. Eligible slots and
+redundant bootstate must be provisioned before using the A/B carrier. See the
+[boot contract](boot-contract.md) for update ordering and remaining limitations.
 
 ## Installation and recovery
 
@@ -23,6 +26,9 @@ normal NAND boot path.
 complete standalone RAM root. It is not a second kernel fork or an installer.
 Its kernel permits Linux-pool and internal-SD writes; it is not a read-only
 forensic acquisition environment.
+
+The legacy `u-boot-h432b-maintenance` and `-maintenance-chain` recipes retain
+fixed-B selection for migration and recovery; they do not honor A/B state.
 
 ## Optional diagnostics
 

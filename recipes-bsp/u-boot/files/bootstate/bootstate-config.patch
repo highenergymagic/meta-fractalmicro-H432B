@@ -1,0 +1,20 @@
+Subject: [PATCH] H432B bootstate qualification
+
+Upstream-Status: Inappropriate [board contract]
+
+--- a/include/configs/hims_u2.h
++++ b/include/configs/hims_u2.h
+@@ -1,1 +1,2 @@
+-#define CONFIG_SYS_NO_FLASH		1
++#define CONFIG_H432B_BOOTSTATE 1
++#define CONFIG_SYS_NO_FLASH		1
+--- a/board/hims/u2/Makefile
++++ b/board/hims/u2/Makefile
+@@ -1,1 +1,1 @@
+-COBJS-y := u2.o u2probe.o u2fastboot.o u2nand.o
++COBJS-y := u2.o u2probe.o u2fastboot.o u2nand.o u2bootstate.o
+--- a/include/configs/hims_u2.h
++++ b/include/configs/hims_u2.h
+@@ -1,1 +1,1 @@
+-#define MTDPARTS_DEFAULT "mtdparts=nand0:4m(factory-boot)ro,507m(linux)ro,1m(bbt-reserved)ro"
++#define MTDPARTS_DEFAULT "mtdparts=nand0:4m(factory-boot)ro,507m(linux),1m(bbt-reserved)ro"

@@ -13,15 +13,20 @@ python3 -m unittest discover -s tests -v
 
 For compiled C vectors, run the tests inside the pinned build container with
 `WIFI_RX_NATIVE_CC=/usr/bin/gcc`. Without that setting, compiled Wi-Fi
-vectors are explicitly skipped.
+vectors are explicitly skipped. Bootstate C vectors use `BOOTSTATE_NATIVE_CC`
+(or `cc` when available).
 
 ## Coverage
 
 | Check | Scope |
 | --- | --- |
+| Boot state | CRC/schema checks, serial wrap, alternate-copy commit/readback failure, exhaustion, stale success and NAND write boundaries |
 | Source contracts | Recipe relationships, protocol constants, bounds and cleanup structure |
 | Wi-Fi receive vectors | Actual C parser: padding, lengths, truncation and CRC/ICV flags |
 | Wi-Fi station vectors | H2C framing, CCMP nonce/header construction and BSS-cache selection |
+
+Bootstate torn-write vectors model interrupted payloads and UBI update markers;
+they are not physical power-cut qualification.
 
 The crypto-provider stub verifies framing and error propagation, not
 AES/CCM correctness or security. Offline tests do not exercise electrical

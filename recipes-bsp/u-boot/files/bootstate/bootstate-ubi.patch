@@ -1,0 +1,38 @@
+Subject: [PATCH] H432B bootstate qualification
+
+Upstream-Status: Inappropriate [board contract]
+
+--- a/common/cmd_ubi.c
++++ b/common/cmd_ubi.c
+@@ -1,1 +1,30 @@
+-/* Read the complete static image and verify each LEB data CRC. */
++/* Dedicated dynamic environment copies, never a raw NAND offset. */
++int h432b_ubi_bootstate_read(unsigned copy, void *buffer)
++{
++	char *name;
++	struct ubi_volume *vol;
++	if (copy > 1 || !ubi) return -EINVAL;
++	name = copy ? "bootstate_b" : "bootstate_a";
++	vol = ubi_find_volume(name);
++	if (!vol || vol->vol_type != UBI_DYNAMIC_VOLUME ||
++	    vol->reserved_pebs != 2 || vol->usable_leb_size != 126976 ||
++	    vol->updating || vol->upd_marker || vol->corrupted) return -EINVAL;
++	return ubi_volume_read(name, buffer, 4096, 0);
++}
++int h432b_ubi_bootstate_replace(unsigned copy, const void *buffer)
++{
++	char *name;
++	struct ubi_volume *vol;
++	int ret;
++	if (copy > 1 || !ubi || ubi->ro_mode) return -EROFS;
++	name = copy ? "bootstate_b" : "bootstate_a";
++	vol = ubi_find_volume(name);
++	if (!vol || vol->vol_type != UBI_DYNAMIC_VOLUME ||
++	    vol->reserved_pebs != 2 || vol->usable_leb_size != 126976 ||
++	    vol->updating) return -EINVAL;
++	ret = ubi_volume_write(name, (void *)buffer, 4096);
++	if (ret || vol->upd_marker || vol->corrupted) return -EIO;
++	return 0;
++}
++
++/* Read the complete static image and verify each LEB data CRC. */

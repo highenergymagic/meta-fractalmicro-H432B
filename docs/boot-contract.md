@@ -13,8 +13,12 @@ not hardware revisions or a request to install successive versions.
 | `u-boot-h432b` | `nand51-raw` | USB-shell bootstrap at 0x40021000; raw binary requires CE packaging. |
 | `u-boot-h432b-fastboot` | `ram53-fastboot-only` | Fastboot RAM loader at 0x46000000. |
 | `u-boot-h432b-nand` | `ram54-nand-reader` | Interactive read-only NAND loader at 0x46000000. |
-| `u-boot-h432b-maintenance` | `ram-maintenance-b` | Current kernel-B reader and one-shot fastboot stage at 0x46000000. |
-| `u-boot-h432b-maintenance-chain` | `nand-maintenance-chain-raw` and `nand-maintenance-ce-carrier` | Persistent low-address bootstrap containing the maintenance stage. |
+| `u-boot-h432b-bootstate` | `ram-bootstate` | Explicit bootstate diagnostic shell at 0x46000000; no automatic Linux boot. |
+| `u-boot-h432b-bootstate-chain` | `nand-bootstate-test-ce-carrier` | CE carrier for the bootstate diagnostic stage; not the runtime selector. |
+| `u-boot-h432b-ab` | `ram-ab` | Persistent A/B selector and one-shot fastboot stage at 0x46000000. |
+| `u-boot-h432b-ab-chain` | `nand-ab-chain-raw` and `nand-ab-ce-carrier` | Factory-compatible carrier containing the A/B stage. |
+| `u-boot-h432b-maintenance` | `ram-maintenance-b` | Legacy fixed kernel-B reader and one-shot fastboot stage at 0x46000000. |
+| `u-boot-h432b-maintenance-chain` | `nand-maintenance-chain-raw` and `nand-maintenance-ce-carrier` | Legacy fixed-B carrier; ignores persistent A/B state. |
 | `u-boot-h432b-nand-profile` | `ram57-nand-profile` | RAM-only NAND timing and instruction-cache experiment. |
 | `u-boot-h432b-nand-timer` | `ram-nand-timer` | RAM-only PWM4 clock and NAND timing tests. |
 | `u-boot-h432b-nand-subpage` | `ram-nand-subpage` | RAM-only BCH partial-page read experiment. |
@@ -45,19 +49,75 @@ use a bounded Android-v2 envelope; the compressed root slot is limited to
 16 MiB. NAND kernel volumes have a 132 x 124 KiB capacity.
 
 Normal NAND boot loads the runtime kernel and a minimal root-handoff initramfs.
-It mounts the separate slot-B SquashFS systembase through ubiblock and switches
-root to systemd, with a volatile writable overlay. The standalone RAM recovery
-bundle uses the same runtime kernel with a complete RAM root filesystem and
-can boot without a provisioned UBI pool. Neither path implements automatic
-A/B selection or rollback.
+The A/B stage selects a kernel volume and supplies `rauc.slot=A` or
+`rauc.slot=B` to Linux. The initramfs mounts the corresponding SquashFS
+systembase through ubiblock and switches root to systemd, with a volatile
+writable overlay. The current systembase is slot-independent. Historical
+`-b` image target names remain for build compatibility; an unmanaged boot
+without a selected slot retains the explicit B handoff.
 
-The maintenance-stage boot command selects `kernel_b` explicitly. The
-`openh432-early-b` image embeds a `b` root-slot marker, and root handoff checks
-that the systembase carries the same marker. Slot B is a software deployment
-choice, not a hardware requirement. Slot A is retained as an older image pair;
-it is not an automatic fallback. A/B operation requires coordinated image-pair
-selection, boot-attempt accounting, boot-success confirmation and rollback
-policy; copying images to the other slot does not implement those mechanisms.
+The standalone RAM recovery bundle uses the same runtime kernel with a complete
+RAM root filesystem and can boot without a provisioned UBI pool.
+
+## Persistent boot policy
+
+Two dynamic UBI volumes, `bootstate_a` and `bootstate_b`, hold redundant
+4 KiB U-Boot-format environments with CRC32 and incremental serial flags.
+These copies are not tied to the corresponding operating-system slots.
+The loader imports only the version, `BOOT_ORDER`, `BOOT_A_LEFT` and
+`BOOT_B_LEFT` fields; executable environment settings are not imported.
+
+Each bootstate volume has two 126,976-byte LEBs. The 4 KiB record contains
+a little-endian CRC32, an 8-bit incremental serial and NUL-separated variables:
+`H432_BOOTSTATE_VERSION=1`, `BOOT_ORDER=A B` (or `B A`), and decimal
+`BOOT_A_LEFT` / `BOOT_B_LEFT` counts from 0 through 255. Normal healthy
+allowance is three attempts. Required duplicates and malformed records are
+rejected; serial selection handles wrap from 255 to zero.
+
+The selector visits slots in `BOOT_ORDER` and skips zero attempt counts.
+Before launching a kernel, it decrements the selected count, updates the
+alternate environment volume and verifies the stored record. Failed persistence
+prevents launch. Both invalid copies or exhausted slots lead to USB maintenance,
+not automatic reinitialization. Returned image-load failures consume further
+attempts; a hung kernel requires a reset before selection runs again.
+
+Linux receives the selected slot and attempt serial. After a 30-second health
+interval, `FMMarkBootSuccessful.service` checks the mounted slot, BRLTTY,
+the tty1 user session and service restart counts. It restores that slot to three
+attempts under the environment-library lock, only if the recorded attempt is
+still current. Network connectivity is not a success requirement.
+
+An update must first make its inactive destination ineligible, write and verify
+both the kernel and systembase, then activate the pair in one environment
+transaction. Never update the mounted systembase. A legacy fixed-B carrier
+ignores this policy and must not be mistaken for the A/B carrier.
+
+Hardware-watchdog recovery, signed update-bundle installation and persistent
+userdata migration are not provided by this policy. RAUC-compatible variable
+names do not imply that a RAUC installer is installed. Software fallback on
+detected root-handoff failure requests a reset; it does not guarantee recovery
+from a wedged kernel or reset controller.
+
+### Bootstate utilities
+
+The target package `h432b-bootstate-check` shares the loader's state decoder:
+
+- `--inspect COPY0 COPY1`: validate two captured records without writing NAND.
+- `--emit-initial-b`: emit an initial B-only record to stdout; file generation
+  only, not provisioning or installation.
+- `--mark-good A|B SERIAL`: perform a locked, serial-checked success update.
+  Use the health-gated service rather than invoking this directly in normal use.
+
+The standard systembase supplies `/etc/fw_env.config` for volumes
+`/dev/ubi0_5` and `/dev/ubi0_6` at offset zero, environment size `0x1000`.
+These must be named `bootstate_a` and `bootstate_b` with the required dynamic
+geometry. The service verifies the layout before writing. A libubootenv
+adaptation propagates lock errors and permits a valid redundant peer when
+one volume is unreadable after an interrupted UBI update.
+
+The diagnostic loader's `u2bootstate` command provides `inspect`,
+`consume` and `boot` operations. Inspection can trigger UBI attachment
+repairs; consume and boot persist an attempt. None is a forensic capture tool.
 
 The [NAND documentation](nand.md) describes ECC and bounded UBI layout.
 The factory prefix uses a different ECC format and must not be rewritten by

@@ -1,0 +1,24 @@
+Subject: [PATCH] Refuse environment access when locking fails
+
+Upstream-Status: Pending
+
+--- a/src/uboot_env.c
++++ b/src/uboot_env.c
+@@ -1,7 +1,10 @@
+-int libuboot_open(struct uboot_ctx *ctx) {
+-	if (!ctx)
+-		return -EINVAL;
+-	libuboot_lock(ctx);
+-
+-	return libuboot_load(ctx);
+-}
++int libuboot_open(struct uboot_ctx *ctx) {
++	int ret;
++	if (!ctx)
++		return -EINVAL;
++	ret = libuboot_lock(ctx);
++	if (ret)
++		return ret;
++
++	return libuboot_load(ctx);
++}

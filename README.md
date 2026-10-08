@@ -15,8 +15,9 @@ by Fractal Microsystems as part of OpenH432.
 
 This layer contains the machine configuration, Linux CIP kernel with
 PREEMPT_RT integration, device tree, U-Boot 2012.10 adaptations and
-board-specific image constraints. Source versions and patch order are
-defined in the recipes.
+board-specific image constraints. The A/B bootloader preserves the factory
+boot chain and uses redundant UBI bootstate for attempt tracking and fallback.
+Source versions and patch order are defined in the recipes.
 
 Distribution policy and userspace packages belong to
 [meta-fractalmicro-openh432](https://github.com/highenergymagic/meta-fractalmicro-openh432).
@@ -42,9 +43,9 @@ See [build configuration](https://github.com/highenergymagic/openh432-build/blob
 - [Tests](tests/README.md): offline checks and device-test procedures.
 
 The [support matrix](https://github.com/highenergymagic/openh432-build/blob/main/docs/status.md)
-defines runtime support and known limitations. This is a development BSP;
-Linux accessibility and power management are not complete. Diagnostic
-qualification does not imply inclusion in the normal image.
+defines runtime support and known limitations. The interactive braille console
+is integrated; application accessibility and power management remain incomplete.
+Diagnostic qualification does not imply inclusion in the normal image.
 
 Read the boot contract and
 [installation guide](https://github.com/highenergymagic/openh432-tools/blob/main/docs/installation.md)

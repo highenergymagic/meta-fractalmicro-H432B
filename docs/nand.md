@@ -8,7 +8,7 @@ The measured device is Samsung EC/DC, 512 MiB SLC: 4096 eraseblocks of
 | Region | Offset | Size | Policy |
 |---|---:|---:|---|
 | Factory boot and CE-carried U-Boot | 0 | 4 MiB | Protected |
-| Shared Linux UBI pool | 4 MiB | 507 MiB | Explicit provisioning only |
+| Shared Linux UBI pool | 4 MiB | 507 MiB | Runtime UBI writes; explicit initial provisioning |
 | Reserved tail/possible future flash BBT | 511 MiB | 1 MiB | Protected |
 
 The factory prefix includes StepLoader, EBOOT, its boot table, and the
@@ -44,8 +44,11 @@ Full-page I/O leaves 124 KiB logical eraseblocks. Static volumes:
 | recovery | 264 | 31.969 MiB |
 | systembase_a / systembase_b, each | 1651 | 199.926 MiB |
 
-Two dynamic bootstate volumes reserve two LEBs each. This reserves capacity;
-it does not implement an A/B update/rollback policy yet.
+Two dynamic bootstate volumes reserve two LEBs each and hold redundant 4 KiB
+U-Boot environment records. The A/B loader persists attempt consumption before
+launch; Linux acknowledges a healthy boot using the same format. See the
+[boot contract](boot-contract.md#persistent-boot-policy) for the state schema
+and paired-image activation sequence.
 
 The planner subtracts observed bad blocks, another 80 PEBs for future bad
 blocks, and four PEBs for UBI layout/WL/atomic-change needs. With one observed
@@ -65,7 +68,7 @@ belongs in UBIFS/dynamic volumes or the separately planned SD layout.
 ## Validation scope
 
 Qualification on one device includes scratch-block erase/program/readback,
-unchanged bad-block markers, protected-prefix comparison including OOB, UBI
+protected-prefix comparison including OOB, UBI
 provisioning and complete kernel/base-volume hashes. Linux and U-Boot BCH8
 parity agreed for all four page sectors; injected one-through-eight-bit RAM
 errors per sector were corrected.
@@ -76,12 +79,20 @@ and the separate SquashFS systembase, not a full development initramfs.
 See [boot performance](boot-performance.md) for measurements and limits.
 
 Build checks cover image/heap/stack overlap, carrier format and required
-filesystem configuration. U-Boot NAND writes remain disabled at both MTD
-callbacks and the controller command interface. Persistent Linux-volume
-updates use the Linux UBI path; fastboot has no flash/erase backend.
+filesystem configuration. The A/B and bootstate diagnostic loaders enable
+bounded Linux-pool writes for UBI state updates and maintenance; they use the
+hardware timer for program/erase deadlines. Even an inspection can cause UBI
+attachment repairs and is not forensic read-only access. Other read-only
+loader profiles retain their write guards. Factory prefix and tail writes,
+and raw OOB programming, remain blocked. Kernel/base replacement uses Linux
+UBI; fastboot has no flash/erase backend.
 
-No coordinated A/B activation, power-loss update recovery, NAND endurance
-qualification or complete stock-CE restoration is implemented. Preserve each
+Exhausted-slot fallback and healthy-boot acknowledgement are device-tested.
+Physical power-cut recovery, NAND endurance and complete stock-CE restoration
+remain unqualified; a signed update installer is not implemented. An early
+software-timer diagnostic retired one additional pool block; subsequent tests
+used the corrected hardware timer. Detailed scope is recorded in the
+[hardware validation record](https://github.com/highenergymagic/openh432-build/blob/main/docs/hardware-validation.md). Preserve each
 device's actual raw+OOB backup; a vendor EBOOT download is not a substitute.
 
 See the [installation guide](https://github.com/highenergymagic/openh432-tools/blob/main/docs/installation.md)

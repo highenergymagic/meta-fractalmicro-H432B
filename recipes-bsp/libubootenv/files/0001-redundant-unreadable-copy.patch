@@ -1,0 +1,22 @@
+Subject: [PATCH] H432B bootstate qualification
+
+Upstream-Status: Inappropriate [board contract]
+
+--- a/src/uboot_env.c
++++ b/src/uboot_env.c
+@@ -1,4 +1,11 @@
+-		if (ret != ctx->size) {
+-			free(buf[0]);
+-			return -EIO;
+-		}
++		if (ret != ctx->size) {
++			/* An interrupted UBI update makes one volume unreadable.
++			 * Keep checking the other redundant copy; never parse the
++			 * incomplete buffer or reset a valid peer to defaults. */
++			if (copies > 1) {
++				crcenv[i] = false;
++				continue;
++			}
++			free(buf[0]);
++			return -EIO;
++		}
