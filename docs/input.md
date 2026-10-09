@@ -4,8 +4,8 @@
 
 The normal NAND kernel includes KEY_POWER, the keyboard, routing keys and
 selectors. The `linux-h432b-input-test` profile uses the same shared driver and
-wiring. The evdev ABI remains provisional; chord translation, keypad locking
-and notification policy are not implemented. The normal systembase includes
+wiring. The evdev ABI remains provisional. BRLTTY provides braille chord translation;
+keypad locking and notification policy are not implemented. The normal systembase includes
 a bounded vibration command, not an automatic haptics service.
 
 Raw GPIO recorders must not run alongside the input driver or while changing
@@ -16,8 +16,10 @@ do not configure whole banks.
 
 GPH2[6]/EINT22 is active high and rests low. gpio-keys reports KEY_POWER
 with 20 ms debounce and no autorepeat. Press/release delivery is verified.
-Long-hold electrical behavior, shutdown and wake are not qualified; the OS
-ignores power-key actions. See [power management](power-control.md).
+The normal OS policy requests deep suspend; another power press wakes the
+same session. Other input devices are not wake sources. Electrical poweroff
+and long-hold hardware behavior remain unqualified.
+See [power management](power-control.md).
 
 ## Keyboard matrix
 

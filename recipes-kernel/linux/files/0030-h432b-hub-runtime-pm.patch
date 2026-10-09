@@ -1,0 +1,31 @@
+Subject: [PATCH] usb: onboard: keep the H432B onboard hub active at runtime
+
+On H432B, suspending the empty NEC hub can stall OHCI register accesses
+and normal restart. Connecting a downstream device releases the stall.
+Keeping the hub runtime-active permits restart with all sockets empty.
+
+Limit the workaround to the H432B board and its DT-described NEC hub.
+Use the USB core runtime-PM API; retain system-sleep callbacks and do
+not change either host controller's power-management policy.
+
+Upstream-Status: Inappropriate [H432B board-specific hardware workaround]
+
+--- a/drivers/usb/misc/onboard_usb_dev.c
++++ b/drivers/usb/misc/onboard_usb_dev.c
+@@ -635,8 +635,16 @@ static int onboard_dev_usbdev_probe(struct usb_device *udev)
+ 	err = onboard_dev_add_usbdev(onboard_dev, udev);
+ 	if (err)
+ 		return err;
+
++	/*
++	 * An idle upstream link on this board can stall host register
++	 * accesses during shutdown. System sleep remains supported.
++	 */
++	if (of_machine_is_compatible("hims,braillesense-u2") &&
++	    of_device_is_compatible(dev->of_node, "usb409,5a"))
++		usb_disable_autosuspend(udev);
++
+ 	return 0;
+ }
+
+ static void onboard_dev_usbdev_disconnect(struct usb_device *udev)

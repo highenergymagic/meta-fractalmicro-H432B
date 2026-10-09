@@ -37,6 +37,22 @@ selective power policy are not established. No unmeasured voltage is specified.
 Hub port 1 is unidentified. Port numbering describes the tested hub topology,
 not Linux USB bus numbers.
 
+## Power management
+
+The onboard NEC hub is kept runtime-active on H432B. Suspending its empty
+upstream link can stall host-register access during shutdown. This policy is
+limited to the board's device-tree-described hub; external devices retain
+their normal runtime-PM policies, and both EHCI and OHCI remain enabled.
+
+System suspend is separate from runtime autosuspend. The existing hub
+power/reset and host-controller system-sleep callbacks remain in use.
+Do not force the onboard hub's `power/control` back to `auto`.
+
+Empty-port software reboot and power-button deep suspend/resume have been
+verified with this policy in the standard NAND kernel. The hub returns
+runtime-active after resume; host-controller runtime PM remains automatic.
+The underlying silicon clock/PHY failure mechanism is not established.
+
 ## Diagnostics
 
 `tests/check-usb-hub.sh` checks hub/adapter identity, topology, speed and

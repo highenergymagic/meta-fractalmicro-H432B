@@ -15,10 +15,10 @@ Peripheral recovery is qualified separately from core suspend:
 | Ethernet | DHCP, SSH and checksum-verified bidirectional transfers | Interface resets/reopens; uninterrupted sessions and endurance unqualified |
 | Wi-Fi | Automatic WPA2 station reassociation and interface-bound ICMP | Sustained transfers and repeated-cycle endurance unqualified |
 | Bluetooth | Provisioned identity, radio parameters and HCI commands retained | Manual initialization required; connected-peer retention unqualified |
-| Audio | Playback started after resume and stream-clock release | Open streams across suspend and gap-free boot playback unqualified |
+| Audio | Playback started after resume, stream-clock release and OpenEVV console speech restored | Open streams across suspend and repeated-cycle endurance unqualified |
 | GPS | Checksum-valid NMEA reception | Assistance retention and acquisition performance unqualified |
 | FM | Muted reopening and tuning | Reception and open handles across sleep unqualified |
-| USB | Gadget reconnection and hub/adapter re-enumeration | Open serial sessions and payload continuity unqualified |
+| USB | Gadget reconnection, hub/adapter re-enumeration and empty-port reboot after wake | Open serial sessions and payload continuity unqualified |
 | RTC | Elapsed sleep-time accounting with network synchronization stopped | Battery-removal retention and long-term accuracy unqualified |
 
 These checks cover specific images and individual device cycles, not a combined

@@ -13,6 +13,13 @@
 #include "s5pv210-hims-u2-compass.dtsi"
 #include "s5pv210-hims-u2-audio-input.dtsi"
 
+/* Standalone boot must not wait for a host to drain USB serial output.
+ * The explicit ttyGS0 maintenance shell remains independent of /dev/console.
+ */
+&{/chosen} {
+    bootargs = "console=tty0 rdinit=/init loglevel=4 systemd.show_status=no clk_ignore_unused g_serial.iProduct=OpenH432-RAM g_serial.iSerialNumber=H432-RAM-TEST";
+};
+
 &{/nand@b0e00000} {
     hims,write-window = <0x00400000 0x1fb00000>;
 };

@@ -24,8 +24,8 @@ capacity register. The exact device model is not yet verified on hardware.
 
 The electrical implementation of the inverting stage is not established.
 A controlled USB unplug test confirmed that the secondary input deasserts
-when USB power is removed. The primary input has not been qualified with an
-AC adapter. Stock polling uses a five-second interval and filters
+when USB power is removed. Charging has been observed with AC and USB connected together, but the primary
+input has not been isolated through an AC-only transition test. Stock polling uses a five-second interval and filters
 capacity samples; communication failure must not be assumed to mean no pack.
 
 ## Driver and diagnostic profile
@@ -116,7 +116,9 @@ is advertised.
 
 The driver has no writable power_supply properties. Device removal cancels
 polling before unregistering the supply and releasing GPIOs.
-Charging transitions, the AC source and low-battery policy remain unqualified.
+A NAND-runtime observation with AC and USB connected reported Charging and
+sustained positive gauge current. This does not establish USB-only charging,
+a complete charge cycle or automatic low-battery policy.
 Power-button actions belong to the separate system sleep policy.
 
 The shared status/range policy is compiled and tested inside the pinned build
@@ -139,10 +141,15 @@ calibrated measurements. Near-zero current must be interpreted against sensor
 offset accuracy. Sticky status flags describe prior conditions and do not
 alone establish present undervoltage or an observed full charge cycle.
 
+A NAND-runtime sample with AC and USB connected reported approximately
+1.24–1.33 A positive current and rising voltage from 3.484 to 3.503 V, with
+charging and both external-source indications asserted. This establishes
+active charging in that configuration, not the ability to charge from USB
+alone or calibrated measurement accuracy.
+
 Compiled tests cover status/GPIO combinations, stale/error handling and signed
-conversion boundaries. Active charging transitions, the AC input, exact gauge
-model and long-term pack health remain unqualified. The earlier RAM-profile
-results are not a combined NAND-runtime qualification; see the
+conversion boundaries. Isolated AC transitions, the exact gauge model and
+long-term pack health remain unqualified. For artifact scope see the
 [validation record](https://github.com/highenergymagic/openh432-build/blob/main/docs/hardware-validation.md).
 
 ## References

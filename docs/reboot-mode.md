@@ -26,17 +26,22 @@ The shared definitions live in `linux-h432b-platform.inc` and
 `u-boot-h432b-boot-mode.inc`. There is no separate legacy reboot-test kernel
 or loader target.
 
-## Current boot chain
+## Boot chains
 
-`u-boot-h432b-maintenance` loads the existing `kernel_b` volume, falling
-back to the USB maintenance interface on failure.
-`u-boot-h432b-maintenance-chain` packages that stage in the low-address CE
-carrier. It requires a verified kernel-B image and matching systembase-B
-volume; it does not provision either.
+The normal deployment uses `u-boot-h432b-ab-chain`: a factory-compatible
+carrier containing the persistent A/B selector. It consumes the one-shot
+request before normal slot selection. Without a maintenance request, it
+selects an eligible kernel and matching systembase using redundant UBI boot
+state. Invalid or exhausted state also leads to USB maintenance.
 
-This is fixed-slot development policy, not A/B rollback. The factory
-first-stage loader and EBOOT remain in place. Normal autoboot does not offer
-a timed fastboot window: USB enumeration alone is not command readiness.
+The optional `u-boot-h432b-maintenance-chain` is the legacy fixed-B carrier.
+It ignores A/B selection and requires a verified `kernel_b` with matching
+`systembase_b`. Neither carrier provisions storage. See the
+[boot contract](boot-contract.md) for artifact roles and update ordering.
+
+Both retain the factory first-stage loader and EBOOT. Normal autoboot does
+not offer a timed fastboot window: USB enumeration alone is not command
+readiness.
 
 ## Validation and limits
 
@@ -46,10 +51,14 @@ entering fastboot. The maintenance carrier subsequently booted the installed
 Linux system after plain Reset. These are distinct tests, not evidence for
 every reset or power-loss scenario.
 
-A retention-test marker survived a software reboot, while an earlier physical
-Reset cleared it. Retention across power removal, suspend and other factory
-firmware is not guaranteed. A persistent boot-control record would require
-a separate design with ECC, bad-block handling and interrupted-write recovery.
+A retention-test marker survived a software reboot but was cleared by physical
+Reset. INFORM7 is a one-shot request, not persistent update state; retention
+across power removal, suspend and other factory firmware is not guaranteed.
+Persistent A/B attempt tracking uses separate redundant UBI records.
+
+Ordinary software reboot with empty USB host ports, including after deep
+suspend/resume, has passed with the board-specific onboard-hub runtime-PM
+policy. Do not force that hub to autosuspend; see [USB host](usb-host.md).
 
 The optional `h432b-reboot-probe` package contains a read-only register
 inventory and an explicit retention tester. The tester requires an empty

@@ -7,7 +7,6 @@ SRC_URI = "https://www.kernel.org/pub/linux/kernel/projects/cip/6.12/linux-cip-6
     https://www.kernel.org/pub/linux/kernel/projects/rt/6.12/patch-6.12.111-rt21.patch.xz;name=rt \
     file://0001-readonly-storage-integration.patch \
     file://0002-nand-reader.patch \
-    file://0003-usb-host-diagnostics.patch \
     file://0004-usb-host-required-power-bit.patch \
     file://0005-sdio-cis-end.patch \
     file://0006-audio-clock-codec.patch \

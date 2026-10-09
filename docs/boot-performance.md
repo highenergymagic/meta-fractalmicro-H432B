@@ -26,6 +26,21 @@ Non-filesystem UBI image and bootstate volumes are excluded from generic udev
 filesystem probing; selected-root verification, block-device discovery and
 normal hotplug remain enabled.
 
+## Standalone console policy
+
+The normal NAND kernel uses `console=tty0`, `loglevel=4` and
+`systemd.show_status=no`. Kernel messages remain available through `dmesg`;
+systemd logs remain in the journal. The explicitly enabled `ttyGS0` maintenance
+shell is independent of the boot console and does not require a host reader
+for local braille startup.
+
+Using the USB gadget as `/dev/console` makes systemd status-line closes wait
+for unread serial output to drain. The gadget driver permits a 15-second
+close timeout, so an unattended boot can accumulate minutes of delay.
+Diagnostic profiles retain their explicit USB console; keep a reader attached
+when using those profiles. Normal boot qualification must include a run with
+no host console reader.
+
 ## Qualified measurements
 
 These are samples from one board, not performance guarantees. Exact image
