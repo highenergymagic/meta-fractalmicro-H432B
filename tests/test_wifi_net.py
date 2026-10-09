@@ -5,6 +5,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1] / "recipes-kernel/linux/files"
 NET = (ROOT / "h432b-wifi-net.h").read_text()
+NET += (ROOT / "h432b-wifi-debug.h").read_text().split(
+    "static ssize_t network_start_store")[1]
 CMD = (ROOT / "h432b-wifi-command.h").read_text()
 DRIVER = (ROOT / "h432b-wifi-transport.c").read_text()
 

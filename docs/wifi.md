@@ -15,6 +15,13 @@ The default runtime includes the driver. Systembase supplies `iw`,
 With it, startup initializes the radio and creates the interface automatically;
 without it, initialization is skipped. Building never accesses hardware.
 
+The service requests the driver's `initialize` operation once firmware is
+available on systembase. The driver validates firmware, performs power and
+firmware setup, acknowledges the active state and registers the interface.
+Repeating a successful request is harmless; a failed hardware sequence still
+requires a fresh boot. Routine scan and association traces use debug logging;
+initialization and transport failures remain error reports.
+
 This is a limited development station profile, not a production-ready driver:
 
 - WPA2-PSK with CCMP only. WEP, TKIP, WPA3/SAE, enterprise authentication,
@@ -119,13 +126,22 @@ releasing the IRQ and SDIO function.
 ## Optional diagnostics
 
 The runtime is the primary implementation. `openh432-wifi-test` is a
-compatibility target using the same driver and slot-B systembase, not a
-standalone recovery image. Build it through the pinned launcher only when that
+diagnostic kernel bundle using the same driver, a root-handoff initramfs and
+an installed slot-matched systembase. It is not a standalone recovery image. Build it through the pinned launcher only when that
 specific diagnostic target is needed.
 
 On a normal firmware-equipped installation, `FMWiFi.service` owns startup.
 Do not replay low-level initialization writes after it starts. The root-only
-sysfs interface remains available for separate diagnostic boots:
+experiment interface is excluded from the standard kernel. Build the explicit
+`linux-h432b-wifi-test` target to enable `CONFIG_H432B_WIFI_DIAGNOSTICS`;
+prevent automatic initialization on that boot with the kernel command-line
+option `systemd.mask=FMWiFi.service`. Stopping
+that service after initialization does not reset the chip or release hardware
+ownership. The early userspace in
+`openh432-wifi-test` still hands off to the installed systembase, so building
+that target alone does not suppress its startup services.
+Diagnostic register snapshots are also disabled in the standard kernel.
+The diagnostic controls are:
 
 | Write attribute | Request | Purpose |
 | --- | --- | --- |

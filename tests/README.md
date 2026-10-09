@@ -13,8 +13,9 @@ python3 -m unittest discover -s tests -v
 
 For compiled C vectors, run the tests inside the pinned build container with
 `WIFI_RX_NATIVE_CC=/usr/bin/gcc`. This setting selects the compiler for Wi-Fi
-vectors and audio clock-lifetime tests; they are skipped when it is absent. Bootstate C vectors use `BOOTSTATE_NATIVE_CC`
-(or `cc` when available).
+vectors, LED register operations, and audio clock/gating tests; those compiled
+tests are skipped when it is absent. Audio patch-stack checks also require
+`patch`. Bootstate C vectors use `BOOTSTATE_NATIVE_CC` (or `cc` when available).
 
 ## Coverage
 
@@ -23,11 +24,14 @@ vectors and audio clock-lifetime tests; they are skipped when it is absent. Boot
 | Boot state | CRC/schema checks, serial wrap, alternate-copy commit/readback failure, exhaustion, stale success and NAND write boundaries |
 | NAND loader timing | Hardware-tick counter phases, bounded reporting and retained I/O/check operations |
 | Fixed BCH | Build-time generic/fixed parity and decoding comparison using fetched upstream source |
-| Audio clock lifetime | Positive ALSA constraint results, startup errors and balanced clock references |
+| Audio | Positive ALSA constraint results, clock references, zero-fuzz patch application, jack polarity and compiled speaker-gating callbacks |
 | Suspend integration | Runtime recipe, wake-source, display-power and peripheral-retention contracts |
 | Source contracts | Recipe relationships, protocol constants, bounds and cleanup structure |
 | Wi-Fi receive vectors | Actual C parser: padding, lengths, truncation and CRC/ICV flags |
 | Wi-Fi station vectors | H2C framing, CCMP nonce/header construction and BSS-cache selection |
+| Runtime Wi-Fi initialization | Firmware validation ordering, idempotence and separation of optional diagnostics |
+| LED outputs | Compiled register writes, nibble preservation and error handling |
+| Motion sensor | Runtime integration, factory-parameter conversion and power-management contracts |
 
 The A/B loader build runs `check-bch-equivalence.py` with its pinned native
 compiler. It compiles the fetched BCH library twice (generic and M=13, T=8),

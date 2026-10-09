@@ -43,6 +43,7 @@ static int wifi_event_parse(const u8 *data, unsigned int size,
 	return 0;
 }
 
+#ifdef CONFIG_H432B_WIFI_DIAGNOSTICS
 static int wifi_event_test(struct sdio_func *func, struct h432b_event_result *r,
 			   u16 baseline)
 {
@@ -127,3 +128,4 @@ out:
 	kfree(data);
 	return error;
 }
+#endif

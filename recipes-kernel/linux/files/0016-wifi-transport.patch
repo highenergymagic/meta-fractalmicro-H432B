@@ -1,7 +1,20 @@
-Subject: Add opt-in H432B SDIO transport qualification
-Upstream-Status: Inappropriate [board transport qualification]
+Subject: Add H432B RTL8712 SDIO station driver
+Upstream-Status: Inappropriate [board-specific station driver]
 
 --- a/drivers/mmc/core/Makefile
 +++ b/drivers/mmc/core/Makefile
 @@ -1,0 +2,1 @@
 +obj-y += h432b-wifi-transport.o
+
+--- a/drivers/mmc/core/Kconfig
++++ b/drivers/mmc/core/Kconfig
+@@ -1,0 +2,9 @@
++config H432B_WIFI_DIAGNOSTICS
++	bool "H432B RTL8712 hardware experiment interfaces"
++	depends on ARCH_S5PV210 && MMC
++	default n
++	help
++	  Expose manual transport, power, firmware and command experiments.
++	  These controls are not required for station operation and must stay
++	  disabled in normal runtime images.
++

@@ -30,4 +30,10 @@ require h432b-battery.inc
 require h432b-usb-host.inc
 require h432b-external-sd.inc
 
+SRC_URI += "file://0027-h432b-audio-capture.patch file://0028-h432b-audio-jacks.patch file://s5pv210-hims-u2-audio-input.dtsi"
+do_configure:append() {
+    install -m 0644 ${UNPACKDIR}/s5pv210-hims-u2-audio-input.dtsi ${S}/arch/arm/boot/dts/samsung/
+}
+
+require h432b-compass.inc
 require h432b-suspend.inc

@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1] / "recipes-kernel/linux/files"
 EVENT = (ROOT / "h432b-wifi-events.h").read_text()
 FW = (ROOT / "h432b-wifi-firmware.h").read_text()
 DRIVER = (ROOT / "h432b-wifi-transport.c").read_text()
+DRIVER += (ROOT / "h432b-wifi-debug.h").read_text()
 
 
 class WifiEvents(unittest.TestCase):

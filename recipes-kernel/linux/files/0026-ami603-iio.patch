@@ -1,0 +1,17 @@
+Subject: [PATCH] iio: add AMI603 direct-mode sensor integration
+Upstream-Status: Inappropriate [initial board qualification]
+
+--- a/drivers/iio/magnetometer/Makefile
++++ b/drivers/iio/magnetometer/Makefile
+@@ -1,0 +2 @@
++obj-$(CONFIG_AMI603) += ami603.o
+--- a/drivers/iio/magnetometer/Kconfig
++++ b/drivers/iio/magnetometer/Kconfig
+@@ -1,0 +2,7 @@
++config AMI603
++	tristate "Aichi AMI603 magnetometer and accelerometer"
++	depends on I2C
++	help
++	  Direct-mode readings from the six-axis AMI603 sensor.
++	  This does not provide calibrated compass headings.
++

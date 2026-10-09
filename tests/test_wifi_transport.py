@@ -6,6 +6,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 KERNEL = ROOT / "recipes-kernel/linux"
 SOURCE = (KERNEL / "files/h432b-wifi-transport.c").read_text()
+SOURCE += (KERNEL / "files/h432b-wifi-debug.h").read_text()
 
 
 class WifiTransport(unittest.TestCase):

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * RTL8712 SDIO cfg80211 integration. Included after the diagnostic owner.
+ * RTL8712 SDIO cfg80211 integration. Included after the SDIO device state.
  * Limited WPA2-PSK/CCMP station profile with passive scans and host crypto.
  */
 #include <linux/etherdevice.h>
@@ -218,7 +218,7 @@ static void wifi_net_scan_work(struct work_struct *work)
 	net->scans++;
 	net->consecutive_empty = 0;
 	mutex_unlock(&owner->lock);
-	dev_info(&net->func->dev, "cfg80211 scan: error=%d completed=%u reports=%u\n",
+	dev_dbg(&net->func->dev, "cfg80211 scan: error=%d completed=%u reports=%u\n",
 		 error, net->scans, net->reports);
 	wifi_net_finish_scan(net, error || READ_ONCE(net->stopping));
 	if (!error && !READ_ONCE(net->stopping))
@@ -557,7 +557,7 @@ static int wifi_net_register(struct sdio_func *func, struct h432b_wifi_sample *o
 	if (error)
 		goto unregister_wiphy;
 	owner->net = net;
-	dev_info(&func->dev, "cfg80211 passive-scan interface registered\n");
+	dev_dbg(&func->dev, "station interface registered\n");
 	return 0;
 
 unregister_wiphy:
@@ -601,31 +601,7 @@ static void wifi_net_unregister(struct h432b_wifi_sample *owner)
 	wiphy_free(net->wiphy);
 }
 
-static ssize_t network_start_store(struct device *dev, struct device_attribute *attr,
-				   const char *buf, size_t count)
-{
-	struct sdio_func *func = dev_to_sdio_func(dev);
-	struct h432b_wifi_sample *owner = sdio_get_drvdata(func);
-	int error;
-
-	if (!sysfs_streq(buf, "1"))
-		return -EINVAL;
-	mutex_lock(&owner->lock);
-	if (owner->command.attempted || owner->event.attempted || owner->net)
-		error = -EALREADY;
-	else if (owner->firmware.stage != 12 || owner->firmware.error ||
-		 owner->firmware.cleanup || owner->power.warm ||
-		 !owner->ack.attempted || owner->ack.error || owner->ack.cleanup)
-		error = -EAGAIN;
-	else {
-		owner->command.attempted = true;
-		error = wifi_net_register(func, owner);
-		owner->command.error = error;
-	}
-	mutex_unlock(&owner->lock);
-	return error ? error : count;
-}
-static DEVICE_ATTR_WO(network_start);
+#include "h432b-wifi-led.h"
 
 /* Counters only: never publish received packet contents or nearby identities. */
 static ssize_t network_result_show(struct device *dev,

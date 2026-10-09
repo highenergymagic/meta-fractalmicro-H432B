@@ -26,9 +26,12 @@ is not a promise of availability in the normal runtime.
 
 ## Controls and power
 
-- [Speaker audio](audio.md)
+- [Audio and jack detection](audio.md)
 - [Braille display](braille.md)
 - [Input devices](input.md)
+- [Motion sensor](compass.md)
+- [Visual displays](visual-displays.md)
+- [Status indicators](indicators.md)
 - [Battery telemetry](battery.md)
 - [Power management](power-control.md)
 

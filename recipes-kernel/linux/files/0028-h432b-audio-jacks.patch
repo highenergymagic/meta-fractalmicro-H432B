@@ -1,0 +1,162 @@
+Subject: [PATCH] ASoC: hims-u2: report jacks and gate speaker on headphone insertion
+
+Upstream-Status: Inappropriate [H432B board-specific wiring]
+
+--- a/sound/soc/samsung/hims-u2-audio.c
++++ b/sound/soc/samsung/hims-u2-audio.c
+@@ -9,6 +9,8 @@
+ #include <linux/delay.h>
+ #include <linux/gpio/consumer.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
++#include <sound/jack.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+ #include <sound/pcm_params.h>
+@@ -22,31 +24,71 @@
+ 	struct snd_soc_dai_link_component cpu, codec, platform;
+ 	struct gpio_desc *unmute, *speaker;
+ 	struct clk *dma_request_clk;
++	struct mutex output_lock;
++	bool output_active;
++	struct snd_soc_jack headphone_jack, microphone_jack;
++	struct snd_soc_jack_gpio headphone_gpio, microphone_gpio;
++	struct notifier_block headphone_notifier;
+ };
+
++/* The factory gates the external speaker amplifier, not a codec output pair. */
+ static void u2_mute(void *data)
+ {
+ 	struct u2_audio *u2 = data;
+
++	mutex_lock(&u2->output_lock);
++	u2->output_active = false;
+ 	gpiod_set_value_cansleep(u2->unmute, 0);
+ 	gpiod_set_value_cansleep(u2->speaker, 0);
++	mutex_unlock(&u2->output_lock);
+ }
+
++static int u2_headphone_changed(struct notifier_block *nb,
++				unsigned long status, void *data)
++{
++	struct u2_audio *u2 = container_of(nb, struct u2_audio,
++					  headphone_notifier);
++
++	mutex_lock(&u2->output_lock);
++	if (u2->output_active)
++		gpiod_set_value_cansleep(u2->speaker,
++					!(status & SND_JACK_HEADPHONE));
++	mutex_unlock(&u2->output_lock);
++	return NOTIFY_OK;
++}
++
++static void u2_unregister_headphone_notifier(void *data)
++{
++	struct u2_audio *u2 = data;
++
++	snd_soc_jack_notifier_unregister(&u2->headphone_jack,
++					&u2->headphone_notifier);
++}
++
+ static int u2_speaker_event(struct snd_soc_dapm_widget *w,
+ 			    struct snd_kcontrol *kcontrol, int event)
+ {
+ 	struct u2_audio *u2 = snd_soc_card_get_drvdata(w->dapm->card);
++	int present;
+
++	if (!SND_SOC_DAPM_EVENT_ON(event)) {
+-	if (SND_SOC_DAPM_EVENT_ON(event)) {
+-		/* Stock HwUnMute: speaker high, 50 ms, unmute high. */
+-		gpiod_set_value_cansleep(u2->speaker, 1);
+-		msleep(50);
+-		gpiod_set_value_cansleep(u2->unmute, 1);
+-		msleep(200);
+-	} else {
+ 		u2_mute(u2);
+ 		msleep(50);
++		return 0;
+ 	}
++
++	mutex_lock(&u2->output_lock);
++	present = gpiod_get_value_cansleep(u2->headphone_gpio.desc);
++	if (present < 0) {
++		mutex_unlock(&u2->output_lock);
++		return present;
++	}
++	gpiod_set_value_cansleep(u2->speaker, !present);
++	msleep(50);
++	gpiod_set_value_cansleep(u2->unmute, 1);
++	msleep(200);
++	u2->output_active = true;
++	mutex_unlock(&u2->output_lock);
+ 	return 0;
+ }
+
+@@ -74,6 +116,14 @@
+
+ static int u2_link_init(struct snd_soc_pcm_runtime *rtd)
+ {
++	struct snd_soc_component *codec = snd_soc_rtd_to_codec(rtd, 0)->component;
++	int ret;
++
++	/* Match the factory internal-microphone bias voltage selection. */
++	ret = snd_soc_component_update_bits(codec, WM8983_INPUT_CTRL,
++					    WM8983_MBVSEL, WM8983_MBVSEL);
++	if (ret < 0)
++		return ret;
+ 	/* Binding the card must not automatically unmute the box. */
+ 	snd_soc_dapm_disable_pin(&rtd->card->dapm, "Internal Speaker");
+ 	return snd_soc_dapm_sync(&rtd->card->dapm);
+@@ -88,6 +138,7 @@
+
+ static int u2_late_probe(struct snd_soc_card *card)
+ {
++	struct u2_audio *u2 = snd_soc_card_get_drvdata(card);
+ 	int ret;
+
+ 	ret = snd_soc_limit_volume(card, "Headphone Playback Volume",
+@@ -98,6 +149,36 @@
+ 				   U2_ANALOG_VOLUME_MAX);
+ 	if (ret < 0)
+ 		return ret;
++	ret = snd_soc_card_jack_new(card, "Headphone Jack", SND_JACK_HEADPHONE,
++				    &u2->headphone_jack);
++	if (ret)
++		return ret;
++	u2->headphone_notifier.notifier_call = u2_headphone_changed;
++	snd_soc_jack_notifier_register(&u2->headphone_jack,
++				      &u2->headphone_notifier);
++	ret = devm_add_action_or_reset(card->dev,
++				      u2_unregister_headphone_notifier, u2);
++	if (ret)
++		return ret;
++	u2->headphone_gpio.name = "headphone-detect";
++	u2->headphone_gpio.report = SND_JACK_HEADPHONE;
++	u2->headphone_gpio.debounce_time = 50;
++	/* Active-low polarity is in DT; neither jack may wake the system. */
++	ret = snd_soc_jack_add_gpiods(card->dev, &u2->headphone_jack, 1,
++				     &u2->headphone_gpio);
++	if (ret)
++		return ret;
++	ret = snd_soc_card_jack_new(card, "Microphone Jack", SND_JACK_MICROPHONE,
++				    &u2->microphone_jack);
++	if (ret)
++		return ret;
++	u2->microphone_gpio.name = "microphone-detect";
++	u2->microphone_gpio.report = SND_JACK_MICROPHONE;
++	u2->microphone_gpio.debounce_time = 50;
++	ret = snd_soc_jack_add_gpiods(card->dev, &u2->microphone_jack, 1,
++				     &u2->microphone_gpio);
++	if (ret)
++		return ret;
+ 	dev_info(card->dev, "HP/SPK analogue volume limited to %u/63\n",
+ 		 U2_ANALOG_VOLUME_MAX);
+ 	return 0;
+@@ -195,6 +276,7 @@
+ 	u2 = devm_kzalloc(dev, sizeof(*u2), GFP_KERNEL);
+ 	if (!u2)
+ 		return -ENOMEM;
++	mutex_init(&u2->output_lock);
+ 	u2->unmute = devm_gpiod_get(dev, "unmute", GPIOD_OUT_LOW);
+ 	if (IS_ERR(u2->unmute))
+ 		return dev_err_probe(dev, PTR_ERR(u2->unmute), "unmute GPIO\n");

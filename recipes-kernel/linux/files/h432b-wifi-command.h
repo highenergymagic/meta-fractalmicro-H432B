@@ -110,6 +110,8 @@ static void wifi_command_snapshot(struct sdio_func *func,
 	struct h432b_command_snapshot *s;
 	unsigned int i;
 
+	if (!IS_ENABLED(CONFIG_H432B_WIFI_DIAGNOSTICS))
+		return;
 	if (r->snapshots >= ARRAY_SIZE(r->snapshot))
 		return;
 	s = &r->snapshot[r->snapshots++];

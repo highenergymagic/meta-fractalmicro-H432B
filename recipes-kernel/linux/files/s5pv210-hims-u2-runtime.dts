@@ -10,6 +10,8 @@
 #include "s5pv210-hims-u2-usb-host-test.dtsi"
 #include "s5pv210-hims-u2-external-sd.dtsi"
 #include "s5pv210-hims-u2-suspend.dtsi"
+#include "s5pv210-hims-u2-compass.dtsi"
+#include "s5pv210-hims-u2-audio-input.dtsi"
 
 &{/nand@b0e00000} {
     hims,write-window = <0x00400000 0x1fb00000>;

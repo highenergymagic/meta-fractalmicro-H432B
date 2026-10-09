@@ -34,7 +34,7 @@ static int wifi_net_event(void *context, u8 code, const u8 *data, unsigned int l
 			return -EBADMSG;
 		result = (s32)get_unaligned_le32(data + 24);
 		net->join_result = result;
-		dev_info(&net->func->dev, "association result=%d bytes=%u\n", result, length);
+		dev_dbg(&net->func->dev, "association result=%d bytes=%u\n", result, length);
 		if (!net->connecting)
 			return 0;
 		if (!ether_addr_equal(data + 32, net->bssid))

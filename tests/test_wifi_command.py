@@ -5,6 +5,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1] / "recipes-kernel/linux/files"
 C = (ROOT / "h432b-wifi-command.h").read_text()
 D = (ROOT / "h432b-wifi-transport.c").read_text()
+D += (ROOT / "h432b-wifi-debug.h").read_text()
 
 class WifiCommand(unittest.TestCase):
     def test_command_descriptor(self):

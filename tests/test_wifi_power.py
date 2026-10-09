@@ -7,6 +7,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1] / "recipes-kernel/linux"
 POWER = (ROOT / "files/h432b-wifi-power.h").read_text()
 DRIVER = (ROOT / "files/h432b-wifi-transport.c").read_text()
+DRIVER += (ROOT / "files/h432b-wifi-debug.h").read_text()
 
 
 class WifiPower(unittest.TestCase):

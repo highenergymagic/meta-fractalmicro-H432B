@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-only
+&pinctrl0 {
+	audio_jack_pins: audio-jack-pins {
+		samsung,pins = "gph3-0", "gph3-4";
+		/* Inherited pull-downs falsely report both empty jacks inserted. */
+		samsung,pin-pud = <S5PV210_PIN_PULL_NONE>;
+	};
+};
+
+&{/sound} {
+	pinctrl-names = "default";
+	pinctrl-0 = <&audio_jack_pins>;
+	headphone-detect-gpios = <&gph3 4 GPIO_ACTIVE_LOW>;
+	microphone-detect-gpios = <&gph3 0 GPIO_ACTIVE_LOW>;
+	/* Jack IRQs report state, but do not wake a suspended device. */
+};

@@ -1,0 +1,66 @@
+Subject: [PATCH] ASoC: hims-u2: enable duplex PCM and microphone bias routing
+
+Upstream-Status: Inappropriate [H432B board-specific wiring]
+
+Keep qualified playback and gain ceiling. Bias follows the capture DAPM path;
+no analogue monitoring or automatic recording is enabled.
+
+--- a/sound/soc/samsung/hims-u2-audio.c
++++ b/sound/soc/samsung/hims-u2-audio.c
+@@ -1,9 +1,9 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /*
++ * H432B WM8983 GPIO control and I2S0.
++ * Duplex PCM accepts 44.1 kHz / stereo / S16_LE.
+- * H432B diagnostic playback: CE-proven WM8983 GPIO control and I2S0.
+- * First port accepts only 44.1 kHz / stereo / S16_LE.
+  * CE enables both HP and SPK pairs; their analog wiring is not yet isolated.
++ * External input routing and jack detection remain separate interfaces.
+- * No capture or jack IRQ support yet.
+  */
+ #include <linux/clk.h>
+ #include <linux/delay.h>
+@@ -51,6 +51,7 @@
+
+ static const struct snd_soc_dapm_widget u2_widgets[] = {
+ 	SND_SOC_DAPM_SPK("Internal Speaker", u2_speaker_event),
++	SND_SOC_DAPM_MIC("Internal Mic", NULL),
+ };
+
+ static const struct snd_soc_dapm_route u2_routes[] = {
+@@ -58,10 +59,16 @@
+ 	{ "Internal Speaker", NULL, "HPR" },
+ 	{ "Internal Speaker", NULL, "SPKL" },
+ 	{ "Internal Speaker", NULL, "SPKR" },
++	{ "Internal Mic", NULL, "Mic Bias" },
++	{ "LIP", NULL, "Internal Mic" },
++	{ "LIN", NULL, "Internal Mic" },
++	{ "RIP", NULL, "Internal Mic" },
++	{ "RIN", NULL, "Internal Mic" },
+ };
+
+ static const struct snd_kcontrol_new u2_controls[] = {
+ 	SOC_DAPM_PIN_SWITCH("Internal Speaker"),
++	SOC_DAPM_PIN_SWITCH("Internal Mic"),
+ };
+
+ static int u2_link_init(struct snd_soc_pcm_runtime *rtd)
+@@ -223,7 +230,7 @@
+ 	u2->platform.of_node = u2->cpu.of_node;
+ 	u2->codec.dai_name = "wm8983-hifi";
+ 	u2->link.name = "WM8983";
++	u2->link.stream_name = "H432B PCM";
+-	u2->link.stream_name = "U2 Playback";
+ 	u2->link.cpus = &u2->cpu;
+ 	u2->link.num_cpus = 1;
+ 	u2->link.codecs = &u2->codec;
+@@ -232,7 +239,8 @@
+ 	u2->link.num_platforms = 1;
+ 	u2->link.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
+ 			   SND_SOC_DAIFMT_CBS_CFS;
++	u2->link.symmetric_rate = 1;
++	u2->link.symmetric_sample_bits = 1;
+-	u2->link.playback_only = 1;
+ 	u2->link.init = u2_link_init;
+ 	u2->link.ops = &u2_ops;
+ 	u2->card.name = "OpenH432";

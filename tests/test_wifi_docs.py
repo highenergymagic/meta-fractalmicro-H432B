@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 GUIDE = (ROOT / "docs/wifi.md").read_text()
 RECORD = (ROOT / "docs/wifi-qualification.md").read_text()
 DRIVER = (ROOT / "recipes-kernel/linux/files/h432b-wifi-transport.c").read_text()
+DRIVER += (ROOT / "recipes-kernel/linux/files/h432b-wifi-debug.h").read_text()
 
 
 class WifiDocumentation(unittest.TestCase):
