@@ -66,8 +66,11 @@ struct BrailleDataStruct {
 };
 static int openInput(const char *name) {
   glob_t paths;
-  int found = -1;
-  if (glob("/dev/input/event*", 0, NULL, &paths)) return -1;
+  int found = -1, error = ENODEV;
+  if (glob("/dev/input/event*", 0, NULL, &paths)) {
+    errno = ENODEV;
+    return -1;
+  }
   for (size_t i = 0; i < paths.gl_pathc; i++) {
     char actual[128] = {0};
     struct input_id id;
@@ -83,14 +86,21 @@ static int openInput(const char *name) {
       close(fd);
       close(found);
       found = -1;
-      errno = EEXIST;
+      error = EEXIST;
       break;
     }
     found = fd;
   }
   globfree(&paths);
-  if (found >= 0 && ioctl(found, EVIOCGRAB, 1) < 0) {
+  /* Report why no device is available; close() must not replace errno. */
+  if (found < 0) {
+    errno = error;
+    return -1;
+  }
+  if (ioctl(found, EVIOCGRAB, 1) < 0) {
+    error = errno;
     close(found);
+    errno = error;
     return -1;
   }
   return found;
