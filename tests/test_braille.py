@@ -36,6 +36,15 @@ class Braille(unittest.TestCase):
             self.assertIn(token, patch)
         self.assertNotIn("writel", patch)
 
+    def test_shutdown_lowers_dots_and_removes_supply(self):
+        source = (FILES / "h432b-braille.c").read_text()
+        self.assertIn(".shutdown = display_shutdown,", source)
+        body = source[source.index("static void display_shutdown"):]
+        body = body[:body.index("\n}\n")]
+        self.assertLess(body.index("shift_frame(h, blank)"), body.index("msleep(100)"))
+        self.assertLess(body.index("msleep(100)"), body.index("gpiod_set_value_cansleep(h->enable, 0)"))
+        self.assertIn("h->dead = true;", body)
+
     def test_frame_abi(self):
         source = (FILES / "h432b-braille.c").read_text()
         for token in ("count != sizeof(cells)", "copy_from_user", "-EBUSY",
