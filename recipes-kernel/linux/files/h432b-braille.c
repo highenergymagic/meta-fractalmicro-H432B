@@ -217,6 +217,27 @@ static int display_resume(struct device *dev)
 }
 static DEFINE_SIMPLE_DEV_PM_OPS(display_pm, display_suspend, display_resume);
 
+/* Power-off and reboot: lower every dot and remove cell drive, as on suspend.
+ * The board stays powered after a halt, so the last frame would otherwise
+ * remain raised with the supply on. No later write reaches the GPIOs.
+ */
+static void display_shutdown(struct platform_device *pdev)
+{
+	struct h432_braille *h = platform_get_drvdata(pdev);
+	const u8 blank[32] = {0};
+
+	mutex_lock(&h->lock);
+	if (!h->dead && !h->suspended &&
+	    gpiod_get_direction(h->enable) == 0 &&
+	    gpiod_get_value_cansleep(h->enable) == 1) {
+		shift_frame(h, blank);
+		msleep(100);
+		gpiod_set_value_cansleep(h->enable, 0);
+	}
+	h->dead = true;
+	mutex_unlock(&h->lock);
+}
+
 static const struct of_device_id display_matches[] = {
 	{ .compatible = "fractal,h432b-braille" }, {}
 };
@@ -224,6 +245,7 @@ MODULE_DEVICE_TABLE(of, display_matches);
 static struct platform_driver display_driver = {
 	.probe = display_probe,
 	.remove = display_remove,
+	.shutdown = display_shutdown,
 	.driver = {
 		.name = "h432b-braille",
 		.of_match_table = display_matches,
