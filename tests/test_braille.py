@@ -51,6 +51,16 @@ class Braille(unittest.TestCase):
             self.assertIn(token, source)
         self.assertIn("../hm/scroll.kti", (BACKEND / "all.ktb").read_text())
 
+    def test_backend_reports_missing_input_device(self):
+        source = (BACKEND / "braille.c").read_text()
+        body = source[source.index("static int openInput"):]
+        body = body[:body.index("\n}\n")]
+        self.assertIn("int found = -1, error = ENODEV;", body)
+        self.assertIn("error = EEXIST;", body)
+        self.assertLess(body.index("errno = error;"), body.index("EVIOCGRAB"))
+        grab = body[body.index("EVIOCGRAB"):]
+        self.assertLess(grab.index("error = errno;"), grab.index("close(found);"))
+
     @unittest.skipUnless(os.environ.get("WIFI_RX_NATIVE_CC"), "pinned native C compiler required")
     def test_actual_wire_and_key_helpers(self):
         code = r'''
