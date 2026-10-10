@@ -31,10 +31,19 @@ significant bit first, with the recovered alternating polarity convention.
 
 Enable state must already be active and configured as output by the retained
 boot chain. A Samsung GPIO readback patch exposes the hardware direction
-without rewriting the inherited output. During suspend, the driver shifts a neutral frame, waits 100 ms and drives
+without rewriting the inherited output. During suspend, the driver shifts a
+neutral frame, waits 100 ms and drives
 the enable low. Resume drives it high, waits 100 ms and restores the cached
 frame. Tactile testing confirmed cell power removal and restoration. This is
 not a PMIC transaction or whole-board poweroff; blanking alone is not rail removal.
+
+Kernel shutdown, including reboot, also neutralizes the cells, waits 100 ms
+and lowers the supply before closing the transport. A subsequent boot relies
+on the retained factory boot chain to restore the supply. Software poweroff
+does not implement whole-board electrical shutdown or power-key resume from
+halt; use Reset to restart a halted qualification device. The normal power-key
+action remains suspend/resume.
+
 The standard eight-dot mapping is implemented in the kernel. Qualification
 combined the established six-dot greeting, a dot-7 left-column extension,
 and an operator-confirmed full eight-dot cell.
