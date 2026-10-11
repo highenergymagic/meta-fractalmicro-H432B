@@ -2,11 +2,13 @@
 
 ## Availability
 
-The normal NAND runtime supports power-button deep suspend and resume.
-Suspend removes braille-cell drive power; wake restores the cached display
-and the same interactive session. The power switch is the only enabled wake
-source. Other keys and both three-position selectors have been tested without
-waking the device.
+The normal NAND runtime supports power-button deep suspend/resume and
+[wakeable clean shutdown](#wakeable-shutdown). Suspend removes braille-cell
+drive power; wake restores the cached display and the same interactive
+session. After clean shutdown, power instead requests a fresh boot. Neither
+path electrically isolates the battery. The power switch is the only enabled
+wake source; other keys and both three-position selectors have been tested
+without waking a suspended device.
 
 Peripheral recovery is qualified separately from core suspend:
 
@@ -24,7 +26,7 @@ Peripheral recovery is qualified separately from core suspend:
 These checks cover specific images and individual device cycles, not a combined
 peripheral endurance test. See the
 [validation record](https://github.com/highenergymagic/openh432-build/blob/main/docs/hardware-validation.md#power-button-deep-suspend-qualification)
-for artifacts and methods. Electrical poweroff is not implemented.
+for artifacts and methods.
 
 The factory user-visible off/on behavior is suspend/resume, including removal
 of braille-cell drive power, rather than a cold shutdown. The display driver
@@ -34,14 +36,51 @@ Keypad locking must not suppress the independent power switch.
 ## Power switch and resume contract
 
 The spring-loaded switch is GPH2[6]/EINT22, active high. The device tree uses
-gpio-keys, KEY_POWER and 20 ms debounce. Event delivery is hardware-tested;
-long-hold electrical behavior is not.
+gpio-keys, KEY_POWER and 20 ms debounce. Press/release events and sustained
+holds through the shutdown countdown have been hardware-tested.
 
 Factory wake enters physical 0x40020000 rather than the upstream Linux
 INFORM0 resume pointer. Suspend-enabled runtime builds exclude the bottom
 2 MiB of RAM and decompress at 0x40208000, keeping the fixed wake entry outside
 Linux-managed memory. The bridge refuses incompatible memory layouts and
 requires EINT22 to be the sole enabled external wake source.
+
+## Wakeable shutdown
+
+The runtime device tree enables the board-specific `hims,wakeable-poweroff`
+path. Clean software shutdown followed by power-button fresh startup has
+passed a hardware cycle, as has ordinary suspend/resume on the same kernel.
+Repeated-cycle endurance and shutdown current remain unqualified.
+
+The final kernel power-off handler runs after normal service, filesystem and
+device shutdown. It waits for a stable release of the power switch, masks all
+wake sources except EINT22, and enters retained-memory sleep. The next power
+press dispatches through the factory resume bridge to a stackless hardware
+reset routine, requesting a fresh boot rather than restoring the old session.
+Ordinary suspend retains its separate resume target and session semantics.
+
+This is soft-off, not electrical battery isolation. Retained memory and wake
+logic require power; shutdown current and peripheral rail reduction have not
+been measured. It does not program PMIC voltage/enable registers, replace
+factory firmware, enable RTC alarm wake, or write an additional NAND flag.
+A held shutdown gesture delays sleep until release. Failure to enter sleep
+leaves the device halted, requiring Reset; this is not a wakeable fallback.
+
+## Beeper
+
+The normal runtime describes the passive beeper on GPD0[0]/TOUT0 using the
+upstream `pwm-beeper` driver. PWM channel 0 is reserved as an output; the
+system timer channels remain separate. The input device is named `pwm-beeper`
+and accepts `EV_SND/SND_BELL` (default 1 kHz) and `EV_SND/SND_TONE`.
+The driver stops output on close and during suspend. No ALSA stream or audio
+codec is involved. Warning tones, cancellation and the complete shutdown
+countdown have been verified on hardware. Explicitly disabling the Samsung
+PWM channel also silences any waveform inherited from firmware before normal
+runtime use. Quiet startup after this handoff has been verified; repeated-cycle
+endurance remains unqualified.
+
+Button gesture timing belongs to the OS layer's `FMPowerKey.service`, not the
+kernel driver. Applications should not compete with that service for tones.
 
 ## Real-time clock
 

@@ -12,6 +12,11 @@
 #include "s5pv210-hims-u2-suspend.dtsi"
 #include "s5pv210-hims-u2-compass.dtsi"
 #include "s5pv210-hims-u2-audio-input.dtsi"
+#include "s5pv210-hims-u2-beeper.dtsi"
+
+/ {
+    hims,wakeable-poweroff;
+};
 
 /* Standalone boot must not wait for a host to drain USB serial output.
  * The explicit ttyGS0 maintenance shell remains independent of /dev/console.

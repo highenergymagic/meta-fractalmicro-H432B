@@ -39,10 +39,11 @@ not a PMIC transaction or whole-board poweroff; blanking alone is not rail remov
 
 Kernel shutdown, including reboot, also neutralizes the cells, waits 100 ms
 and lowers the supply before closing the transport. A subsequent boot relies
-on the retained factory boot chain to restore the supply. Software poweroff
-does not implement whole-board electrical shutdown or power-key resume from
-halt; use Reset to restart a halted qualification device. The normal power-key
-action remains suspend/resume.
+on the retained factory boot chain to restore the supply. The runtime's
+wakeable shutdown path allows the power switch to request a fresh boot after
+clean shutdown; it does not restore the previous session or electrically
+isolate the battery. See [power management](power-control.md#wakeable-shutdown)
+and the [OS gesture policy](https://github.com/highenergymagic/meta-fractalmicro-openh432/blob/main/docs/runtime.md#suspend-policy).
 
 The standard eight-dot mapping is implemented in the kernel. Qualification
 combined the established six-dot greeting, a dot-7 left-column extension,

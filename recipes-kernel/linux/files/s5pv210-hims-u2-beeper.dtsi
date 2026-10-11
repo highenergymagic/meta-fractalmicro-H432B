@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/* Passive beeper on TOUT0; channels 3/4 remain the system timers. */
+/ {
+    beeper {
+        compatible = "pwm-beeper";
+        pwms = <&pwm 0 1000000 0>;
+        beeper-hz = <1000>;
+        pinctrl-names = "default";
+        pinctrl-0 = <&h432b_beeper_pin>;
+    };
+};
+
+&pwm {
+    samsung,pwm-outputs = <0>;
+};
+
+&pinctrl0 {
+    h432b_beeper_pin: beeper-pin {
+        samsung,pins = "gpd0-0";
+        samsung,pin-function = <2>;
+        samsung,pin-pud = <0>;
+    };
+};

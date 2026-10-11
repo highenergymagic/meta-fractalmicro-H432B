@@ -1,0 +1,26 @@
+Subject: [PATCH] pwm: samsung: honor disabled state without cached enable
+Upstream-Status: Pending
+
+This driver has no get_state callback, so the initial cached enable state
+does not describe hardware left running by firmware. Apply a requested
+disabled state to the channel even when the cache says disabled. Besides
+stopping an inherited waveform, this initializes disabled_mask so resume
+does not start a channel that was never enabled by its consumer.
+
+--- a/drivers/pwm/pwm-samsung.c
++++ b/drivers/pwm/pwm-samsung.c
+@@ -437,8 +437,12 @@
+ 	}
+
+ 	if (!state->enabled) {
+-		if (enabled)
+-			pwm_samsung_disable(chip, pwm);
++		/*
++		 * No get_state callback: firmware may have left the hardware
++		 * running while the PWM core's initial cached state is disabled.
++		 * Also establish disabled_mask for the resume callback.
++		 */
++		pwm_samsung_disable(chip, pwm);
+
+ 		return 0;
+ 	}

@@ -26,6 +26,7 @@ require h432b-fm.inc
 
 require h432b-braille.inc
 require h432b-input.inc
+require h432b-beeper.inc
 require h432b-battery.inc
 require h432b-usb-host.inc
 require h432b-external-sd.inc

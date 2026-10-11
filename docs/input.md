@@ -15,11 +15,13 @@ do not configure whole banks.
 ## Power switch
 
 GPH2[6]/EINT22 is active high and rests low. gpio-keys reports KEY_POWER
-with 20 ms debounce and no autorepeat. Press/release delivery is verified.
-The normal OS policy requests deep suspend; another power press wakes the
-same session. Other input devices are not wake sources. Electrical poweroff
-and long-hold hardware behavior remain unqualified.
-See [power management](power-control.md).
+with 20 ms debounce and no autorepeat. Press/release delivery and sustained
+holds are verified. The OS layer interprets a tap as suspend and a held press
+as an audible, cancellable shutdown countdown. Power wakes a suspended session
+or requests a fresh boot after wakeable shutdown; other input devices are not
+wake sources. These actions do not electrically isolate the battery.
+See [power management](power-control.md) and the
+[OS gesture policy](https://github.com/highenergymagic/meta-fractalmicro-openh432/blob/main/docs/runtime.md#suspend-policy).
 
 ## Keyboard matrix
 

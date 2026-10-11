@@ -26,6 +26,8 @@ tests are skipped when it is absent. Audio patch-stack checks also require
 | Fixed BCH | Build-time generic/fixed parity and decoding comparison using fetched upstream source |
 | Audio | Positive ALSA constraint results, clock references, zero-fuzz patch application, jack polarity and compiled speaker-gating callbacks |
 | Suspend integration | Runtime recipe, wake-source, display-power and peripheral-retention contracts |
+| Wakeable shutdown | DT opt-in, power-only wake masks, release-before-sleep and separate ARM reset entry contracts |
+| Beeper | Runtime PWM channel ownership, device integration and explicit inherited-output disable contracts |
 | Source contracts | Recipe relationships, protocol constants, bounds and cleanup structure |
 | Wi-Fi receive vectors | Actual C parser: padding, lengths, truncation and CRC/ICV flags |
 | Wi-Fi station vectors | H2C framing, CCMP nonce/header construction and BSS-cache selection |

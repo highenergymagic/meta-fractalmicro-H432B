@@ -1,0 +1,221 @@
+Subject: [PATCH] ARM: s5pv210: support H432B button-wakeable shutdown
+Upstream-Status: Inappropriate [board-specific factory resume contract]
+
+Keep standard device shutdown and ordinary suspend separate. At final
+power-off, arm only EINT22 and use the reserved factory resume bridge to
+request a fresh hardware reset on wake, without restoring Linux context.
+Wait for release of the shutdown gesture before arming the wake source.
+This is retained-memory soft-off, not battery isolation or PMIC cutoff.
+
+--- a/arch/arm/mach-s5pv210/pm.c
++++ b/arch/arm/mach-s5pv210/pm.c
+@@ -9,7 +9,9 @@
+ // Copyright (c) 2006 Simtec Electronics
+ //	Ben Dooks <ben@simtec.co.uk>
+
++#include <linux/delay.h>
+ #include <linux/init.h>
++#include <linux/reboot.h>
+ #include <linux/memblock.h>
+ #include <linux/of.h>
+ #include <linux/suspend.h>
+@@ -156,7 +158,7 @@
+ 	return 1; /* Aborting suspend */
+ }
+
+-static void s5pv210_pm_prepare(void)
++static void s5pv210_prepare_sleep(unsigned long resume)
+ {
+ 	unsigned int tmp;
+
+@@ -167,7 +169,7 @@
+ 	__raw_writel(s5pv210_irqwake_intmask, S5P_WAKEUP_MASK);
+
+ 	/* ensure at least INFORM0 has the resume address */
+-	__raw_writel(__pa_symbol(s5pv210_cpu_resume), S5P_INFORM0);
++	__raw_writel(resume, S5P_INFORM0);
+
+ 	tmp = __raw_readl(S5P_SLEEP_CFG);
+ 	tmp &= ~(S5P_SLEEP_CFG_OSC_EN | S5P_SLEEP_CFG_USBOSC_EN);
+@@ -183,6 +185,11 @@
+ 	tmp = __raw_readl(S5P_OTHERS);
+ 	tmp |= S5P_OTHER_SYSC_INTOFF;
+ 	__raw_writel(tmp, S5P_OTHERS);
++}
++
++static void s5pv210_pm_prepare(void)
++{
++	s5pv210_prepare_sleep(__pa_symbol(s5pv210_cpu_resume));
+
+ 	s3c_pm_do_save(s5pv210_core_save, ARRAY_SIZE(s5pv210_core_save));
+ 	if (h432b_sromc)
+@@ -276,6 +283,138 @@
+ 	.resume		= s5pv210_pm_resume,
+ };
+
++/* Alive-domain registers remain accessible after device_shutdown(). */
++#define H432B_GPIO_PHYS		0xe0200000
++#define H432B_GPH2CON		0xc40
++#define H432B_GPH2DAT		0xc44
++#define H432B_GPH2PUD		0xc48
++#define H432B_EINT_CON2		0xe08
++#define H432B_EINT_MASK		0xf00
++#define H432B_EINT_PEND		0xf40
++#define H432B_POWER_PIN		6
++#define H432B_POWER_EINT		22
++#define H432B_VIC_PHYS		0xf2000000
++#define H432B_VIC_STRIDE		0x100000
++#define H432B_VIC_ENABLE_CLEAR	0x14
++#define H432B_VIC_SOFT_CLEAR	0x1c
++
++static void __iomem *h432b_power_gpio;
++static void __iomem *h432b_vic[4];
++extern void h432b_poweroff_resume(void);
++
++static void h432b_power_off(void)
++{
++	u32 value;
++	unsigned int bank, released = 0;
++
++	/*
++	 * No driver callbacks, sleeping APIs, clock-dependent peripherals or
++	 * PMIC transactions here: userspace and devices have already stopped.
++	 * mdelay uses the calibrated CPU loop, not the shut-down clockevent.
++	 */
++	local_fiq_disable();
++	/*
++	 * Shutdown does not call vic_suspend(). Mask the CPU-facing IRQ/FIQ
++	 * sources as well as PMU wake sources, otherwise a pending timer or
++	 * device interrupt can make WFI return without entering sleep.
++	 * EINT22 wakes through the always-on PMU, not a running VIC handler.
++	 */
++	for (bank = 0; bank < ARRAY_SIZE(h432b_vic); bank++) {
++		writel(~0U, h432b_vic[bank] + H432B_VIC_ENABLE_CLEAR);
++		writel(~0U, h432b_vic[bank] + H432B_VIC_SOFT_CLEAR);
++	}
++	dsb(sy);
++	__raw_writel(~0U, S5P_EINT_WAKEUP_MASK);
++	__raw_writel(~0U, S5P_WAKEUP_MASK);
++
++	/* The held power-off gesture must not also become a wake gesture. */
++	while (released < 20) {
++		if (readl(h432b_power_gpio + H432B_GPH2DAT) &
++		    BIT(H432B_POWER_PIN))
++			released = 0;
++		else
++			released++;
++		mdelay(1);
++	}
++
++	/* GPH2[6] -> EINT22, no pull, high-level wake (active-high switch). */
++	value = readl(h432b_power_gpio + H432B_GPH2CON);
++	value = (value & ~(0xfU << 24)) | (0xfU << 24);
++	writel(value, h432b_power_gpio + H432B_GPH2CON);
++	value = readl(h432b_power_gpio + H432B_GPH2PUD);
++	writel(value & ~(3U << 12), h432b_power_gpio + H432B_GPH2PUD);
++	value = readl(h432b_power_gpio + H432B_EINT_CON2);
++	writel((value & ~(7U << 24)) | BIT(24),
++	       h432b_power_gpio + H432B_EINT_CON2);
++	for (bank = 0; bank < 4; bank++) {
++		writel(0xff, h432b_power_gpio + H432B_EINT_MASK + bank * 4);
++		writel(0xff, h432b_power_gpio + H432B_EINT_PEND + bank * 4);
++	}
++	writel(0xff & ~BIT(H432B_POWER_PIN),
++	       h432b_power_gpio + H432B_EINT_MASK + 8);
++	__raw_writel((u32)~BIT(H432B_POWER_EINT), S5P_EINT_WAKEUP_MASK);
++	__raw_writel(__raw_readl(S5P_WAKEUP_STAT), S5P_WAKEUP_STAT);
++
++	/*
++	 * Reuse only the SoC sleep setup, not the suspend lifecycle. The
++	 * first-stage loader enters our reserved bridge on wake; INFORM0
++	 * selects a physical, stackless reset stub instead of cpu_resume.
++	 * Normal suspend continues selecting s5pv210_cpu_resume independently.
++	 */
++	s5pv210_prepare_sleep(__pa_symbol(h432b_poweroff_resume));
++	flush_cache_all();
++	cpu_suspend(0, s5pv210_cpu_suspend);
++
++	/* A new press racing WFI may abort entry instead of waking from it. */
++	if (readl(h432b_power_gpio + H432B_GPH2DAT) & BIT(H432B_POWER_PIN)) {
++		__raw_writel(1, S5P_SWRESET);
++		dsb(sy);
++	}
++
++	/* Sleep entry failed. Stay halted; never restart the terminated OS. */
++	for (;;)
++		cpu_relax();
++}
++
++static void __init h432b_poweroff_init(void)
++{
++	int ret;
++	unsigned int bank;
++
++	if (!h432b_power_button_only ||
++	    !of_property_read_bool(of_root, "hims,wakeable-poweroff"))
++		return;
++	h432b_power_gpio = ioremap(H432B_GPIO_PHYS, PAGE_SIZE);
++	if (!h432b_power_gpio) {
++		pr_err("H432B: cannot map power-off wake input\n");
++		return;
++	}
++	for (bank = 0; bank < ARRAY_SIZE(h432b_vic); bank++) {
++		h432b_vic[bank] = ioremap(H432B_VIC_PHYS +
++					 bank * H432B_VIC_STRIDE, PAGE_SIZE);
++		if (!h432b_vic[bank]) {
++			pr_err("H432B: cannot map power-off interrupt controller\n");
++			goto unmap;
++		}
++	}
++	ret = register_platform_power_off(h432b_power_off);
++	if (ret) {
++		pr_err("H432B: cannot register wakeable power-off: %d\n", ret);
++		goto unmap;
++	}
++	pr_info("H432B: button-wakeable power-off registered\n");
++	return;
++
++unmap:
++	for (bank = 0; bank < ARRAY_SIZE(h432b_vic); bank++) {
++		if (h432b_vic[bank])
++			iounmap(h432b_vic[bank]);
++		h432b_vic[bank] = NULL;
++	}
++	iounmap(h432b_power_gpio);
++	h432b_power_gpio = NULL;
++}
++
+ /*
+  * Initialization entry point.
+  */
+@@ -285,4 +424,5 @@
+ 		return;
+ 	register_syscore_ops(&s5pv210_pm_syscore_ops);
+ 	suspend_set_ops(&s5pv210_suspend_ops);
+-}
++	h432b_poweroff_init();
++}
+--- a/arch/arm/mach-s5pv210/sleep.S
++++ b/arch/arm/mach-s5pv210/sleep.S
+@@ -30,3 +30,21 @@
+ ENTRY(s5pv210_cpu_resume)
+ 	b	cpu_resume
+ ENDPROC(s5pv210_cpu_resume)
++
++/*
++ * H432B soft-off wake target. Factory BL1 has restored memory access and
++ * enters in ARM state with MMU off. Use physical MMIO, no stack or Linux
++ * context. SWRESET selects the ordinary factory boot path; never branch
++ * directly into EBOOT with partially restored hardware state.
++ */
++	.arm
++	.align 2
++ENTRY(h432b_poweroff_resume)
++	ldr	r0, 1f
++	mov	r1, #1
++	str	r1, [r0]
++	dsb	sy
++0:	b	0b
++	.align 2
++1:	.word	0xe0102000	/* SWRESET */
++ENDPROC(h432b_poweroff_resume)
