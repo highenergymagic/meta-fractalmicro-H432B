@@ -1,0 +1,31 @@
+From: Saravana Kannan <saravanak@google.com>
+Subject: [PATCH] driver core: fw_devlink: Make the error message a bit more useful
+
+Diagnostic backport of the upstream message change. This changes neither
+link construction nor error severity. It identifies the firmware consumer
+behind proxy links so that missing child-device associations can be fixed.
+
+Source: https://lore.kernel.org/all/20241024061347.1771063-4-saravanak@google.com/
+
+Upstream-Status: Backport [https://lore.kernel.org/all/20241024061347.1771063-4-saravanak@google.com/]
+
+Signed-off-by: Saravana Kannan <saravanak@google.com>
+---
+ drivers/base/core.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/base/core.c b/drivers/base/core.c
+--- a/drivers/base/core.c
++++ b/drivers/base/core.c
+@@ -2237,9 +2237,9 @@ static int fw_devlink_create_devlink(struct device *con,
+ 		}
+
+ 		if (con != sup_dev && !device_link_add(con, sup_dev, flags)) {
+-			dev_err(con, "Failed to create device link (0x%x) with %s\n",
+-				flags, dev_name(sup_dev));
++			dev_err(con, "Failed to create device link (0x%x) with supplier %s for %pfwf\n",
++				flags, dev_name(sup_dev), link->consumer);
+ 			ret = -EINVAL;
+ 		}
+
+ 		goto out;

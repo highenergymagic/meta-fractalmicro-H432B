@@ -6,7 +6,7 @@ from pathlib import Path
 WINDOWS={"readonly":None,"scratch":(0x1fee0000,0x20000),"ubi":(0x400000,0x1fb00000)}
 
 def apply(text,profile):
-    marker='compatible = "hims,u2-nand-bch";'
+    marker='compatible = "hims,h432b-nand";'
     if text.count(marker)!=1 or "hims,write-window" in text:
         raise ValueError("Expected unmodified single H432B NAND node")
     if profile not in WINDOWS: raise ValueError("Invalid NAND profile")

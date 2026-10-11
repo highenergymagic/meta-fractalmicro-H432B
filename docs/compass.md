@@ -26,12 +26,17 @@ hard-iron or soft-iron compensation. It does not expose the pedometer.
 ## Board integration
 
 The dedicated GPIO I2C bus uses GPB4 for SCL and GPB6 for SDA, with
-7-bit address `0x0f`. GPE1[2] enables the sensor supply.
+7-bit address `0x0f`. A fixed regulator controls GPE1[2] and is connected to
+the silicon driver's `vdd-supply`; the driver contains no board GPIO numbers.
 Measurements use bounded status-register polling. DRDY and interrupt
 pins are not configured as wake sources.
 
 The sensor returns to standby after each read. System suspend disables
-its supply; resume verifies identity before allowing measurements.
+its owned supply reference; resume verifies identity before allowing measurements.
+Regulator errors are propagated, and a failed disable retains its reference
+state so a later cleanup can retry without an unbalanced enable. Shutdown and
+unbind release the supply. The regulator-based integration requires hardware
+requalification; the measurement protocol and delay requirements are unchanged.
 No OTP programming is performed.
 
 ## Qualification

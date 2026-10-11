@@ -22,24 +22,27 @@ It uses Linux GPIO and evdev interfaces on the Sense itself.
 | Data | GPJ1[5] |
 | Clock | GPJ1[4] |
 | Latch | GPJ4[1] |
-| Inherited display enable | GPJ0[3] |
+| Display enable | GPJ0[3] |
 
 The driver claims individual GPIO descriptors. Keyboard scanning uses other
 pins in the same banks; no whole-bank register writes are permitted. Frame
 writes are serialized. The transport sends cells in reverse order, most
 significant bit first, with the recovered alternating polarity convention.
 
-Enable state must already be active and configured as output by the retained
-boot chain. A Samsung GPIO readback patch exposes the hardware direction
-without rewriting the inherited output. During suspend, the driver shifts a
+The driver preserves an active bootloader greeting. If the supply is off or
+its GPIO is still an input, it establishes output-low, acquires the shift
+signals, sends a neutral frame, then enables the supply and waits 100 ms.
+It does not require bootloader power initialization. A Samsung GPIO readback
+patch exposes the hardware direction without rewriting an active output.
+During suspend, the driver shifts a
 neutral frame, waits 100 ms and drives
 the enable low. Resume drives it high, waits 100 ms and restores the cached
 frame. Tactile testing confirmed cell power removal and restoration. This is
 not a PMIC transaction or whole-board poweroff; blanking alone is not rail removal.
 
 Kernel shutdown, including reboot, also neutralizes the cells, waits 100 ms
-and lowers the supply before closing the transport. A subsequent boot relies
-on the retained factory boot chain to restore the supply. The runtime's
+and lowers the supply before closing the transport. Driver unbind uses the
+same neutral-frame and supply-off sequence. The runtime's
 wakeable shutdown path allows the power switch to request a fresh boot after
 clean shutdown; it does not restore the previous session or electrically
 isolate the battery. See [power management](power-control.md#wakeable-shutdown)
@@ -57,7 +60,7 @@ through bit 7 for dot 8. Translation, contractions and cursor rendering
 belong in userspace; these bytes are dot masks, not text or Braille ASCII.
 
 An invalid frame length returns EINVAL without updating the display.
-A competing open returns EBUSY. Writes fail if the inherited enable is low
+A competing open returns EBUSY. Writes fail if the enable is low
 or the device has been removed. Close leaves the last displayed frame intact.
 There is no hardware cell-position readback; a successful write confirms
 that the GPIO sequence completed, not that every physical dot moved.

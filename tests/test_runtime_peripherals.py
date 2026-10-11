@@ -23,7 +23,7 @@ class RuntimePeripherals(unittest.TestCase):
         dt = (FILES / "s5pv210-hims-u2-runtime.dts").read_text()
         for forbidden in ("resume-test", "factory-resume", "wakeup-source", "regulator-min-microvolt"):
             self.assertNotIn(forbidden, recipe + dt)
-        self.assertIn("# CONFIG_SUSPEND is not set",
+        self.assertNotIn("# CONFIG_SUSPEND is not set",
                       (FILES / "u2-battery-test.config").read_text())
 
     def test_external_slot_remains_in_qualified_scope(self):

@@ -1,6 +1,6 @@
 Subject: [PATCH] hims u2 audio
 
-Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
+Upstream-Status: Inappropriate [H432B board-specific audio wiring]
 
 diff --git a/sound/soc/samsung/Kconfig b/sound/soc/samsung/Kconfig
 --- a/sound/soc/samsung/Kconfig
@@ -10,7 +10,7 @@ diff --git a/sound/soc/samsung/Kconfig b/sound/soc/samsung/Kconfig
  if SND_SOC_SAMSUNG
  
 +config SND_SOC_HIMS_U2
-+	tristate "HIMS U2 diagnostic WM8983 playback"
++	tristate "H432B WM8983 audio"
 +	depends on OF && SPI_MASTER && GPIOLIB
 +	select SND_SAMSUNG_I2S
 +	select SND_SOC_WM8983
@@ -32,7 +32,7 @@ diff --git a/sound/soc/samsung/hims-u2-audio.c b/sound/soc/samsung/hims-u2-audio
 new file mode 100644
 --- /dev/null
 +++ b/sound/soc/samsung/hims-u2-audio.c
-@@ -0,0 +1,276 @@
+@@ -0,0 +1,277 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * H432B diagnostic playback: CE-proven WM8983 GPIO control and I2S0.
@@ -107,7 +107,7 @@ new file mode 100644
 +}
 +
 +/*
-+ * User-requested ceiling: floor(63 * 0.80) = 50, -7 dB analogue gain.
++ * Board analogue gain ceiling: floor(63 * 0.80) = 50, -7 dB analogue gain.
 + * Both pairs are limited until the internal amplifier input is isolated.
 + * This limits normal ALSA controls; it is not a calibrated speaker rating.
 + */
@@ -125,7 +125,7 @@ new file mode 100644
 +				   U2_ANALOG_VOLUME_MAX);
 +	if (ret < 0)
 +		return ret;
-+	dev_info(card->dev, "HP/SPK analogue volume limited to %u/63\n",
++	dev_dbg(card->dev, "HP/SPK analogue volume limited to %u/63\n",
 +		 U2_ANALOG_VOLUME_MAX);
 +	return 0;
 +}
@@ -293,6 +293,7 @@ new file mode 100644
 +}
 +
 +static const struct of_device_id u2_audio_of_match[] = {
++	{ .compatible = "hims,h432b-audio" },
 +	{ .compatible = "hims,u2-audio-diagnostic" },
 +	{ }
 +};
@@ -302,10 +303,10 @@ new file mode 100644
 +	.probe = u2_audio_probe,
 +	.shutdown = u2_audio_shutdown,
 +	.driver = {
-+		.name = "hims-u2-audio",
++		.name = "h432b-audio",
 +		.of_match_table = u2_audio_of_match,
 +	},
 +};
 +module_platform_driver(u2_audio_driver);
-+MODULE_DESCRIPTION("HIMS U2 diagnostic WM8983 playback");
++MODULE_DESCRIPTION("H432B WM8983 audio");
 +MODULE_LICENSE("GPL");

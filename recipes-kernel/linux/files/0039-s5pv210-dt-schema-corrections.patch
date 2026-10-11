@@ -1,0 +1,48 @@
+Subject: [PATCH] ARM: dts: samsung: correct S5PV210 I2S and PMU descriptions
+
+Upstream-Status: Pending
+
+Samsung I2S bindings define one DAI selector cell, including primary
+and secondary FIFOs. Permit the existing S5PV210 PMU to host syscon
+children through simple-mfd like the other supported Samsung PMUs.
+
+---
+--- a/Documentation/devicetree/bindings/soc/samsung/exynos-pmu.yaml
++++ b/Documentation/devicetree/bindings/soc/samsung/exynos-pmu.yaml
+@@ -67,6 +67,7 @@
+               - samsung,exynos5250-pmu
+               - samsung,exynos5420-pmu
+               - samsung,exynos5433-pmu
++              - samsung-s5pv210-pmu
+           - const: simple-mfd
+           - const: syscon
+
+--- a/arch/arm/boot/dts/samsung/s5pv210.dtsi
++++ b/arch/arm/boot/dts/samsung/s5pv210.dtsi
+@@ -248,7 +248,7 @@
+ 			samsung,idma-addr = <0xc0010000>;
+ 			pinctrl-names = "default";
+ 			pinctrl-0 = <&i2s0_bus>;
+-			#sound-dai-cells = <0>;
++			#sound-dai-cells = <1>;
+ 			status = "disabled";
+ 		};
+
+@@ -263,7 +263,7 @@
+ 			clocks = <&clocks CLK_I2S1>, <&clocks SCLK_AUDIO1>;
+ 			pinctrl-names = "default";
+ 			pinctrl-0 = <&i2s1_bus>;
+-			#sound-dai-cells = <0>;
++			#sound-dai-cells = <1>;
+ 			status = "disabled";
+ 		};
+
+@@ -278,7 +278,7 @@
+ 			clocks = <&clocks CLK_I2S2>, <&clocks SCLK_AUDIO2>;
+ 			pinctrl-names = "default";
+ 			pinctrl-0 = <&i2s2_bus>;
+-			#sound-dai-cells = <0>;
++			#sound-dai-cells = <1>;
+ 			status = "disabled";
+ 		};
+

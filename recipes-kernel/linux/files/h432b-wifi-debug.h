@@ -62,7 +62,7 @@ out:
 	sample->error = error;
 	sample->cleanup_error = cleanup;
 	dev_dbg(&func->dev, "transport sample complete: error=%d cleanup=%d\n",
-		 error, cleanup);
+		error, cleanup);
 }
 
 static ssize_t sample_store(struct device *dev, struct device_attribute *attr,
@@ -100,7 +100,7 @@ static ssize_t result_show(struct device *dev, struct device_attribute *attr,
 		size = sysfs_emit(buf, "idle\n");
 	else
 		size = sysfs_emit(buf,
-			"error=%d cleanup=%d cmd52_before=%*ph cmd53=%*ph cmd52_after=%*ph\n",
+				  "error=%d cleanup=%d cmd52_before=%*ph cmd53=%*ph cmd52_after=%*ph\n",
 			sample->error, sample->cleanup_error,
 			SAMPLE_BYTES, sample->before, SAMPLE_BYTES, sample->bulk,
 			SAMPLE_BYTES, sample->after);
@@ -148,7 +148,7 @@ out:
 	sdio_release_host(func);
 	r->error = error;
 	dev_dbg(dev, "power test: error=%d cleanup=%d warm=%d step=%u\n",
-		 r->error, r->cleanup, r->warm, r->step);
+		r->error, r->cleanup, r->warm, r->step);
 	mutex_unlock(&sample->lock);
 	/* Register changes persist; no unsupported rollback sequence is attempted. */
 	return error ? error : r->cleanup ? r->cleanup : count;
@@ -156,7 +156,7 @@ out:
 static DEVICE_ATTR_WO(power_init);
 
 static ssize_t power_result_show(struct device *dev, struct device_attribute *attr,
-				  char *buf)
+				 char *buf)
 {
 	struct h432b_wifi_sample *sample = sdio_get_drvdata(dev_to_sdio_func(dev));
 	struct h432b_power_result *r = &sample->power;
@@ -167,7 +167,7 @@ static ssize_t power_result_show(struct device *dev, struct device_attribute *at
 		size = sysfs_emit(buf, "idle\n");
 	else
 		size = sysfs_emit(buf,
-			"error=%d cleanup=%d warm=%d step=%u before=%04x,%04x,%04x after=%04x,%04x,%04x command=%04x verify=%04x\n",
+				  "error=%d cleanup=%d warm=%d step=%u before=%04x,%04x,%04x after=%04x,%04x,%04x command=%04x verify=%04x\n",
 			r->error, r->cleanup, r->warm, r->step,
 			r->before[0], r->before[1], r->before[2],
 			r->after[0], r->after[1], r->after[2],
@@ -210,7 +210,7 @@ static ssize_t firmware_load_store(struct device *dev, struct device_attribute *
 				       sysfs_streq(buf, "full"));
 		r->error = error;
 		dev_dbg(dev, "firmware memory: error=%d cleanup=%d stage=%u bytes=%u cpu=%04x\n",
-			 error, r->cleanup, r->stage, r->bytes, r->cpu);
+			error, r->cleanup, r->stage, r->bytes, r->cpu);
 	}
 	release_firmware(fw);
 	if (!error)
@@ -224,7 +224,7 @@ unlock:
 static DEVICE_ATTR_WO(firmware_load);
 
 static ssize_t firmware_result_show(struct device *dev, struct device_attribute *attr,
-				     char *buf)
+				    char *buf)
 {
 	struct h432b_wifi_sample *sample = sdio_get_drvdata(dev_to_sdio_func(dev));
 	struct h432b_fw_result *r = &sample->firmware;
@@ -235,7 +235,7 @@ static ssize_t firmware_result_show(struct device *dev, struct device_attribute 
 		size = sysfs_emit(buf, "idle\n");
 	else
 		size = sysfs_emit(buf,
-			"error=%d cleanup=%d stage=%u bytes=%u packets=%u version=%04x initial=%04x imem=%04x emem=%04x cpu=%04x dmem=%04x ready=%04x boot_source=%02x\n",
+				  "error=%d cleanup=%d stage=%u bytes=%u packets=%u version=%04x initial=%04x imem=%04x emem=%04x cpu=%04x dmem=%04x ready=%04x boot_source=%02x\n",
 			r->error, r->cleanup, r->stage, r->bytes, r->packets,
 			r->version, r->initial, r->imem, r->emem, r->cpu,
 			r->dmem, r->ready, r->boot_source);
@@ -287,7 +287,7 @@ static ssize_t power_ack_result_show(struct device *dev,
 		size = sysfs_emit(buf, "idle\n");
 	else
 		size = sysfs_emit(buf,
-			"error=%d cleanup=%d irq_error=%d native=%d callbacks=%u saved_mask=%04x armed_mask=%04x status=%04x final_status=%04x old_request=%02x request=%02x before=%02x reply=%02x final_reply=%02x\n",
+				  "error=%d cleanup=%d irq_error=%d native=%d callbacks=%u saved_mask=%04x armed_mask=%04x status=%04x final_status=%04x old_request=%02x request=%02x before=%02x reply=%02x final_reply=%02x\n",
 			r->error, r->cleanup, r->irq_error, r->native, r->callbacks,
 			r->saved_mask, r->armed_mask, r->status, r->final_status,
 			r->old_request, r->request, r->before, r->reply, r->final_reply);
@@ -339,7 +339,7 @@ static ssize_t event_result_show(struct device *dev,
 		size = sysfs_emit(buf, "idle\n");
 	else
 		size = sysfs_emit(buf,
-			"error=%d cleanup=%d baseline=%04x blocks=%04x after=%04x status=%04x final_status=%04x bytes=%u events=%u first_code=%u first_seq=%u first_length=%u head=%*ph\n",
+				  "error=%d cleanup=%d baseline=%04x blocks=%04x after=%04x status=%04x final_status=%04x bytes=%u events=%u first_code=%u first_seq=%u first_length=%u head=%*ph\n",
 			r->error, r->cleanup, r->baseline, r->blocks, r->after,
 			r->status, r->final_status, r->bytes, r->events,
 			r->first_code, r->first_seq, r->first_length, 64, r->head);
@@ -403,7 +403,7 @@ static ssize_t command_result_show(struct device *dev,
 		size = sysfs_emit(buf, "idle\n");
 	else
 		size = sysfs_emit(buf,
-			"error=%d cleanup=%d sent=%d matched=%d replies=%u reply_length=%u batches=%u events=%u debug=%u bytes=%u consumed=%04x port_seq=%u event_seq=%u pages=%u,%u status=%04x,%04x reply=%*ph debug_head=%*ph\n",
+				  "error=%d cleanup=%d sent=%d matched=%d replies=%u reply_length=%u batches=%u events=%u debug=%u bytes=%u consumed=%04x port_seq=%u event_seq=%u pages=%u,%u status=%04x,%04x reply=%*ph debug_head=%*ph\n",
 			r->error, r->cleanup, r->sent, r->matched, r->replies,
 			r->reply_length, r->batches,
 			r->events, r->debug_events, r->bytes, r->consumed,
@@ -451,13 +451,13 @@ static ssize_t network_start_store(struct device *dev, struct device_attribute *
 	if (!sysfs_streq(buf, "1"))
 		return -EINVAL;
 	mutex_lock(&owner->lock);
-	if (owner->command.attempted || owner->event.attempted || owner->net)
+	if (owner->command.attempted || owner->event.attempted || owner->net) {
 		error = -EALREADY;
-	else if (owner->firmware.stage != 12 || owner->firmware.error ||
+	} else if (owner->firmware.stage != 12 || owner->firmware.error ||
 		 owner->firmware.cleanup || owner->power.warm ||
-		 !owner->ack.attempted || owner->ack.error || owner->ack.cleanup)
+		 !owner->ack.attempted || owner->ack.error || owner->ack.cleanup) {
 		error = -EAGAIN;
-	else {
+	} else {
 		owner->command.attempted = true;
 		error = wifi_net_register(func, owner);
 		owner->command.error = error;

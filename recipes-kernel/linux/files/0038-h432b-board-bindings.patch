@@ -1,0 +1,195 @@
+Subject: [PATCH] dt-bindings: describe H432B storage and audio interfaces
+
+Upstream-Status: Pending
+
+Document exact board resources and downstream qualification properties.
+
+---
+--- /dev/null
++++ b/Documentation/devicetree/bindings/mtd/hims,h432b-nand.yaml
+@@ -0,0 +1,72 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/mtd/hims,h432b-nand.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: H432B factory-compatible NAND controller interface
++
++maintainers:
++  - Freya Fractal <24643711+highenergymagic@users.noreply.github.com>
++
++description: |
++  Board interface for the S5PV210 NAND controller with a single 512 MiB,
++  8-bit device and factory-compatible BCH-8/OOB layout. Factory boot data
++  occupies the first 4 MiB and the factory bad-block table occupies the last
++  1 MiB. These regions are never writable through this interface. The
++  controller timing and enable state are inherited from the factory loader.
++  The historical raw reader is a separate, read-only diagnostic interface.
++
++properties:
++  compatible:
++    oneOf:
++      - const: hims,h432b-nand
++      - const: hims,u2-nand-bch
++        deprecated: true
++      - const: hims,u2-nand-readonly
++        deprecated: true
++
++  reg:
++    maxItems: 1
++
++  clocks:
++    items:
++      - description: NFCON controller clock
++      - description: NANDXL interface gate required by the H432B register aperture
++
++  clock-names:
++    items:
++      - const: nand
++      - const: bus
++
++  hims,write-window:
++    $ref: /schemas/types.yaml#/definitions/uint32-array
++    description: |
++      Byte offset and length of the writable NAND area. Both values must
++      be aligned to the 128 KiB erase size. The complete window must lie
++      between the protected factory boot and bad-block-table regions.
++      Omission makes the complete device read-only for qualification.
++    items:
++      - minimum: 4194304
++        maximum: 535691264
++        multipleOf: 131072
++      - minimum: 131072
++        maximum: 531628032
++        multipleOf: 131072
++
++required:
++  - compatible
++  - reg
++  - clocks
++  - clock-names
++
++allOf:
++  - if:
++      properties:
++        compatible:
++          const: hims,u2-nand-readonly
++    then:
++      properties:
++        hims,write-window: false
++
++additionalProperties: false
+--- /dev/null
++++ b/Documentation/devicetree/bindings/sound/hims,h432b-audio.yaml
+@@ -0,0 +1,76 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/sound/hims,h432b-audio.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: H432B WM8983 audio card
++
++maintainers:
++  - Freya Fractal <24643711+highenergymagic@users.noreply.github.com>
++
++description: |
++  H432B board audio wiring between the Samsung I2S controller and a WM8983
++  codec. The card owns the amplifier/mute outputs and board clock topology;
++  codec control is provided by a separate SPI bus device. Jack detectors
++  are optional and do not constitute wake sources.
++
++properties:
++  compatible:
++    oneOf:
++      - const: hims,h432b-audio
++      - const: hims,u2-audio-diagnostic
++        deprecated: true
++
++  hims,i2s-controller:
++    $ref: /schemas/types.yaml#/definitions/phandle
++    description: Samsung I2S controller providing the primary playback/capture DAI.
++
++  hims,audio-codec:
++    $ref: /schemas/types.yaml#/definitions/phandle
++    description: WM8983 codec control device.
++
++  unmute-gpios:
++    maxItems: 1
++    description: Asserted to unmute the board audio path.
++
++  speaker-gpios:
++    maxItems: 1
++    description: Asserted to enable the speaker amplifier.
++
++  headphone-detect-gpios:
++    maxItems: 1
++    description: Asserted when a plug is present in the headphone jack.
++
++  microphone-detect-gpios:
++    maxItems: 1
++    description: Asserted when a plug is present in the microphone jack.
++
++  clocks:
++    items:
++      - description: Audio PLL output
++      - description: Audio-subsystem source mux
++      - description: I2S source mux
++      - description: Audio bus divider
++      - description: I2S functional clock
++      - description: DMA request path clock
++
++  clock-names:
++    items:
++      - const: epll
++      - const: audmux
++      - const: i2smux
++      - const: bus
++      - const: i2s
++      - const: dma-request
++
++required:
++  - compatible
++  - hims,i2s-controller
++  - hims,audio-codec
++  - unmute-gpios
++  - speaker-gpios
++  - clocks
++  - clock-names
++
++additionalProperties: false
+--- a/Documentation/devicetree/bindings/arm/samsung/samsung-boards.yaml
++++ b/Documentation/devicetree/bindings/arm/samsung/samsung-boards.yaml
+@@ -31,6 +31,7 @@
+         items:
+           - enum:
+               - aesop,torbreck                  # aESOP Torbreck based on S5PV210
++              - hims,braillesense-u2            # HIMS H432B BrailleSense U2
+               - samsung,aquila                  # Samsung Aquila based on S5PC110
+               - samsung,goni                    # Samsung Goni based on S5PC110
+               - yic,smdkc110                    # YIC System SMDKC110 based on S5PC110
+--- a/Documentation/devicetree/bindings/mmc/samsung,s3c6410-sdhci.yaml
++++ b/Documentation/devicetree/bindings/mmc/samsung,s3c6410-sdhci.yaml
+@@ -34,6 +34,21 @@
+
+   interrupts:
+     maxItems: 1
++
++  hims,rtl8712-cis-end-quirk:
++    type: boolean
++    description: |
++      The H432B onboard RTL8712S function has a malformed CIS without an END
++      tuple after its valid function-extension tuple. Permit that exact
++      vendor, device, function and tuple layout to terminate enumeration at
++      the validated FUNCE boundary. This does not relax other CIS errors.
++
++  hims,read-only-probe:
++    type: boolean
++    description: |
++      H432B storage-qualification profile. Force block storage attached to
++      this host read-only while identifying hardware. Not used in the normal
++      NAND runtime; it does not change SDIO register access permissions.
+
+ required:
+   - compatible

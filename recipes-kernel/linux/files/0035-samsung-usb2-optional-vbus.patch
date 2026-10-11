@@ -1,0 +1,26 @@
+Subject: [PATCH] phy: samsung-usb2: acquire optional VBUS supply as optional
+
+The binding does not require vbus-supply and the power callbacks already
+support an absent regulator. Use the optional consumer API so that absence
+does not create a dummy regulator. Propagate actual supplier errors rather
+than silently ignoring everything except probe deferral.
+
+Upstream-Status: Pending
+
+diff --git a/drivers/phy/samsung/phy-samsung-usb2.c b/drivers/phy/samsung/phy-samsung-usb2.c
+--- a/drivers/phy/samsung/phy-samsung-usb2.c
++++ b/drivers/phy/samsung/phy-samsung-usb2.c
+@@ -212,9 +212,10 @@ static int samsung_usb2_phy_probe(struct platform_device *pdev)
+-	drv->vbus = devm_regulator_get(dev, "vbus");
++	drv->vbus = devm_regulator_get_optional(dev, "vbus");
+ 	if (IS_ERR(drv->vbus)) {
+ 		ret = PTR_ERR(drv->vbus);
+-		if (ret == -EPROBE_DEFER)
+-			return ret;
++		if (ret != -ENODEV)
++			return dev_err_probe(dev, ret,
++					     "Failed to get VBUS supply\n");
+ 		drv->vbus = NULL;
+ 	}
+ 
+ 	for (i = 0; i < drv->cfg->num_phys; i++) {

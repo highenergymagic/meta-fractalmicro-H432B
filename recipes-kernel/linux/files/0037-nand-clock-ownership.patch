@@ -1,0 +1,88 @@
+From: Fractal Microsystems <opensource@fractalmicro.org>
+Subject: [PATCH] mtd: rawnand: h432b: own the NAND controller clock
+
+The factory loader leaves NFCON enabled, but inherited gate state is not
+a Linux clock reference. Claim the controller clock before any register
+access in both the normal BCH driver and the opt-in raw inspector.
+Managed lifetime keeps it enabled until NAND removal and balances probe
+failures, including deferred clock-provider registration.
+
+The H432B integration also requires the NANDXL interface gate for access to
+the raw NAND register aperture. With NFCON held on, clearing NANDXL makes
+NFCONF/NFCONT read zero; restoring only NANDXL restores their original values.
+The factory kernel enables both gates. Own both dependencies rather than
+retaining a global clk_ignore_unused override. This is a board-qualified
+dependency, not a claim about every S5PV210 integration. Controller timings
+and the protected factory/BBT layout are unchanged.
+
+Upstream-Status: Inappropriate [board NAND drivers are not upstream]
+Signed-off-by: Fractal Microsystems <opensource@fractalmicro.org>
+
+diff --git a/drivers/mtd/nand/raw/hims-u2-nand.c b/drivers/mtd/nand/raw/hims-u2-nand.c
+--- a/drivers/mtd/nand/raw/hims-u2-nand.c
++++ b/drivers/mtd/nand/raw/hims-u2-nand.c
+@@ -4,6 +4,7 @@
+  * Factory boot records use a different ECC format and must be read raw.
+  * A RAM BBT preserves the factory bad-block tables in the reserved tail.
+  */
++#include <linux/clk.h>
+ #include <linux/delay.h>
+ #include <linux/io.h>
+ #include <linux/iopoll.h>
+@@ -226,6 +227,7 @@
+ 	struct device *dev = &pdev->dev;
+ 	struct u2_nand *n;
+ 	struct mtd_info *mtd;
++	struct clk *clk;
+ 	u32 window[2];
+ 	int ret;
+
+@@ -235,6 +237,14 @@
+ 	n->regs = devm_platform_ioremap_resource(pdev, 0);
+ 	if (IS_ERR(n->regs))
+ 		return PTR_ERR(n->regs);
++	clk = devm_clk_get_enabled(dev, "nand");
++	if (IS_ERR(clk))
++		return dev_err_probe(dev, PTR_ERR(clk),
++				     "failed to enable NAND controller clock\n");
++	clk = devm_clk_get_enabled(dev, "bus");
++	if (IS_ERR(clk))
++		return dev_err_probe(dev, PTR_ERR(clk),
++				     "failed to enable NAND interface clock\n");
+ 	if (!(readl(n->regs + NFCONT) & BIT(0)) ||
+ 	    (readl(n->regs + NFCONF) & BIT(0)))
+ 		return dev_err_probe(dev, -ENODEV,
+diff --git a/drivers/mtd/nand/raw/hims-u2-nand-ro.c b/drivers/mtd/nand/raw/hims-u2-nand-ro.c
+--- a/drivers/mtd/nand/raw/hims-u2-nand-ro.c
++++ b/drivers/mtd/nand/raw/hims-u2-nand-ro.c
+@@ -4,6 +4,7 @@
+  * Inherits controller timings and pinmux. ECC is deliberately disabled, so
+  * this interface must not be used to read a corrected filesystem image.
+  */
++#include <linux/clk.h>
+ #include <linux/delay.h>
+ #include <linux/io.h>
+ #include <linux/iopoll.h>
+@@ -115,6 +116,7 @@
+ 	struct device *dev = &pdev->dev;
+ 	struct u2_nand *n;
+ 	struct mtd_info *mtd;
++	struct clk *clk;
+ 	int ret;
+
+ 	n = devm_kzalloc(dev, sizeof(*n), GFP_KERNEL);
+@@ -123,6 +125,14 @@
+ 	n->regs = devm_platform_ioremap_resource(pdev, 0);
+ 	if (IS_ERR(n->regs))
+ 		return PTR_ERR(n->regs);
++	clk = devm_clk_get_enabled(dev, "nand");
++	if (IS_ERR(clk))
++		return dev_err_probe(dev, PTR_ERR(clk),
++				     "failed to enable NAND controller clock\n");
++	clk = devm_clk_get_enabled(dev, "bus");
++	if (IS_ERR(clk))
++		return dev_err_probe(dev, PTR_ERR(clk),
++				     "failed to enable NAND interface clock\n");
+ 	if (!(readl(n->regs + NFCONT) & BIT(0)) ||
+ 	    (readl(n->regs + NFCONF) & BIT(0)))
+ 		return dev_err_probe(dev, -ENODEV,

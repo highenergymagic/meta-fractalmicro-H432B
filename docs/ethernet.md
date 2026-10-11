@@ -87,6 +87,11 @@ Linux exposes the effective Ethernet address at
 This board ID is **not a verified manufacturer serial number**. No
 `serial-number` property is fabricated. The stock processor-model-derived
 boot name and a removable battery's identity are not suitable system serials.
+Linux-capable U-Boot stages use the same MAC-derived board ID for their
+maintenance USB serial and the Linux ACM console serial. Missing or invalid
+factory identity leaves those serials absent, not a shared fabricated value.
+The USB serial identifies the software's board-ID derivation; it does not
+change the distinction from a manufacturer serial number.
 Per-device addresses and identifiers must never be embedded in published
 sources or generic firmware artifacts.
 

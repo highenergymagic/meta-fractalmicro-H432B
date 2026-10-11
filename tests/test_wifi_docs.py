@@ -24,16 +24,20 @@ class WifiDocumentation(unittest.TestCase):
     def test_guide_and_validation_are_separate(self):
         self.assertIn("(wifi-qualification.md)", GUIDE)
         self.assertIn("(wifi.md)", RECORD)
-        for section in ("## Scope and artifacts", "## Results", "## Limits"):
+        for section in ("## Scope", "## Rate-adapting NAND station profile",
+                        "## Historical basic-rate station profile",
+                        "### Limits of this profile"):
             self.assertIn(section, RECORD)
+        self.assertIn("not a measured\ntransmit PHY rate", RECORD)
+        self.assertIn("do not qualify the current driver", RECORD)
         self.assertNotIn("## Pending firmware-event inspection", RECORD)
         self.assertNotIn("SHA256", GUIDE)
 
     def test_limitations_remain_explicit(self):
-        for phrase in ("PMF", "not implemented", "empty work invocations",
-                       "fixed 1 Mb/s", "volatile writable overlay",
+        for phrase in ("PMF", "not supported", "Scans while associated",
+                       "not a hardware qualification claim", "volatile",
                        "does not contain, fetch or redistribute",
-                       "do not emulate the radio",
+                       "do not\nreplace radio",
                        "mutually exclusive"):
             self.assertIn(phrase, GUIDE)
 

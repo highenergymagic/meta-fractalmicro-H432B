@@ -2,7 +2,7 @@
 require linux-h432b-base.inc
 SUMMARY = "H432B NAND runtime kernel with reboot mode and qualified GPS support"
 SRC_URI += "file://s5pv210-hims-u2-reboot-test.dts file://u2-reboot-test.config file://s5pv210-hims-u2-gps.dtsi \
-    file://h432b-gps-power.c file://0014-h432b-gps-power.patch file://u2-gps.config"
+    file://h432b-gps-power.c file://0014-h432b-gps-power.patch file://0014a-h432b-gps-binding.patch file://u2-gps.config"
 
 do_configure:append() {
     install -m 0644 ${UNPACKDIR}/h432b-gps-power.c ${S}/drivers/misc/

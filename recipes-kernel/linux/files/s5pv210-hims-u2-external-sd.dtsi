@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /* Removable slot: qualified reads/hotplug; write support not yet qualified. */
 &pinctrl0 {
-    external_sd_detect: external-sd-detect {
+    external_sd_detect: external-sd-detect-pins {
         samsung,pins = "gph3-1";
         samsung,pin-function = <0>;
         samsung,pin-pud = <0>;

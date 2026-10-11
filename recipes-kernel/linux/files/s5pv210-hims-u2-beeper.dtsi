@@ -15,7 +15,7 @@
 };
 
 &pinctrl0 {
-    h432b_beeper_pin: beeper-pin {
+    h432b_beeper_pin: beeper-pins {
         samsung,pins = "gpd0-0";
         samsung,pin-function = <2>;
         samsung,pin-pud = <0>;

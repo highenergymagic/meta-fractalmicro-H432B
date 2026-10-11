@@ -36,8 +36,10 @@ settings; the runtime's separate power-management integration enables suspend. T
 telemetry testing and uses the installed slot-B root through its minimal
 handoff.
 
-The battery-inventory platform device exposes a root-readable snapshot
-attribute. Reading it initiates two CRC-checked ROM reads, then, for supported
+Only the diagnostic profile enables `CONFIG_H432B_BATTERY_DEBUG`. It exposes
+root-readable `snapshot` and `registers` files in debugfs under
+`battery-inventory/`; these are not stable sysfs interfaces and are absent from
+the normal NAND kernel. Reading `snapshot` initiates two CRC-checked ROM reads, then, for supported
 family codes, two capacity reads with agreement and range checks.
 Transactions use the identified ROM, not broadcast register access.
 A family code is not necessarily an exact model identifier.
@@ -49,14 +51,15 @@ It reports GPIO levels and transport errors even when battery readings fail.
 ## Raw measurement snapshot
 
 The driver also provides
-`/sys/devices/platform/battery-inventory/registers`, readable only by root.
+`/sys/kernel/debug/battery-inventory/registers` in the diagnostic profile,
+readable only by root after mounting debugfs.
 Each explicit read verifies the single-drop ROM twice and accepts family
 0x32 before selecting that device. It reads two passes of fixed windows
 0x01–0x1b (status/capacity/measurements) and 0x60–0x7c (parameters).
 It does not export the unique ROM, read the user-identity area, or accept
 an arbitrary address from userspace.
 
-The parameter bytes are the current EEPROM **shadow RAM**: no Recall, Copy,
+The parameter bytes are the current EEPROM shadow RAM: no Recall, Copy,
 Write Data or charger-control command is issued. `parameters_equal` reports
 agreement between passes. Register data has no transport CRC; two passes
 are evidence for comparison, not proof of error-free data. Measurements may
@@ -114,8 +117,19 @@ charging, even at 100 percent: the driver does not invent a charge-complete
 signal. No exact chip model, health, presence, serial number or estimated runtime
 is advertised.
 
-The driver has no writable power_supply properties. Device removal cancels
-polling before unregistering the supply and releasing GPIOs.
+The driver has no writable power_supply properties: it monitors the gauge and
+board power indications, rather than replacing the autonomous charger.
+`CONFIG_H432B_BATTERY` selects it in the power-supply subsystem. Matching is by
+the battery device's compatible string, not the machine's product name.
+Board wiring uses the canonical `hims,h432b-battery` compatible. The original
+`fractal,h432b-battery-inventory` alias remains accepted for existing device
+trees; driver and power_supply names are unchanged.
+
+System suspend, shutdown and device removal cancel polling and release the bus.
+The cache becomes unavailable at suspend; resume queues a fresh sample instead
+of reporting a pre-sleep measurement. Explicit diagnostic reads return EBUSY
+while the transport is stopped. Device removal stops the worker before
+unregistering the supply and releasing GPIOs.
 A NAND-runtime observation with AC and USB connected reported Charging and
 sustained positive gauge current. This does not establish USB-only charging,
 a complete charge cycle or automatic low-battery policy.

@@ -34,13 +34,13 @@
 };
 
 &pinctrl0 {
-    wifi_power_sleep: wifi-power-sleep {
+    wifi_power_sleep: wifi-power-sleep-pins {
         samsung,pins = "gpe0-3";
         /* MMC_PM_KEEP_POWER also requires the board enable to stay high. */
         samsung,pin-con-pdn = <1>;
         samsung,pin-pud-pdn = <0>;
     };
-    braille_power_sleep: braille-power-sleep {
+    braille_power_sleep: braille-power-sleep-pins {
         samsung,pins = "gpj0-3";
         /* Drive low during sleep; do not alter its live mux/output. */
         samsung,pin-con-pdn = <0>;

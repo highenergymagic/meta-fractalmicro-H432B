@@ -42,9 +42,16 @@ class WifiNetwork(unittest.TestCase):
                         stop.index("wifi_net_finish_scan(net, true)"))
         self.assertIn("cfg80211_scan_done(request, &info)", NET)
         self.assertIn("device_remove_group", DRIVER)
-        self.assertIn("wifi_net_unregister(sdio_get_drvdata(func))", DRIVER)
+        self.assertIn("wifi_net_unregister(owner)", DRIVER)
 
     def test_persistent_wire_state_is_not_reset_per_scan(self):
+        runtime = NET.split("static int wifi_net_run_scan", 1)[1].split(
+            "static void wifi_net_scan_work", 1)[0]
+        self.assertNotIn("wifi_command_test", NET)
+        self.assertNotIn("set opmode:", runtime)
+        self.assertIn("wifi_h2c_send(net->func, r, 18", runtime)
+        self.assertIn("while (!r->survey_done)", runtime)
+        self.assertIn("WRITE_ONCE(net->scan_aborted, true)", NET)
         for token in ("r->persistent && r->stream_started ? r->next_command : 1",
                       "r->next_command = (r->command_seq + 1) & 0x7f",
                       "if (!r->persistent || !r->stream_started)",

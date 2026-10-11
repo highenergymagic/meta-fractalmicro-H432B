@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 """Firmware loader scope and bounds contracts; not a hardware emulator."""
 from pathlib import Path
+import os
+import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1] / "recipes-kernel/linux"
@@ -22,8 +25,8 @@ class WifiFirmware(unittest.TestCase):
         self.assertIn("transfer = ALIGN(length + 32, 512)", FW)
         self.assertIn("memset(packet, 0, transfer)", FW)
         self.assertIn("length == remaining ? BIT(28) : 0", FW)
-        self.assertIn("mmc_io_rw_extended(func->card, 1, func->num", FW)
-        self.assertIn("WIFI_FW_FIFO, 1, packet, transfer / 512, 512", FW)
+        self.assertIn("wifi_sdio_blocks(func, true, WIFI_FW_FIFO", FW)
+        self.assertIn("packet, transfer / 512", FW)
         self.assertNotIn("sdio_memcpy_toio(func, WIFI_FW_FIFO", FW)
         self.assertNotIn("sdio_writesb", FW)
         self.assertIn("host->max_blk_count < WIFI_FW_PACKET / 512", FW)
@@ -52,10 +55,43 @@ class WifiFirmware(unittest.TestCase):
         for fragment in ("memset(config, 0, 48)", "config[2] = 0x14",
                          "config[6] = 0x12", "config[0x0e] = 1",
                          "config[0x12] = 2", "config[0x13] = 2",
-                         "config[0x19] = 1", "packet, config, sizeof(config)",
+                         "config[0x19] = 0", "packet, config, sizeof(config)",
                          "60 : 30, 100000", "i <= tries", "if (i != tries)"):
             self.assertIn(fragment, FW)
         self.assertIn('sysfs_streq(buf, "full")', DRIVER)
+
+    def test_native_profile_enforces_ht20_without_changing_rf_topology(self):
+        cc = os.environ.get("WIFI_RX_NATIVE_CC")
+        if not cc:
+            self.skipTest("pinned-container native compiler not configured")
+        config = FW[FW.index("static void wifi_fw_config("):
+                    FW.index("static int wifi_fw_memory(")]
+        source = r"""
+#include <stdint.h>
+#include <string.h>
+#include <assert.h>
+typedef uint8_t u8;
+""" + config + r"""
+int main(void) {
+ u8 bytes[50];
+ memset(bytes, 0xcc, sizeof(bytes));
+ wifi_fw_config(bytes + 1);
+ assert(bytes[0] == 0xcc && bytes[49] == 0xcc);
+ for (unsigned int i = 0; i < 48; i++) {
+  unsigned int expected = i == 2 ? 0x14 : i == 6 ? 0x12 :
+      i == 14 ? 1 : (i == 18 || i == 19) ? 2 : 0;
+  assert(bytes[i + 1] == expected);
+ }
+ return 0;
+}
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            c = Path(directory) / "config.c"
+            exe = Path(directory) / "config"
+            c.write_text(source)
+            subprocess.run([cc, "-std=c11", "-Wall", "-Wextra", "-Werror",
+                            "-fsanitize=undefined", str(c), "-o", str(exe)], check=True)
+            subprocess.run([str(exe)], check=True)
 
     def test_restore_and_no_network_interface(self):
         self.assertIn("sdio_set_block_size(func, saved_blksize)", FW)

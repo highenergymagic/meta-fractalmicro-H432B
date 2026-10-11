@@ -44,7 +44,11 @@ class BatterySupplyTests(unittest.TestCase):
 
     def test_cleanup(self):
         self.assertIn("cancel_delayed_work_sync(&b->poll)", SOURCE)
-        self.assertLess(SOURCE.index("devm_power_supply_register"), SOURCE.index("devm_add_action_or_reset"))
+        probe = SOURCE.split("static int battery_inventory_probe", 1)[1]
+        self.assertLess(probe.index("devm_power_supply_register"),
+                        probe.index("devm_add_action_or_reset(dev, battery_stop_poll"))
+        self.assertLess(probe.index("devm_add_action_or_reset(dev, battery_stop_poll"),
+                        probe.index("battery_debugfs_init"))
         self.assertIn("gpiod_set_value(b->pull_low, 0)", SOURCE)
 
     def test_compiled_policy_tests(self):
@@ -54,7 +58,8 @@ class BatterySupplyTests(unittest.TestCase):
         self.assertIn("-Wall -Wextra -Werror", recipe)
         self.assertIn('CONFIG_POWER_SUPPLY=y', recipe)
         config = (FILES / "u2-battery-test.config").read_text()
-        self.assertIn("# CONFIG_SUSPEND is not set", config)
+        self.assertNotIn("# CONFIG_SUSPEND is not set", config)
+        self.assertIn("CONFIG_H432B_BATTERY=y", config)
 
 if __name__ == "__main__":
     unittest.main()

@@ -34,7 +34,10 @@ class RebootModeContract(unittest.TestCase):
         self.assertIn("mode-normal = <0x48344e4d>", dts)
         self.assertIn("mode-bootloader = <0x48344642>", dts)
         self.assertIn("mode-fastboot = <0x48344642>", dts)
-        self.assertIn('"syscon", "simple-mfd"', dts)
+        self.assertRegex(
+            dts, r'compatible\s*=\s*"samsung-s5pv210-pmu",\s*'
+            r'"simple-mfd",\s*"syscon"\s*;'
+        )
         header = (UB / "files/reboot/bootmode.h").read_text()
         self.assertIn("H432B_MODE_NORMAL 0x48344e4dU", header)
         self.assertIn("H432B_MODE_FASTBOOT 0x48344642U", header)

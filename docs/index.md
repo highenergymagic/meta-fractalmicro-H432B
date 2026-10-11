@@ -38,6 +38,7 @@ is not a promise of availability in the normal runtime.
 ## Verification and sources
 
 - [Offline and device tests](../tests/README.md)
+- [Kernel integration audit](kernel-audit-soc.md)
 - [Wi-Fi qualification](wifi-qualification.md)
 - [Hardware validation records](https://github.com/highenergymagic/openh432-build/blob/main/docs/hardware-validation.md)
 - [Source provenance](provenance.md)

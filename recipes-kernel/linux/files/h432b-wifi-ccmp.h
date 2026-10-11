@@ -34,7 +34,7 @@ static void wifi_ccmp_iv(u8 *iv, u64 pn, u8 index)
  * Heap-backed scatterlist buffers: never map stack data through the crypto API.
  */
 static int wifi_ccmp_crypt(struct h432b_wifi_key *key, u8 *frame,
-			    unsigned int header, unsigned int payload, bool decrypt)
+			   unsigned int header, unsigned int payload, bool decrypt)
 {
 	struct aead_request *request;
 	struct scatterlist sg[2];

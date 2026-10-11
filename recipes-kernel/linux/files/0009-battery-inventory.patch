@@ -1,13 +1,40 @@
-Subject: Build opt-in H432B battery transport inventory
-Upstream-Status: Inappropriate [board qualification experiment]
+Subject: [PATCH] power: supply: integrate H432B battery gauge transport
+Upstream-Status: Pending
 
---- a/drivers/misc/Makefile
-+++ b/drivers/misc/Makefile
-@@ -3,6 +3,7 @@
- # Makefile for misc devices that really don't fit anywhere else.
- #
- 
-+obj-y += h432b-battery-inventory.o
- obj-$(CONFIG_IBM_ASM)		+= ibmasm/
- obj-$(CONFIG_IBMVMC)		+= ibmvmc.o
- obj-$(CONFIG_AD525X_DPOT)	+= ad525x_dpot.o
+Add the board's split-GPIO single-wire transport to power_supply, with
+standard cached telemetry and optional raw snapshots isolated in debugfs.
+
+---
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -9,6 +9,24 @@
+
+ if POWER_SUPPLY
+
++config H432B_BATTERY
++	tristate "H432B battery gauge"
++	depends on GPIOLIB && OF
++	help
++	  Report fuel-gauge and external power-source measurements on the
++	  H432B board. The split GPIO 1-Wire transport is board-specific;
++	  charger configuration and battery policy are not part of this driver.
++	  Applications consume the standard power_supply properties.
++
++config H432B_BATTERY_DEBUG
++	bool "H432B battery raw diagnostic files"
++	depends on H432B_BATTERY && DEBUG_FS
++	help
++	  Expose root-readable raw telemetry snapshots through debugfs.
++	  Not needed by normal power_supply users or runtime charging.
++	  These files provide register and transport analysis, not a stable ABI.
++	  Leave this disabled in normal runtime kernels.
++
+ config POWER_SUPPLY_DEBUG
+ 	bool "Power supply debug"
+ 	help
+--- a/drivers/power/supply/Makefile
++++ b/drivers/power/supply/Makefile
+@@ -1,2 +1,3 @@
+ # SPDX-License-Identifier: GPL-2.0
++obj-$(CONFIG_H432B_BATTERY) += h432b-battery-inventory.o
+ subdir-ccflags-$(CONFIG_POWER_SUPPLY_DEBUG) := -DDEBUG

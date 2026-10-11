@@ -29,22 +29,22 @@
     };
 };
 &pinctrl0 {
-    usb_hub_enable_pin: usb-hub-enable-pin {
+    usb_hub_enable_pin: usb-hub-enable-pins {
         samsung,pins = "gph2-7";
         samsung,pin-function = <1>;
         samsung,pin-pud = <0>;
     };
-    usb12_enable_pin: usb12-enable-pin {
+    usb12_enable_pin: usb12-enable-pins {
         samsung,pins = "gph3-7";
         samsung,pin-function = <1>;
         samsung,pin-pud = <0>;
     };
-    usb3_enable_pin: usb3-enable-pin {
+    usb3_enable_pin: usb3-enable-pins {
         samsung,pins = "gph1-3";
         samsung,pin-function = <1>;
         samsung,pin-pud = <0>;
     };
-    usb_hub_reset_pin: usb-hub-reset-pin {
+    usb_hub_reset_pin: usb-hub-reset-pins {
         samsung,pins = "gpj4-2";
         /* Shared OF node: GPIO consumer sets direction; only apply bias here. */
         samsung,pin-pud = <0>;

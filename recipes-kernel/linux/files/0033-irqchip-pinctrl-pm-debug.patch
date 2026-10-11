@@ -1,0 +1,23 @@
+Subject: [PATCH] irqchip: vic: and pinctrl: exynos: make PM tracing opt-in
+
+Upstream-Status: Pending
+
+Normal suspend/resume and wake-mask programming are not diagnostic events.
+Use dynamic-debug-compatible helpers instead of unconditional printk/debug
+and info records. Error reporting and suspend behavior are unchanged.
+
+diff --git a/drivers/irqchip/irq-vic.c b/drivers/irqchip/irq-vic.c
+--- a/drivers/irqchip/irq-vic.c
++++ b/drivers/irqchip/irq-vic.c
+@@ -105,1 +105,1 @@
+-	printk(KERN_DEBUG "%s: resuming vic at %p\n", __func__, base);
++	pr_debug("%s: resuming vic at %p\n", __func__, base);
+@@ -135,1 +135,1 @@
+-	printk(KERN_DEBUG "%s: suspending vic at %p\n", __func__, base);
++	pr_debug("%s: suspending vic at %p\n", __func__, base);
+diff --git a/drivers/pinctrl/samsung/pinctrl-exynos.c b/drivers/pinctrl/samsung/pinctrl-exynos.c
+--- a/drivers/pinctrl/samsung/pinctrl-exynos.c
++++ b/drivers/pinctrl/samsung/pinctrl-exynos.c
+@@ -445,1 +445,1 @@
+-	pr_info("wake %s for irq %u (%s-%lu)\n", on ? "enabled" : "disabled",
++	pr_debug("wake %s for irq %u (%s-%lu)\n", on ? "enabled" : "disabled",

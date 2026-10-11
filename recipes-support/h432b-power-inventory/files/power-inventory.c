@@ -19,8 +19,11 @@ int main(int argc, char **argv)
     FILE *name = fopen("/sys/class/i2c-dev/i2c-9/name", "r");
     char buf[80] = {0};
     if (!name) { perror("adapter identity"); return 1; }
+    /* Keep diagnostic access compatible with earlier installed device trees.
+     * Bus 9 remains the explicitly aliased PMIC bus, never a scanned adapter. */
     int valid = fgets(buf, sizeof(buf), name) &&
-                !strcmp(buf, "i2c-pmic-inventory\n");
+                (!strcmp(buf, "i2c-pmic\n") ||
+                 !strcmp(buf, "i2c-pmic-inventory\n"));
     fclose(name);
     if (!valid) { fputs("Unexpected adapter; refusing transaction\n", stderr); return 1; }
     int fd = open("/dev/i2c-9", O_RDWR | O_CLOEXEC);

@@ -1,17 +1,23 @@
 Subject: [PATCH] iio: add AMI603 direct-mode sensor integration
-Upstream-Status: Inappropriate [initial board qualification]
+Upstream-Status: Pending
 
+Select the direct-mode IIO sensor driver independently of board GPIO
+wiring. Power is owned through the regulator supplied by device tree.
+
+---
 --- a/drivers/iio/magnetometer/Makefile
 +++ b/drivers/iio/magnetometer/Makefile
-@@ -1,0 +2 @@
+@@ -1,0 +2,1 @@
 +obj-$(CONFIG_AMI603) += ami603.o
 --- a/drivers/iio/magnetometer/Kconfig
 +++ b/drivers/iio/magnetometer/Kconfig
-@@ -1,0 +2,7 @@
+@@ -1,0 +2,9 @@
 +config AMI603
 +	tristate "Aichi AMI603 magnetometer and accelerometer"
-+	depends on I2C
++	depends on I2C && REGULATOR
 +	help
 +	  Direct-mode readings from the six-axis AMI603 sensor.
 +	  This does not provide calibrated compass headings.
++	  Factory sensitivity and offsets accompany the raw IIO channels.
++	  The driver polls completion and balances its regulator supply.
 +

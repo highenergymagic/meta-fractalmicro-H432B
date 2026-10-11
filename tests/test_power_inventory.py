@@ -30,6 +30,7 @@ class PowerInventoryTests(unittest.TestCase):
         self.assertIn('reg < (dvs ? 7 : 2)', text)
         self.assertIn('if (reg == 2 || reg == 3) continue;', text)
         self.assertIn('strcmp(buf, "i2c-pmic-inventory\\n")', text)
+        self.assertIn('strcmp(buf, "i2c-pmic\\n")', text)
         self.assertIn('.addr = 0x66, .flags = 0, .len = 1, .buf = &reg', text)
         self.assertIn('.addr = 0x66, .flags = I2C_M_RD, .len = 1, .buf = &value', text)
         self.assertNotIn('I2C_SLAVE_FORCE', text)

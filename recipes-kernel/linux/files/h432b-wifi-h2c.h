@@ -54,8 +54,7 @@ static int wifi_h2c_send(struct sdio_func *func, struct h432b_command_result *r,
 	}
 	/* Asynchronous events, not debug strings, acknowledge normal commands. */
 	r->sent = false;
-	error = mmc_io_rw_extended(func->card, 1, func->num, 0x18c80, 1,
-				  packet, transfer / 512, 512);
+	error = wifi_sdio_blocks(func, true, 0x18c80, packet, transfer / 512);
 	if (!error) {
 		r->next_command = (r->next_command + 1) & 0x7f;
 		r->commands_done++;

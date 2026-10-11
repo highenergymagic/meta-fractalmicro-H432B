@@ -78,12 +78,6 @@ class SuspendRuntime(unittest.TestCase):
                         include.index("0021-h432b-suspend-peripheral-retention.patch"))
 
     def test_ethernet_sleep_irq_and_loopback_bounds(self):
-        irq = (FILES / "0022-smsc911x-suspend-irq-order.patch").read_text()
-        self.assertIn("synchronize_irq(ndev->irq)", irq)
-        self.assertIn("pdata->suspend_int_cfg & ~INT_CFG_IRQ_EN_", irq)
-        self.assertNotIn("disable_irq(ndev->irq)", irq)
-        self.assertLess(irq.index("if (to == 0)"),
-                        irq.index("INT_CFG, pdata->suspend_int_cfg"))
         rx = (FILES / "0023-smsc911x-bound-loopback-rx.patch").read_text()
         self.assertIn("loopback_rx_pkt[MIN_PACKET_SIZE + 4] __aligned(4)", rx)
         self.assertIn("pktlength != sizeof(pdata->loopback_rx_pkt)", rx)
@@ -91,7 +85,7 @@ class SuspendRuntime(unittest.TestCase):
         self.assertLess(rx.index("pktlength != sizeof"),
                         rx.rindex("rx_readfifo(pdata"))
         include = (ROOT / "recipes-kernel/linux/h432b-suspend.inc").read_text()
-        self.assertIn("0022-smsc911x-suspend-irq-order.patch", include)
+        self.assertNotIn("0022-smsc911x-suspend-irq-order.patch", include)
         self.assertIn("0023-smsc911x-bound-loopback-rx.patch", include)
 
     def test_ethernet_board_resume_uses_netdev_lifecycle(self):
@@ -124,7 +118,9 @@ class SuspendRuntime(unittest.TestCase):
 
     def test_runtime_merge_is_last(self):
         recipe = (ROOT / "recipes-kernel/linux/linux-h432b-runtime_6.12.111.bb").read_text()
-        self.assertTrue(recipe.strip().endswith("require h432b-suspend.inc"))
+        includes = [line for line in recipe.splitlines() if line.startswith("require ")]
+        self.assertEqual(includes[-1], "require h432b-suspend.inc")
+        self.assertIn("${UNPACKDIR}/h432b-runtime.config", recipe)
         include = (ROOT / "recipes-kernel/linux/h432b-suspend.inc").read_text()
         self.assertIn("u2-resume-test.config", include)
         self.assertIn("Automatic kernel test suspend is forbidden", include)

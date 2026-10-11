@@ -18,6 +18,8 @@ do_configure:append() {
     done
 }
 
+H432B_WIFI_CONFIG = "h432b-wifi-runtime.config"
+H432B_WIFI_DRIVER_MODE = "m"
 require h432b-wifi.inc
 
 require h432b-bluetooth.inc
@@ -38,3 +40,19 @@ do_configure:append() {
 
 require h432b-compass.inc
 require h432b-suspend.inc
+
+# Diagnostic profiles keep PM test controls; the standard image does not.
+SRC_URI += "file://h432b-runtime.config"
+do_configure:append() {
+    KCONFIG_CONFIG=${B}/.config ${S}/scripts/kconfig/merge_config.sh -m -O ${B} \
+        ${B}/.config ${UNPACKDIR}/h432b-runtime.config
+    oe_runmake -C ${S} O=${B} olddefconfig
+    for option in BPF_SYSCALL BPF_JIT CGROUP_BPF CRYPTO_AES_ARM; do
+        grep -qx "CONFIG_$option=y" ${B}/.config || bbfatal "Missing runtime isolation option: $option"
+    done
+    if [ "${H432B_WIFI_DRIVER_MODE}" = "m" ]; then
+        grep -qx "CONFIG_MODULES=y" ${B}/.config || bbfatal "Runtime module loading is disabled"
+        grep -qx "CONFIG_MODULE_UNLOAD=y" ${B}/.config || bbfatal "Runtime module removal is disabled"
+    fi
+    grep -qx "CONFIG_RTL8712S=${H432B_WIFI_DRIVER_MODE}" ${B}/.config || bbfatal "Wrong final RTL8712S mode"
+}

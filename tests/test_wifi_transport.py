@@ -13,7 +13,16 @@ class WifiTransport(unittest.TestCase):
     def test_explicit_board_and_function_match(self):
         self.assertIn("SDIO_DEVICE(0x024c, 0x8712)", SOURCE)
         self.assertIn("func->num != 1", SOURCE)
-        self.assertIn('of_machine_is_compatible("hims,braillesense-u2")', SOURCE)
+        self.assertIn('of_device_is_compatible(func->dev.of_node, "hims,h432b-rtl8712s")', SOURCE)
+        self.assertNotIn("of_machine_is_compatible", SOURCE)
+
+    def test_wireless_subsystem_and_explicit_kconfig(self):
+        patch = (KERNEL / "files/0016-wifi-transport.patch").read_text()
+        self.assertIn("drivers/net/wireless/realtek/rtl8712s/Kconfig", patch)
+        self.assertIn("obj-$(CONFIG_RTL8712S)", patch)
+        self.assertNotIn("drivers/mmc/core", patch)
+        for path in (KERNEL / "files").glob("h432b-wifi*.[ch]"):
+            self.assertNotIn('"sdio_ops.h"', path.read_text())
 
     def test_bind_performs_no_io(self):
         probe = SOURCE.split("static int h432b_wifi_probe", 1)[1]

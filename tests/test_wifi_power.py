@@ -28,7 +28,7 @@ class WifiPower(unittest.TestCase):
     def test_power_register_allowlist(self):
         offsets = {int(x, 16) for x in re.findall(r"P(?:8|16|32)\((0x[0-9a-f]+),", POWER)}
         self.assertEqual(offsets, {
-            0x00, 0x02, 0x03, 0x08, 0x09, 0x10, 0x11, 0x1f,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x08, 0x09, 0x10, 0x11, 0x1f,
             0x20, 0x21, 0x26, 0x28, 0x34, 0x40, 0x42, 0x50,
         })
         self.assertNotIn("0x30,", POWER)  # no efuse programming command
@@ -55,7 +55,8 @@ class WifiPower(unittest.TestCase):
     def test_optional_recipe_carries_header(self):
         recipe = (ROOT / "h432b-wifi.inc").read_text()
         self.assertIn("file://h432b-wifi-power.h", recipe)
-        self.assertIn("${UNPACKDIR}/h432b-wifi-power.h", recipe)
+        self.assertIn("file://h432b-wifi-power.h", recipe)
+        self.assertIn("${UNPACKDIR}/h432b-wifi-*.h", recipe)
 
 
 if __name__ == "__main__":

@@ -1,14 +1,20 @@
-Subject: [PATCH] nand reader
+Subject: [PATCH] mtd: add optional H432B raw NAND inspection
 
-Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
+Upstream-Status: Inappropriate [board diagnostic interface]
 
+This explicitly selected diagnostic driver exposes uncorrected raw data.
+The standard NAND runtime uses the BCH-corrected controller instead.
+
+diff --git a/drivers/mtd/nand/raw/hims-u2-nand-ro.c b/drivers/mtd/nand/raw/hims-u2-nand-ro.c
+new file mode 100644
 --- /dev/null
 +++ b/drivers/mtd/nand/raw/hims-u2-nand-ro.c
-@@ -0,0 +1,153 @@
+@@ -0,0 +1,183 @@
 +// SPDX-License-Identifier: GPL-2.0-only
-+/* U2 diagnostic NAND reader. No program/erase/data-out operation exists here.
-+ * Inherits factory controller timings and pinmux. ECC deliberately disabled:
-+ * raw bytes are suitable for inspection, NOT a corrected filesystem view.
++/*
++ * H432B opt-in raw NAND inspection. No program, erase or data-out operations.
++ * Inherits controller timings and pinmux. ECC is deliberately disabled, so
++ * this interface must not be used to read a corrected filesystem image.
 + */
 +#include <linux/delay.h>
 +#include <linux/io.h>
@@ -18,167 +24,201 @@ Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
 +#include <linux/mtd/rawnand.h>
 +#include <linux/of.h>
 +#include <linux/platform_device.h>
++
 +#include "hims-u2-nand-ro-policy.h"
 +
-+#define NFCONF 0x00
-+#define NFCONT 0x04
-+#define NFCMD  0x08
-+#define NFADDR 0x0c
-+#define NFDATA 0x10
-+#define NFSTAT 0x28
++#define NFCONF	0x00
++#define NFCONT	0x04
++#define NFCMD	0x08
++#define NFADDR	0x0c
++#define NFDATA	0x10
++#define NFSTAT	0x28
 +
 +struct u2_nand {
-+ struct nand_controller controller;
-+ struct nand_chip chip;
-+ void __iomem *regs;
++	struct nand_controller controller;
++	struct nand_chip chip;
++	void __iomem *regs;
 +};
 +
 +static int u2_exec_op(struct nand_chip *chip, const struct nand_operation *op,
-+                      bool check_only)
++		      bool check_only)
 +{
-+ struct u2_nand *n = nand_get_controller_data(chip);
-+ const struct nand_op_instr *in;
-+ unsigned int i, j;
-+ u32 original, status;
-+ int ret = 0;
++	struct u2_nand *n = nand_get_controller_data(chip);
++	const struct nand_op_instr *in;
++	unsigned int i, j;
++	u32 original, status;
++	int ret = 0;
 +
-+ if (op->cs != 0) return -ENOTSUPP;
-+ /* Validate the ENTIRE operation before touching the controller. */
-+ for (i = 0; i < op->ninstrs; i++) {
-+  in = &op->instrs[i];
-+  switch (in->type) {
-+  case NAND_OP_CMD_INSTR:
-+   if (!u2_nand_read_command(in->ctx.cmd.opcode)) return -ENOTSUPP;
-+   break;
-+  case NAND_OP_ADDR_INSTR:
-+   if (!in->ctx.addr.naddrs || in->ctx.addr.naddrs > 8) return -ENOTSUPP;
-+   break;
-+  case NAND_OP_DATA_IN_INSTR:
-+  case NAND_OP_WAITRDY_INSTR:
-+   break;
-+  default: /* Includes every DATA_OUT operation. */
-+   return -ENOTSUPP;
-+  }
-+ }
-+ if (check_only) return 0;
-+ original = readl(n->regs + NFCONT);
-+ if (!(original & 1)) return -ENODEV;
-+ writel(original & ~BIT(1), n->regs + NFCONT);
-+ for (i = 0; i < op->ninstrs; i++) {
-+  in = &op->instrs[i];
-+  switch (in->type) {
-+  case NAND_OP_CMD_INSTR:
-+   writeb(in->ctx.cmd.opcode, n->regs + NFCMD);
-+   break;
-+  case NAND_OP_ADDR_INSTR:
-+   for (j = 0; j < in->ctx.addr.naddrs; j++)
-+    writeb(in->ctx.addr.addrs[j], n->regs + NFADDR);
-+   break;
-+  case NAND_OP_DATA_IN_INSTR:
-+   ioread8_rep(n->regs + NFDATA, in->ctx.data.buf.in, in->ctx.data.len);
-+   break;
-+  case NAND_OP_WAITRDY_INSTR:
-+   ret = readl_poll_timeout(n->regs + NFSTAT, status, status & 1,
-+                           1, min_t(unsigned int, in->ctx.waitrdy.timeout_ms, 1000) * 1000);
-+   break;
-+  default:
-+   ret = -ENOTSUPP;
-+  }
-+  if (ret) break;
-+  if (in->delay_ns) ndelay(in->delay_ns);
-+ }
-+ writel(original, n->regs + NFCONT);
-+ return ret;
++	if (op->cs)
++		return -ENOTSUPP;
++	/* Validate the complete operation before touching the controller. */
++	for (i = 0; i < op->ninstrs; i++) {
++		in = &op->instrs[i];
++		switch (in->type) {
++		case NAND_OP_CMD_INSTR:
++			if (!u2_nand_read_command(in->ctx.cmd.opcode))
++				return -ENOTSUPP;
++			break;
++		case NAND_OP_ADDR_INSTR:
++			if (!in->ctx.addr.naddrs || in->ctx.addr.naddrs > 8)
++				return -ENOTSUPP;
++			break;
++		case NAND_OP_DATA_IN_INSTR:
++		case NAND_OP_WAITRDY_INSTR:
++			break;
++		default:
++			/* Reject every data-out operation. */
++			return -ENOTSUPP;
++		}
++	}
++	if (check_only)
++		return 0;
++	original = readl(n->regs + NFCONT);
++	if (!(original & BIT(0)))
++		return -ENODEV;
++	writel(original & ~BIT(1), n->regs + NFCONT);
++	for (i = 0; i < op->ninstrs; i++) {
++		in = &op->instrs[i];
++		switch (in->type) {
++		case NAND_OP_CMD_INSTR:
++			writeb(in->ctx.cmd.opcode, n->regs + NFCMD);
++			break;
++		case NAND_OP_ADDR_INSTR:
++			for (j = 0; j < in->ctx.addr.naddrs; j++)
++				writeb(in->ctx.addr.addrs[j], n->regs + NFADDR);
++			break;
++		case NAND_OP_DATA_IN_INSTR:
++			ioread8_rep(n->regs + NFDATA, in->ctx.data.buf.in,
++				    in->ctx.data.len);
++			break;
++		case NAND_OP_WAITRDY_INSTR:
++			ret = readl_poll_timeout(n->regs + NFSTAT, status,
++						status & BIT(0), 1,
++				min_t(unsigned int, in->ctx.waitrdy.timeout_ms,
++				      1000) * 1000);
++			break;
++		default:
++			ret = -ENOTSUPP;
++		}
++		if (ret)
++			break;
++		if (in->delay_ns)
++			ndelay(in->delay_ns);
++	}
++	writel(original, n->regs + NFCONT);
++	return ret;
 +}
 +
 +static int u2_attach_chip(struct nand_chip *chip)
 +{
-+ if (chip->options & NAND_BUSWIDTH_16) return -EINVAL;
-+ chip->ecc.engine_type = NAND_ECC_ENGINE_TYPE_NONE;
-+ return 0;
++	if (chip->options & NAND_BUSWIDTH_16)
++		return -EINVAL;
++	chip->ecc.engine_type = NAND_ECC_ENGINE_TYPE_NONE;
++	return 0;
 +}
 +
 +static const struct nand_controller_ops u2_ops = {
-+ .exec_op = u2_exec_op,
-+ .attach_chip = u2_attach_chip,
++	.exec_op = u2_exec_op,
++	.attach_chip = u2_attach_chip,
 +};
 +
 +static int u2_nand_probe(struct platform_device *pdev)
 +{
-+ struct device *dev = &pdev->dev;
-+ struct u2_nand *n;
-+ struct mtd_info *mtd;
-+ int ret;
++	struct device *dev = &pdev->dev;
++	struct u2_nand *n;
++	struct mtd_info *mtd;
++	int ret;
 +
-+ n = devm_kzalloc(dev, sizeof(*n), GFP_KERNEL);
-+ if (!n) return -ENOMEM;
-+ n->regs = devm_platform_ioremap_resource(pdev, 0);
-+ if (IS_ERR(n->regs)) return PTR_ERR(n->regs);
-+ if (!(readl(n->regs + NFCONT) & 1) || (readl(n->regs + NFCONF) & 1))
-+  return dev_err_probe(dev, -ENODEV, "requires inherited enabled 8-bit NAND controller\n");
-+ dev_info(dev, "inherited NFCONF=%08x NFCONT=%08x; READ-ONLY raw probe\n",
-+          readl(n->regs + NFCONF), readl(n->regs + NFCONT));
-+ nand_controller_init(&n->controller);
-+ n->controller.ops = &u2_ops;
-+ n->chip.controller = &n->controller;
-+ n->chip.options = NAND_SKIP_BBTSCAN;
-+ n->chip.ecc.engine_type = NAND_ECC_ENGINE_TYPE_NONE;
-+ nand_set_controller_data(&n->chip, n);
-+ nand_set_flash_node(&n->chip, dev->of_node);
-+ mtd = nand_to_mtd(&n->chip);
-+ mtd->dev.parent = dev;
-+ mtd->owner = THIS_MODULE;
-+ mtd->name = "u2-nand-raw-readonly";
-+ platform_set_drvdata(pdev, n);
-+ ret = nand_scan(&n->chip, 1);
-+ if (ret) return dev_err_probe(dev, ret, "read-only NAND detection failed\n");
-+ /* MTD rejects writes too; exec_op still refuses them if called directly. */
-+ mtd->flags &= ~MTD_WRITEABLE;
-+ ret = mtd_device_register(mtd, NULL, 0);
-+ if (ret) nand_cleanup(&n->chip);
-+ return ret;
++	n = devm_kzalloc(dev, sizeof(*n), GFP_KERNEL);
++	if (!n)
++		return -ENOMEM;
++	n->regs = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(n->regs))
++		return PTR_ERR(n->regs);
++	if (!(readl(n->regs + NFCONT) & BIT(0)) ||
++	    (readl(n->regs + NFCONF) & BIT(0)))
++		return dev_err_probe(dev, -ENODEV,
++				     "requires inherited enabled 8-bit NAND controller\n");
++	dev_dbg(dev, "inherited NFCONF=%08x NFCONT=%08x\n",
++		readl(n->regs + NFCONF), readl(n->regs + NFCONT));
++	nand_controller_init(&n->controller);
++	n->controller.ops = &u2_ops;
++	n->chip.controller = &n->controller;
++	n->chip.options = NAND_SKIP_BBTSCAN;
++	n->chip.ecc.engine_type = NAND_ECC_ENGINE_TYPE_NONE;
++	nand_set_controller_data(&n->chip, n);
++	nand_set_flash_node(&n->chip, dev->of_node);
++	mtd = nand_to_mtd(&n->chip);
++	mtd->dev.parent = dev;
++	mtd->owner = THIS_MODULE;
++	mtd->name = "u2-nand-raw-readonly";
++	platform_set_drvdata(pdev, n);
++	ret = nand_scan(&n->chip, 1);
++	if (ret)
++		return dev_err_probe(dev, ret, "read-only NAND detection failed\n");
++	/* MTD rejects writes too; exec_op refuses them if called directly. */
++	mtd->flags &= ~MTD_WRITEABLE;
++	ret = mtd_device_register(mtd, NULL, 0);
++	if (ret)
++		nand_cleanup(&n->chip);
++	return ret;
 +}
 +
 +static void u2_nand_remove(struct platform_device *pdev)
 +{
-+ struct u2_nand *n = platform_get_drvdata(pdev);
-+ int ret = mtd_device_unregister(nand_to_mtd(&n->chip));
-+ if (ret) dev_warn(&pdev->dev, "MTD unregister: %d\n", ret);
-+ nand_cleanup(&n->chip);
++	struct u2_nand *n = platform_get_drvdata(pdev);
++	int ret;
++
++	ret = mtd_device_unregister(nand_to_mtd(&n->chip));
++	if (ret)
++		dev_warn(&pdev->dev, "MTD unregister: %d\n", ret);
++	nand_cleanup(&n->chip);
 +}
 +
 +static const struct of_device_id u2_nand_match[] = {
-+ { .compatible = "hims,u2-nand-readonly" }, { }
++	{ .compatible = "hims,u2-nand-readonly" },
++	{ }
 +};
 +MODULE_DEVICE_TABLE(of, u2_nand_match);
++
 +static struct platform_driver u2_nand_driver = {
-+ .probe = u2_nand_probe, .remove_new = u2_nand_remove,
-+ .driver = { .name = "hims-u2-nand-readonly", .of_match_table = u2_nand_match },
++	.probe = u2_nand_probe,
++	.remove_new = u2_nand_remove,
++	.driver = {
++		.name = "hims-u2-nand-readonly",
++		.of_match_table = u2_nand_match,
++	},
 +};
 +module_platform_driver(u2_nand_driver);
++
 +MODULE_LICENSE("GPL");
-+MODULE_DESCRIPTION("HIMS U2 inherited NAND raw read-only diagnostics (no ECC)");
++MODULE_DESCRIPTION("H432B read-only raw NAND diagnostics without ECC");
+diff --git a/drivers/mtd/nand/raw/hims-u2-nand-ro-policy.h b/drivers/mtd/nand/raw/hims-u2-nand-ro-policy.h
+new file mode 100644
 --- /dev/null
 +++ b/drivers/mtd/nand/raw/hims-u2-nand-ro-policy.h
-@@ -0,0 +1,21 @@
-+/* Pure command whitelist, shared with native negative tests. */
+@@ -0,0 +1,24 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/* Pure command allowlist, shared with native negative tests. */
 +#ifndef HIMS_U2_NAND_RO_POLICY_H
 +#define HIMS_U2_NAND_RO_POLICY_H
++
 +static int u2_nand_read_command(unsigned int opcode)
 +{
-+ switch (opcode) {
-+ case 0x00: /* READ0 */
-+ case 0x05: /* RNDOUT */
-+ case 0x30: /* READSTART */
-+ case 0x70: /* STATUS */
-+ case 0x90: /* READID */
-+ case 0xe0: /* RNDOUTSTART */
-+ case 0xec: /* PARAM */
-+ case 0xee: /* GET_FEATURES */
-+ case 0xff: /* chip reset: volatile state only */
-+  return 1;
-+ default:
-+  return 0;
-+ }
++	switch (opcode) {
++	case 0x00: /* READ0 */
++	case 0x05: /* RNDOUT */
++	case 0x30: /* READSTART */
++	case 0x70: /* STATUS */
++	case 0x90: /* READID */
++	case 0xe0: /* RNDOUTSTART */
++	case 0xec: /* PARAM */
++	case 0xee: /* GET_FEATURES */
++	case 0xff: /* RESET changes volatile state only. */
++		return 1;
++	default:
++		return 0;
++	}
 +}
-+#endif
++
++#endif /* HIMS_U2_NAND_RO_POLICY_H */

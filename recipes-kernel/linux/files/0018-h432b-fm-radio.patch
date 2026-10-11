@@ -1,185 +1,603 @@
-Subject: [PATCH] media: si470x: add H432B Si4702 board sequencing and muted polling
+Subject: [PATCH] media: si470x: support Si4702-C19 supply and polled tuning
+Upstream-Status: Pending
 
-Upstream-Status: Inappropriate [board bring-up; seek and PM not qualified]
+Describe the receiver by part compatible and supplies, without board hooks
+or board GPIO names in the protocol driver. Preserve mute/volume on open
+and resume, support tuning and seek without an IRQ, and do not advertise
+absent RDS. Balance supplies on shutdown and detach. Poll completion with
+bounded waits, clear operation flags on every exit, and restore the old
+frequency if seek fails as required by the V4L2 ABI.
 
+---
 --- a/drivers/media/radio/si470x/radio-si470x.h
 +++ b/drivers/media/radio/si470x/radio-si470x.h
-@@ -152,6 +152,10 @@
+@@ -152,6 +152,13 @@
  	struct completion completion;
  	bool status_rssi_auto_update;	/* Does RSSI get updated automatic? */
 
-+	/* Optional board initialization and bounded polling. */
-+	int (*start_board)(struct si470x_device *radio);
-+	int (*tune_board)(struct si470x_device *radio, unsigned short chan);
++	/* Si4702 has no RDS decoder; control completion may be polled. */
++	bool is_si4702;
++	struct v4l2_ctrl *mute;
++	struct v4l2_ctrl *volume;
++	unsigned int spacing;
++	bool deemphasis_50us;
 +
  	/* si470x ops */
 
  	int (*get_register)(struct si470x_device *radio, int regnr);
+@@ -181,6 +188,9 @@
+ #if IS_ENABLED(CONFIG_I2C_SI470X)
+ 	struct i2c_client *client;
+ 	struct gpio_desc *gpio_reset;
++	struct regulator *vdd;
++	bool vdd_enabled;
++	bool resume_enabled;
+ #endif
+ };
+
 --- a/drivers/media/radio/si470x/radio-si470x-common.c
 +++ b/drivers/media/radio/si470x/radio-si470x-common.c
-@@ -196,6 +196,9 @@
+@@ -99,6 +99,8 @@
+
+
+ /* kernel includes */
++#include <linux/delay.h>
++
+ #include "radio-si470x.h"
+
+ /**************************************************************************
+@@ -190,12 +192,57 @@
+ /*
+  * si470x_set_chan - set the channel
+  */
++static int si470x_poll_stc(struct si470x_device *radio, bool high,
++			   unsigned int timeout)
++{
++	unsigned long deadline = jiffies + msecs_to_jiffies(timeout);
++	int ret;
++
++	do {
++		ret = radio->get_register(radio, STATUSRSSI);
++		if (ret)
++			return ret;
++		if (!!(radio->registers[STATUSRSSI] & STATUSRSSI_STC) == high)
++			return 0;
++		msleep(20);
++	} while (time_before(jiffies, deadline));
++
++	return -ETIMEDOUT;
++}
++
++static int si470x_set_chan_polled(struct si470x_device *radio, unsigned short chan)
++{
++	int ret, cleanup;
++
++	/* STC must fall before a new request and after TUNE is cleared. */
++	radio->registers[CHANNEL] &= ~CHANNEL_TUNE;
++	ret = radio->set_register(radio, CHANNEL);
++	if (ret)
++		return ret;
++	ret = si470x_poll_stc(radio, false, tune_timeout);
++	if (ret)
++		return ret;
++	radio->registers[CHANNEL] =
++		(radio->registers[CHANNEL] & ~CHANNEL_CHAN) | CHANNEL_TUNE | chan;
++	ret = radio->set_register(radio, CHANNEL);
++	if (!ret)
++		ret = si470x_poll_stc(radio, true, tune_timeout);
++	radio->registers[CHANNEL] &= ~CHANNEL_TUNE;
++	cleanup = radio->set_register(radio, CHANNEL);
++	if (!cleanup)
++		cleanup = si470x_poll_stc(radio, false, tune_timeout);
++	return ret ?: cleanup;
++}
++
+ static int si470x_set_chan(struct si470x_device *radio, unsigned short chan)
+ {
+ 	int retval;
  	unsigned long time_left;
  	bool timed_out = false;
 
-+	if (radio->tune_board)
-+		return radio->tune_board(radio, chan);
++	if (radio->is_si4702)
++		return si470x_set_chan_polled(radio, chan);
 +
  	retval = radio->get_register(radio, POWERCFG);
  	if (retval)
  		return retval;
-@@ -368,6 +371,9 @@
+@@ -287,6 +334,96 @@
+ }
+ EXPORT_SYMBOL_GPL(si470x_set_freq);
+
++static int si470x_seek_polled(struct si470x_device *radio,
++			      const struct v4l2_hw_freq_seek *seek)
++{
++	u16 old_config = radio->registers[SYSCONFIG2];
++	int old_band = radio->band, band = old_band;
++	unsigned int old_frequency, frequency, spacing;
++	int ret, cleanup, restore;
++
++	if (seek->type != V4L2_TUNER_RADIO)
++		return -EINVAL;
++	if (seek->rangelow || seek->rangehigh) {
++		for (band = 0; band < ARRAY_SIZE(bands); band++) {
++			if (bands[band].rangelow == seek->rangelow &&
++			    bands[band].rangehigh == seek->rangehigh)
++				break;
++		}
++		if (band == ARRAY_SIZE(bands))
++			return -EINVAL;
++	}
++	ret = si470x_get_freq(radio, &old_frequency);
++	if (ret)
++		return ret;
++	ret = si470x_set_band(radio, band);
++	if (ret)
++		goto restore_frequency;
++	if (seek->spacing) {
++		/* V4L2 requests Hz; select the nearest supported spacing. */
++		spacing = seek->spacing < 75000 ? 2 : seek->spacing < 150000 ? 1 : 0;
++		radio->registers[SYSCONFIG2] &= ~SYSCONFIG2_SPACE;
++		radio->registers[SYSCONFIG2] |= spacing << 4;
++		ret = radio->set_register(radio, SYSCONFIG2);
++		if (ret)
++			goto restore_frequency;
++	}
++	frequency = clamp(old_frequency, bands[band].rangelow, bands[band].rangehigh);
++	ret = si470x_set_freq(radio, frequency);
++	if (ret)
++		goto restore_frequency;
++
++	/* End any preceding operation before requesting a new hardware seek. */
++	radio->registers[POWERCFG] &= ~POWERCFG_SEEK;
++	radio->registers[CHANNEL] &= ~CHANNEL_TUNE;
++	ret = radio->set_register(radio, CHANNEL);
++	if (ret)
++		goto stop_seek;
++	ret = si470x_poll_stc(radio, false, tune_timeout);
++	if (ret)
++		goto stop_seek;
++	radio->registers[POWERCFG] &= ~(POWERCFG_SKMODE | POWERCFG_SEEKUP);
++	radio->registers[POWERCFG] |= POWERCFG_SEEK;
++	if (!seek->wrap_around)
++		radio->registers[POWERCFG] |= POWERCFG_SKMODE;
++	if (seek->seek_upward)
++		radio->registers[POWERCFG] |= POWERCFG_SEEKUP;
++	ret = radio->set_register(radio, POWERCFG);
++	if (!ret)
++		ret = si470x_poll_stc(radio, true, seek_timeout);
++	if (!ret && (radio->registers[STATUSRSSI] & STATUSRSSI_SF))
++		ret = -ENODATA;
++	if (!ret) {
++		ret = radio->get_register(radio, READCHAN);
++		if (!ret)
++			radio->registers[CHANNEL] =
++				(radio->registers[CHANNEL] & ~CHANNEL_CHAN) |
++				(radio->registers[READCHAN] & READCHAN_READCHAN);
++	}
++stop_seek:
++	radio->registers[POWERCFG] &= ~POWERCFG_SEEK;
++	cleanup = radio->set_register(radio, POWERCFG);
++	if (!cleanup)
++		cleanup = si470x_poll_stc(radio, false, tune_timeout);
++	ret = ret ?: cleanup;
++	if (!ret) {
++		radio->spacing = (radio->registers[SYSCONFIG2] & SYSCONFIG2_SPACE) >> 4;
++		return 0;
++	}
++
++restore_frequency:
++	/* The V4L2 ABI requires the original frequency when seeking fails. */
++	radio->band = old_band;
++	radio->registers[SYSCONFIG2] = old_config;
++	restore = radio->set_register(radio, SYSCONFIG2);
++	if (!restore)
++		restore = si470x_set_freq(radio, old_frequency);
++	if (restore)
++		dev_err_ratelimited(&radio->videodev.dev,
++				    "cannot restore frequency after failed seek: %d\n", restore);
++	return restore ?: ret;
++}
++
+
+ /*
+  * si470x_set_seek - set seek
+@@ -299,6 +436,9 @@
+ 	bool timed_out = false;
+ 	unsigned long time_left;
+
++	if (radio->is_si4702)
++		return si470x_seek_polled(radio, seek);
++
+ 	/* set band */
+ 	if (seek->rangelow || seek->rangehigh) {
+ 		for (band = 0; band < ARRAY_SIZE(bands); band++) {
+@@ -364,10 +504,36 @@
+ /*
+  * si470x_start - switch on radio
+  */
++static int si4702_start(struct si470x_device *radio)
++{
++	int ret;
++
++	/* Preserve requested mono/mute state; Si4702 has no RDS registers. */
++	radio->registers[POWERCFG] = POWERCFG_ENABLE |
++		(radio->registers[POWERCFG] & POWERCFG_MONO) |
++		(radio->mute->val ? 0 : POWERCFG_DMUTE);
++	ret = radio->set_register(radio, POWERCFG);
++	if (ret)
++		return ret;
++	msleep(110);
++	radio->registers[SYSCONFIG1] = SYSCONFIG1_GPIO2_INT |
++		(radio->deemphasis_50us ? SYSCONFIG1_DE : 0);
++	radio->registers[SYSCONFIG2] = (0x10 << 8) |
++		((radio->band << 6) & SYSCONFIG2_BAND) |
++		((radio->spacing << 4) & SYSCONFIG2_SPACE) | radio->volume->val;
++	ret = radio->set_register(radio, SYSCONFIG2);
++	if (ret)
++		return ret;
++	return si470x_set_chan_polled(radio, radio->registers[CHANNEL] & CHANNEL_CHAN);
++}
++
+ int si470x_start(struct si470x_device *radio)
  {
  	int retval;
 
-+	if (radio->start_board)
-+		return radio->start_board(radio);
++	if (radio->is_si4702)
++		return si4702_start(radio);
 +
  	/* powercfg */
  	radio->registers[POWERCFG] =
  		POWERCFG_DMUTE | POWERCFG_ENABLE | POWERCFG_RDSM;
-@@ -462,6 +468,9 @@
- 	struct si470x_device *radio = video_drvdata(file);
+@@ -463,18 +629,24 @@
  	int retval = 0;
  	unsigned int block_count = 0;
-+
-+	if (radio->start_board)
-+		return -EOPNOTSUPP;
 
++	if (radio->is_si4702)
++		return -EOPNOTSUPP;
++
  	/* switch on rds reception */
  	if ((radio->registers[SYSCONFIG1] & SYSCONFIG1_RDS) == 0)
-@@ -518,6 +527,9 @@
- 	struct si470x_device *radio = video_drvdata(file);
+ 		si470x_rds_on(radio);
+
+ 	/* block if no new data available */
+ 	while (radio->wr_index == radio->rd_index) {
++		if (!video_is_registered(&radio->videodev))
++			return -ENODEV;
+ 		if (file->f_flags & O_NONBLOCK) {
+ 			retval = -EWOULDBLOCK;
+ 			goto done;
+ 		}
+ 		if (wait_event_interruptible(radio->read_queue,
+-			radio->wr_index != radio->rd_index) < 0) {
++			radio->wr_index != radio->rd_index ||
++			!video_is_registered(&radio->videodev)) < 0) {
+ 			retval = -EINTR;
+ 			goto done;
+ 		}
+@@ -519,6 +691,9 @@
  	__poll_t req_events = poll_requested_events(pts);
  	__poll_t retval = v4l2_ctrl_poll(file, pts);
-+
-+	if (radio->start_board)
-+		return retval;
 
++	if (radio->is_si4702)
++		return retval;
++
  	if (req_events & (EPOLLIN | EPOLLRDNORM)) {
  		/* switch on rds reception */
-@@ -630,7 +642,12 @@
+ 		if ((radio->registers[SYSCONFIG1] & SYSCONFIG1_RDS) == 0)
+@@ -630,7 +805,10 @@
  	/* If there is a reliable method of detecting an RDS channel,
  	   then this code should check for that before setting this
  	   RDS subchannel. */
 -	tuner->rxsubchans |= V4L2_TUNER_SUB_RDS;
-+	if (radio->start_board) {
-+		tuner->capability = V4L2_TUNER_CAP_LOW | V4L2_TUNER_CAP_STEREO;
-+		tuner->rangelow = 875 * FREQ_MUL / 10;
-+	} else {
++	if (radio->is_si4702)
++		tuner->capability &= ~(V4L2_TUNER_CAP_RDS | V4L2_TUNER_CAP_RDS_BLOCK_IO);
++	else
 +		tuner->rxsubchans |= V4L2_TUNER_SUB_RDS;
-+	}
 
  	/* mono/stereo selector */
  	if ((radio->registers[POWERCFG] & POWERCFG_MONO) == 0)
-@@ -708,6 +725,11 @@
- 	if (freq->tuner != 0)
- 		return -EINVAL;
-
-+	if (radio->start_board &&
-+	    (freq->frequency < 875 * FREQ_MUL / 10 ||
-+	     freq->frequency > 108 * FREQ_MUL))
-+		return -ERANGE;
-+
- 	if (freq->frequency < bands[radio->band].rangelow ||
- 	    freq->frequency > bands[radio->band].rangehigh) {
- 		/* Switch to band 1 which covers everything we support */
-@@ -727,6 +749,9 @@
+@@ -742,11 +920,15 @@
+ static int si470x_vidioc_enum_freq_bands(struct file *file, void *priv,
+ 					 struct v4l2_frequency_band *band)
  {
- 	struct si470x_device *radio = video_drvdata(file);
-
-+	if (radio->start_board)
-+		return -EOPNOTSUPP;
++	struct si470x_device *radio = video_drvdata(file);
 +
- 	if (seek->tuner != 0)
- 		return -EINVAL;
-
-@@ -746,6 +771,13 @@
+ 	if (band->tuner != 0)
  		return -EINVAL;
  	if (band->index >= ARRAY_SIZE(bands))
  		return -EINVAL;
-+	if (((struct si470x_device *)video_drvdata(file))->start_board) {
-+		if (band->index)
-+			return -EINVAL;
-+		*band = bands[0];
-+		band->capability = V4L2_TUNER_CAP_LOW | V4L2_TUNER_CAP_STEREO;
-+		return 0;
-+	}
  	*band = bands[band->index];
++	if (radio->is_si4702)
++		band->capability &= ~(V4L2_TUNER_CAP_RDS | V4L2_TUNER_CAP_RDS_BLOCK_IO);
  	return 0;
  }
+
 --- a/drivers/media/radio/si470x/radio-si470x-i2c.c
 +++ b/drivers/media/radio/si470x/radio-si470x-i2c.c
-@@ -21,6 +21,7 @@
+@@ -21,6 +21,9 @@
  #include <linux/delay.h>
  #include <linux/gpio/consumer.h>
  #include <linux/interrupt.h>
 +#include <linux/of.h>
++#include <linux/property.h>
++#include <linux/regulator/consumer.h>
 
  #include "radio-si470x.h"
 
-@@ -163,6 +164,9 @@
+@@ -163,16 +166,109 @@
   * File Operations Interface
   **************************************************************************/
 
-+/* Board helpers use the register accessors above. */
-+#include "h432b-fm.c"
++static void si4702_power_off(void *data)
++{
++	struct si470x_device *radio = data;
++	int ret;
++
++	gpiod_set_value_cansleep(radio->gpio_reset, 1);
++	if (!radio->vdd_enabled)
++		return;
++	ret = regulator_disable(radio->vdd);
++	if (ret)
++		dev_err(&radio->client->dev, "cannot disable tuner supply: %d\n", ret);
++	else
++		radio->vdd_enabled = false;
++}
++
++static int si4702_init(struct si470x_device *radio)
++{
++	struct device *dev = &radio->client->dev;
++	u32 value;
++	int ret;
++
++	radio->spacing = 2;
++	ret = device_property_read_u32(dev, "silabs,channel-spacing-khz", &value);
++	if (!ret) {
++		switch (value) {
++		case 200:
++			radio->spacing = 0;
++			break;
++		case 100:
++			radio->spacing = 1;
++			break;
++		case 50:
++			break;
++		default:
++			return dev_err_probe(dev, -EINVAL, "invalid channel spacing\n");
++		}
++	} else if (device_property_present(dev, "silabs,channel-spacing-khz")) {
++		return dev_err_probe(dev, ret, "invalid channel spacing property\n");
++	}
++	radio->deemphasis_50us = true;
++	ret = device_property_read_u32(dev, "silabs,deemphasis-us", &value);
++	if (!ret) {
++		if (value != 50 && value != 75)
++			return dev_err_probe(dev, -EINVAL, "invalid de-emphasis\n");
++		radio->deemphasis_50us = value == 50;
++	} else if (device_property_present(dev, "silabs,deemphasis-us")) {
++		return dev_err_probe(dev, ret, "invalid de-emphasis property\n");
++	}
++	radio->vdd = devm_regulator_get(dev, "vdd");
++	if (IS_ERR(radio->vdd))
++		return dev_err_probe(dev, PTR_ERR(radio->vdd), "tuner supply\n");
++	radio->gpio_reset = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(radio->gpio_reset))
++		return dev_err_probe(dev, PTR_ERR(radio->gpio_reset), "reset GPIO\n");
++	usleep_range(1000, 2000);
++	ret = regulator_enable(radio->vdd);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot enable tuner supply\n");
++	radio->vdd_enabled = true;
++	ret = devm_add_action_or_reset(dev, si4702_power_off, radio);
++	if (ret)
++		return ret;
++	usleep_range(10000, 12000);
++	gpiod_set_value_cansleep(radio->gpio_reset, 0);
++	msleep(100);
++	ret = si470x_get_all_registers(radio);
++	if (ret)
++		return ret;
++	/* The C19 part has these identification registers before power-up. */
++	if (radio->registers[DEVICEID] != 0x1242 ||
++	    radio->registers[SI_CHIPID] != 0x1000)
++		return dev_err_probe(dev, -ENODEV, "Si4702-C19 identity mismatch\n");
++	if (device_property_read_bool(dev, "silabs,use-crystal")) {
++		/* Preserve the reset value of reserved bits in TEST1. */
++		radio->registers[TEST1] |= BIT(15);
++		ret = si470x_set_register(radio, TEST1);
++		if (ret)
++			return ret;
++		msleep(500);
++	}
++	radio->band = 0;
++	radio->videodev.device_caps = V4L2_CAP_TUNER | V4L2_CAP_RADIO | V4L2_CAP_HW_FREQ_SEEK;
++	return 0;
++}
 +
  /*
   * si470x_fops_open - file open
   */
-@@ -178,6 +182,9 @@
- 		/* start radio */
- 		retval = si470x_start(radio);
- 		if (retval < 0)
-+			goto done;
+ static int si470x_fops_open(struct file *file)
+ {
+ 	struct si470x_device *radio = video_drvdata(file);
+-	int retval = v4l2_fh_open(file);
++	int retval;
 +
-+		if (radio->start_board)
++	if (mutex_lock_interruptible(&radio->lock))
++		return -ERESTARTSYS;
++	if (!video_is_registered(&radio->videodev)) {
++		retval = -ENODEV;
++		goto unlock;
++	}
++	retval = v4l2_fh_open(file);
+
+ 	if (retval)
+-		return retval;
++		goto unlock;
+
+ 	if (v4l2_fh_is_singular_file(file)) {
+ 		/* start radio */
+@@ -180,6 +276,9 @@
+ 		if (retval < 0)
  			goto done;
 
++		if (radio->is_si4702)
++			goto done;
++
  		/* enable RDS / STC interrupt */
-@@ -363,7 +370,8 @@
- 	v4l2_ctrl_new_std(&radio->hdl, &si470x_ctrl_ops,
- 			V4L2_CID_AUDIO_MUTE, 0, 1, 1, 1);
- 	v4l2_ctrl_new_std(&radio->hdl, &si470x_ctrl_ops,
+ 		radio->registers[SYSCONFIG1] |= SYSCONFIG1_RDSIEN;
+ 		radio->registers[SYSCONFIG1] |= SYSCONFIG1_STCIEN;
+@@ -191,6 +290,8 @@
+ done:
+ 	if (retval)
+ 		v4l2_fh_release(file);
++unlock:
++	mutex_unlock(&radio->lock);
+ 	return retval;
+ }
+
+@@ -201,12 +302,34 @@
+ static int si470x_fops_release(struct file *file)
+ {
+ 	struct si470x_device *radio = video_drvdata(file);
++	int ret;
+
+-	if (v4l2_fh_is_singular_file(file))
++	mutex_lock(&radio->lock);
++	if (video_is_registered(&radio->videodev) && v4l2_fh_is_singular_file(file))
+ 		/* stop radio */
+ 		si470x_stop(radio);
+
+-	return v4l2_fh_release(file);
++	ret = v4l2_fh_release(file);
++	mutex_unlock(&radio->lock);
++	return ret;
++}
++
++static void si470x_i2c_release(struct v4l2_device *v4l2_dev)
++{
++	struct si470x_device *radio =
++		container_of(v4l2_dev, struct si470x_device, v4l2_dev);
++
++	v4l2_ctrl_handler_free(&radio->hdl);
++	v4l2_device_unregister(v4l2_dev);
++	kfree(radio->buffer);
++	kfree(radio);
++}
++
++static void si470x_put_device(void *data)
++{
++	struct si470x_device *radio = data;
++
++	v4l2_device_put(&radio->v4l2_dev);
+ }
+
+
+@@ -336,16 +459,19 @@
+ 	int retval = 0;
+
+ 	/* private data allocation and initialization */
+-	radio = devm_kzalloc(&client->dev, sizeof(*radio), GFP_KERNEL);
++	radio = kzalloc(sizeof(*radio), GFP_KERNEL);
+ 	if (!radio) {
+ 		retval = -ENOMEM;
+ 		goto err_initial;
+ 	}
+
+ 	radio->client = client;
++	radio->is_si4702 = of_device_is_compatible(client->dev.of_node,
++						   "silabs,si4702-c19");
+ 	radio->band = 1; /* Default to 76 - 108 MHz */
+ 	mutex_init(&radio->lock);
+ 	init_completion(&radio->completion);
++	init_waitqueue_head(&radio->read_queue);
+
+ 	radio->get_register = si470x_get_register;
+ 	radio->set_register = si470x_set_register;
+@@ -356,14 +482,21 @@
+ 	retval = v4l2_device_register(&client->dev, &radio->v4l2_dev);
+ 	if (retval < 0) {
+ 		dev_err(&client->dev, "couldn't register v4l2_device\n");
++		kfree(radio);
+ 		goto err_initial;
+ 	}
++	radio->v4l2_dev.release = si470x_i2c_release;
++	/* Retain file state after unbind; drop this reference after GPIO cleanup. */
++	retval = devm_add_action_or_reset(&client->dev, si470x_put_device, radio);
++	if (retval)
++		return retval;
+
+ 	v4l2_ctrl_handler_init(&radio->hdl, 2);
+-	v4l2_ctrl_new_std(&radio->hdl, &si470x_ctrl_ops,
+-			V4L2_CID_AUDIO_MUTE, 0, 1, 1, 1);
+-	v4l2_ctrl_new_std(&radio->hdl, &si470x_ctrl_ops,
 -			V4L2_CID_AUDIO_VOLUME, 0, 15, 1, 15);
-+			V4L2_CID_AUDIO_VOLUME, 0, 15, 1,
-+			of_device_is_compatible(client->dev.of_node, "hims,h432b-si4702") ? 7 : 15);
++	radio->mute = v4l2_ctrl_new_std(&radio->hdl, &si470x_ctrl_ops,
++					V4L2_CID_AUDIO_MUTE, 0, 1, 1, 1);
++	radio->volume = v4l2_ctrl_new_std(&radio->hdl, &si470x_ctrl_ops,
++					  V4L2_CID_AUDIO_VOLUME, 0, 15, 1,
++					  radio->is_si4702 ? 7 : 15);
  	if (radio->hdl.error) {
  		retval = radio->hdl.error;
  		dev_err(&client->dev, "couldn't register control\n");
-@@ -381,6 +389,13 @@
+@@ -381,6 +514,13 @@
  		V4L2_CAP_RADIO | V4L2_CAP_RDS_CAPTURE;
  	video_set_drvdata(&radio->videodev, radio);
 
-+	if (of_device_is_compatible(client->dev.of_node, "hims,h432b-si4702")) {
-+		retval = h432b_fm_init(radio);
++	if (radio->is_si4702) {
++		retval = si4702_init(radio);
 +		if (retval)
 +			goto err_all;
-+		goto board_power_ready;
++		goto power_ready;
 +	}
 +
  	radio->gpio_reset = devm_gpiod_get_optional(&client->dev, "reset",
  						    GPIOD_OUT_LOW);
  	if (IS_ERR(radio->gpio_reset)) {
-@@ -392,6 +407,7 @@
+@@ -392,6 +532,7 @@
  	if (radio->gpio_reset)
  		gpiod_set_value(radio->gpio_reset, 1);
 
-+board_power_ready:
++power_ready:
  	/* power up : need 110ms */
  	radio->registers[POWERCFG] = POWERCFG_ENABLE;
  	if (si470x_set_register(radio, POWERCFG) < 0) {
-@@ -431,6 +447,9 @@
- 	radio->rd_index = 0;
- 	init_waitqueue_head(&radio->read_queue);
+@@ -408,7 +549,8 @@
+ 	dev_info(&client->dev, "DeviceID=0x%4.4hx ChipID=0x%4.4hx\n",
+ 			radio->registers[DEVICEID], radio->registers[SI_CHIPID]);
+-	if ((radio->registers[SI_CHIPID] & SI_CHIPID_FIRMWARE) < RADIO_FW_VERSION) {
++	if (!radio->is_si4702 &&
++	    (radio->registers[SI_CHIPID] & SI_CHIPID_FIRMWARE) < RADIO_FW_VERSION) {
+ 		dev_warn(&client->dev,
+ 			"This driver is known to work with firmware version %u, but the device has firmware version %u.\n"
+ 			"If you have some trouble using this driver, please report to V4L ML at linux-media@vger.kernel.org\n",
+ 			RADIO_FW_VERSION,
+@@ -416,11 +558,15 @@
+ 	}
 
-+	if (radio->start_board)
+ 	/* set initial frequency */
+-	si470x_set_freq(radio, 87.5 * FREQ_MUL); /* available in all regions */
++	retval = si470x_set_freq(radio, 875 * FREQ_MUL / 10);
++	if (retval)
++		goto err_all;
++	if (radio->is_si4702)
 +		goto register_video;
-+
+
+ 	/* rds buffer allocation */
+ 	radio->buf_size = rds_buf * 3;
+-	radio->buffer = devm_kmalloc(&client->dev, radio->buf_size, GFP_KERNEL);
++	radio->buffer = kmalloc(radio->buf_size, GFP_KERNEL);
+ 	if (!radio->buffer) {
+ 		retval = -EIO;
+ 		goto err_all;
+@@ -429,7 +575,6 @@
+ 	/* rds buffer configuration */
+ 	radio->wr_index = 0;
+ 	radio->rd_index = 0;
+-	init_waitqueue_head(&radio->read_queue);
+
  	retval = devm_request_threaded_irq(&client->dev, client->irq, NULL,
  					   si470x_i2c_interrupt,
- 					   IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
-@@ -440,6 +459,7 @@
+@@ -440,6 +585,7 @@
  		goto err_all;
  	}
 
@@ -187,11 +605,114 @@ Upstream-Status: Inappropriate [board bring-up; seek and PM not qualified]
  	/* register video device */
  	retval = video_register_device(&radio->videodev, VFL_TYPE_RADIO,
  			radio_nr);
-@@ -516,6 +536,7 @@
+@@ -451,8 +597,6 @@
+
+ 	return 0;
+ err_all:
+-	v4l2_ctrl_handler_free(&radio->hdl);
+-	v4l2_device_unregister(&radio->v4l2_dev);
+ err_initial:
+ 	return retval;
+ }
+@@ -465,13 +609,17 @@
+ {
+ 	struct si470x_device *radio = i2c_get_clientdata(client);
+
++	mutex_lock(&radio->lock);
++	v4l2_device_disconnect(&radio->v4l2_dev);
+ 	video_unregister_device(&radio->videodev);
+
+-	if (radio->gpio_reset)
++	if (radio->is_si4702)
++		si4702_power_off(radio);
++	else if (radio->gpio_reset)
+ 		gpiod_set_value(radio->gpio_reset, 0);
+
+-	v4l2_ctrl_handler_free(&radio->hdl);
+-	v4l2_device_unregister(&radio->v4l2_dev);
++	mutex_unlock(&radio->lock);
++	wake_up_interruptible(&radio->read_queue);
+ }
+
+
+@@ -483,13 +631,16 @@
+ {
+ 	struct i2c_client *client = to_i2c_client(dev);
+ 	struct si470x_device *radio = i2c_get_clientdata(client);
++	int ret;
+
++	mutex_lock(&radio->lock);
++	radio->resume_enabled = (radio->registers[POWERCFG] & POWERCFG_ENABLE) &&
++		!(radio->registers[POWERCFG] & POWERCFG_DISABLE);
+ 	/* power down */
+ 	radio->registers[POWERCFG] |= POWERCFG_DISABLE;
+-	if (si470x_set_register(radio, POWERCFG) < 0)
+-		return -EIO;
+-
+-	return 0;
++	ret = si470x_set_register(radio, POWERCFG);
++	mutex_unlock(&radio->lock);
++	return ret;
+ }
+
+
+@@ -500,22 +651,45 @@
+ {
+ 	struct i2c_client *client = to_i2c_client(dev);
+ 	struct si470x_device *radio = i2c_get_clientdata(client);
++	int ret = 0;
+
++	mutex_lock(&radio->lock);
++	if (!radio->resume_enabled)
++		goto out;
++	if (radio->is_si4702) {
++		ret = si470x_start(radio);
++		goto out;
++	}
+ 	/* power up : need 110ms */
++	radio->registers[POWERCFG] &= ~POWERCFG_DISABLE;
+ 	radio->registers[POWERCFG] |= POWERCFG_ENABLE;
+-	if (si470x_set_register(radio, POWERCFG) < 0)
+-		return -EIO;
+-	msleep(110);
+-
+-	return 0;
++	ret = si470x_set_register(radio, POWERCFG);
++	if (!ret)
++		msleep(110);
++out:
++	mutex_unlock(&radio->lock);
++	return ret;
+ }
+
+ static SIMPLE_DEV_PM_OPS(si470x_i2c_pm, si470x_i2c_suspend, si470x_i2c_resume);
+ #endif
+
++static void si470x_i2c_shutdown(struct i2c_client *client)
++{
++	struct si470x_device *radio = i2c_get_clientdata(client);
++
++	mutex_lock(&radio->lock);
++	if (radio->is_si4702)
++		si4702_power_off(radio);
++	else
++		si470x_stop(radio);
++	mutex_unlock(&radio->lock);
++}
++
  #if IS_ENABLED(CONFIG_OF)
  static const struct of_device_id si470x_of_match[] = {
  	{ .compatible = "silabs,si470x" },
-+	{ .compatible = "hims,h432b-si4702" },
++	{ .compatible = "silabs,si4702-c19" },
  	{ },
  };
  MODULE_DEVICE_TABLE(of, si470x_of_match);
+@@ -534,7 +708,8 @@
+ 	},
+ 	.probe			= si470x_i2c_probe,
+ 	.remove			= si470x_i2c_remove,
++	.shutdown		= si470x_i2c_shutdown,
+ 	.id_table		= si470x_i2c_id,
+ };
+
+ module_i2c_driver(si470x_i2c_driver);

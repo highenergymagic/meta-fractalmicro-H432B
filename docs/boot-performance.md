@@ -120,8 +120,10 @@ Linux receives `openh432.loader_attach_ms`, `openh432.loader_kernel_ms` and
 - Kernel covers the selected kernel command through checked handoff.
 - Total begins at the boot-state command and includes attempt persistence.
 
-With `CONFIG_H432B_NAND_TIMING`, `openh432.nand_scan` and
-`openh432.nand_load` each contain seven comma-separated values:
+Detailed NAND profiling is disabled by default. Set `H432B_NAND_TIMING = "1"`
+in the Yocto build configuration to enable `CONFIG_H432B_NAND_TIMING` in the
+A/B loader. Then `openh432.nand_scan` and `openh432.nand_load` each contain
+seven comma-separated values:
 
 1. FIFO bytes read, including spare-area transfers.
 2. FIFO-read milliseconds.

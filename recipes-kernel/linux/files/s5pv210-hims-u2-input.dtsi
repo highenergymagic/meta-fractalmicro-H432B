@@ -3,13 +3,21 @@
 / {
 	keys {
 		status = "okay";
-		row-gpios = <&gpj0 0 GPIO_ACTIVE_LOW>, <&gpj0 1 GPIO_ACTIVE_LOW>, <&gpj0 2 GPIO_ACTIVE_LOW>;
-		column-gpios = <&gpj2 0 GPIO_ACTIVE_LOW>, <&gpj2 1 GPIO_ACTIVE_LOW>, <&gpj2 2 GPIO_ACTIVE_LOW>, <&gpj2 3 GPIO_ACTIVE_LOW>, <&gpj2 4 GPIO_ACTIVE_LOW>, <&gpj2 5 GPIO_ACTIVE_LOW>, <&gpj2 6 GPIO_ACTIVE_LOW>, <&gpj2 7 GPIO_ACTIVE_LOW>,
-			<&gpj3 0 GPIO_ACTIVE_LOW>, <&gpj3 1 GPIO_ACTIVE_LOW>, <&gpj3 2 GPIO_ACTIVE_LOW>, <&gpj3 3 GPIO_ACTIVE_LOW>, <&gpj3 4 GPIO_ACTIVE_LOW>, <&gpj3 5 GPIO_ACTIVE_LOW>, <&gpj3 6 GPIO_ACTIVE_LOW>, <&gpj3 7 GPIO_ACTIVE_LOW>;
+		row-gpios = <&gpj0 0 GPIO_ACTIVE_LOW>, <&gpj0 1 GPIO_ACTIVE_LOW>,
+			    <&gpj0 2 GPIO_ACTIVE_LOW>;
+		column-gpios = <&gpj2 0 GPIO_ACTIVE_LOW>, <&gpj2 1 GPIO_ACTIVE_LOW>,
+			       <&gpj2 2 GPIO_ACTIVE_LOW>, <&gpj2 3 GPIO_ACTIVE_LOW>,
+			       <&gpj2 4 GPIO_ACTIVE_LOW>, <&gpj2 5 GPIO_ACTIVE_LOW>,
+			       <&gpj2 6 GPIO_ACTIVE_LOW>, <&gpj2 7 GPIO_ACTIVE_LOW>,
+			       <&gpj3 0 GPIO_ACTIVE_LOW>, <&gpj3 1 GPIO_ACTIVE_LOW>,
+			       <&gpj3 2 GPIO_ACTIVE_LOW>, <&gpj3 3 GPIO_ACTIVE_LOW>,
+			       <&gpj3 4 GPIO_ACTIVE_LOW>, <&gpj3 5 GPIO_ACTIVE_LOW>,
+			       <&gpj3 6 GPIO_ACTIVE_LOW>, <&gpj3 7 GPIO_ACTIVE_LOW>;
 		direct-gpios = <&gph2 1 GPIO_ACTIVE_LOW>, <&gph2 2 GPIO_ACTIVE_LOW>,
 			<&gph2 3 GPIO_ACTIVE_LOW>, <&gph2 4 GPIO_ACTIVE_LOW>,
 			<&gph2 5 GPIO_ACTIVE_LOW>, <&gph0 5 GPIO_ACTIVE_LOW>,
 			<&gph0 6 GPIO_ACTIVE_LOW>;
-		selector-gpios = <&gpj1 0 GPIO_ACTIVE_HIGH>, <&gpj1 1 GPIO_ACTIVE_HIGH>, <&gpj1 2 GPIO_ACTIVE_HIGH>, <&gpj1 3 GPIO_ACTIVE_HIGH>;
+		selector-gpios = <&gpj1 0 GPIO_ACTIVE_HIGH>, <&gpj1 1 GPIO_ACTIVE_HIGH>,
+				 <&gpj1 2 GPIO_ACTIVE_HIGH>, <&gpj1 3 GPIO_ACTIVE_HIGH>;
 	};
 };

@@ -1,10 +1,11 @@
-Subject: [PATCH] H432B bounded NAND transactions and Linux software BCH
+Subject: [PATCH] mtd: add H432B NAND controller with software BCH
 
-Upstream-Status: Inappropriate [H432B hardware qualification]
+Upstream-Status: Inappropriate [board-specific factory storage format]
 
-Keep the factory raw reader available as a separate config. The new driver
-uses Linux BCH8/512, RAM BBT, protected boot/tail partitions and an explicit
-bounded write window. No automatic UBI attachment or flash BBT writes.
+Use Linux BCH8/512 and a RAM BBT for the Linux NAND region.
+Preserve the factory boot and BBT regions, whose ECC/storage contracts
+differ. Read-only and scratch windows remain explicit diagnostic profiles;
+the normal runtime exposes the complete Linux UBI region as writable.
 
 --- a/drivers/mtd/nand/raw/Kconfig
 +++ b/drivers/mtd/nand/raw/Kconfig
@@ -13,7 +14,7 @@ bounded write window. No automatic UBI attachment or flash BBT writes.
  if MTD_RAW_NAND
  
 +config MTD_NAND_HIMS_U2
-+	bool "HIMS U2 bounded NAND with software BCH"
++	bool "H432B S5PV210 NAND with software BCH"
 +	depends on ARCH_S5PV210
 +	select MTD_NAND_ECC_SW_BCH
 +	help
@@ -31,13 +32,15 @@ bounded write window. No automatic UBI attachment or flash BBT writes.
  obj-$(CONFIG_MTD_NAND_HIMS_U2_RO) += hims-u2-nand-ro.o
  obj-$(CONFIG_MTD_RAW_NAND)		+= nand.o
  obj-$(CONFIG_MTD_SM_COMMON) 		+= sm_common.o
+diff --git a/drivers/mtd/nand/raw/hims-u2-nand.c b/drivers/mtd/nand/raw/hims-u2-nand.c
 --- /dev/null
 +++ b/drivers/mtd/nand/raw/hims-u2-nand.c
-@@ -0,0 +1,221 @@
+@@ -0,0 +1,319 @@
 +// SPDX-License-Identifier: GPL-2.0-only
-+/* H432B S5PV210 NAND: inherited timing, Linux software BCH8/512.
-+ * Factory boot records use another ECC format; preserve and read them RAW.
-+ * No flash BBT or automatic format is enabled during scratch qualification.
++/*
++ * H432B S5PV210 NAND controller using inherited timings and BCH8/512.
++ * Factory boot records use a different ECC format and must be read raw.
++ * A RAM BBT preserves the factory bad-block tables in the reserved tail.
 + */
 +#include <linux/delay.h>
 +#include <linux/io.h>
@@ -48,286 +51,425 @@ bounded write window. No automatic UBI attachment or flash BBT writes.
 +#include <linux/mtd/rawnand.h>
 +#include <linux/of.h>
 +#include <linux/platform_device.h>
++
 +#include "hims-u2-nand-guard.h"
 +
-+#define NFCONF 0x00
-+#define NFCONT 0x04
-+#define NFCMD  0x08
-+#define NFADDR 0x0c
-+#define NFDATA 0x10
-+#define NFSTAT 0x28
++#define NFCONF	0x00
++#define NFCONT	0x04
++#define NFCMD	0x08
++#define NFADDR	0x0c
++#define NFDATA	0x10
++#define NFSTAT	0x28
 +
 +struct u2_nand {
-+ struct nand_controller controller;
-+ struct nand_chip chip;
-+ void __iomem *regs;
-+ struct u2_nand_guard guard;
-+ bool writable;
-+ struct mtd_partition partitions[5];
-+ unsigned nr_parts;
++	struct nand_controller controller;
++	struct nand_chip chip;
++	void __iomem *regs;
++	struct u2_nand_guard guard;
++	bool writable;
++	struct mtd_partition partitions[5];
++	unsigned int nr_parts;
 +};
-+static bool u2_command_supported(unsigned cmd)
++
++static bool u2_command_supported(unsigned int cmd)
 +{
-+ switch(cmd) {
-+ case 0x00: case 0x05: case 0x30: case 0x70: case 0x90:
-+ case 0xe0: case 0xec: case 0xee: case 0xff:
-+ case 0x80: case 0x10: case 0x60: case 0xd0:
-+  return true;
-+ default: return false;
-+ }
++	switch (cmd) {
++	case NAND_CMD_READ0:
++	case NAND_CMD_RNDOUT:
++	case NAND_CMD_READSTART:
++	case NAND_CMD_STATUS:
++	case NAND_CMD_READID:
++	case NAND_CMD_RNDOUTSTART:
++	case NAND_CMD_PARAM:
++	case NAND_CMD_GET_FEATURES:
++	case NAND_CMD_RESET:
++	case NAND_CMD_SEQIN:
++	case NAND_CMD_PAGEPROG:
++	case NAND_CMD_ERASE1:
++	case NAND_CMD_ERASE2:
++		return true;
++	default:
++		return false;
++	}
 +}
-+static int u2_exec_op(struct nand_chip *chip,const struct nand_operation *op,
-+                      bool check_only)
++
++static int u2_exec_op(struct nand_chip *chip, const struct nand_operation *op,
++		      bool check_only)
 +{
-+ struct u2_nand *n=nand_get_controller_data(chip);
-+ struct u2_nand_guard next=n->guard;
-+ const struct nand_op_instr *in;
-+ unsigned i,j;
-+ u32 original,status;
-+ bool write_op=false;
-+ int ret=0;
-+ if(op->cs) return -ENOTSUPP;
-+ /* First check syntax/support; check_only must not depend on prior I/O. */
-+ for(i=0;i<op->ninstrs;i++) {
-+  in=&op->instrs[i];
-+  switch(in->type) {
-+  case NAND_OP_CMD_INSTR:
-+   if(!u2_command_supported(in->ctx.cmd.opcode)) return -ENOTSUPP;
-+   break;
-+  case NAND_OP_ADDR_INSTR:
-+   if(!in->ctx.addr.naddrs || in->ctx.addr.naddrs>8) return -ENOTSUPP;
-+   break;
-+  case NAND_OP_DATA_IN_INSTR: case NAND_OP_DATA_OUT_INSTR:
-+  case NAND_OP_WAITRDY_INSTR: break;
-+  default: return -ENOTSUPP;
-+  }
-+ }
-+ if(check_only) return 0;
-+ /* Validate every instruction against a COPY before the first MMIO write. */
-+ for(i=0;i<op->ninstrs;i++) {
-+  in=&op->instrs[i];
-+  switch(in->type) {
-+  case NAND_OP_CMD_INSTR:
-+   ret=u2_guard_command(&next,in->ctx.cmd.opcode);
-+   if(in->ctx.cmd.opcode==0x80 || in->ctx.cmd.opcode==0x10 ||
-+      in->ctx.cmd.opcode==0x60 || in->ctx.cmd.opcode==0xd0) write_op=true;
-+   if(!n->writable && (next.mode || in->ctx.cmd.opcode==0x10 ||
-+                      in->ctx.cmd.opcode==0xd0)) ret=-1;
-+   break;
-+  case NAND_OP_ADDR_INSTR:
-+   ret=u2_guard_address(&next,in->ctx.addr.addrs,in->ctx.addr.naddrs);
-+   break;
-+  case NAND_OP_DATA_OUT_INSTR:
-+   write_op=true;
-+   ret=n->writable ? u2_guard_output(&next,in->ctx.data.len) : -1;
-+   break;
-+  default: break;
-+  }
-+  if(ret) {
-+   n->guard.mode=n->guard.addressed=0;
-+   return -EROFS;
-+  }
-+ }
-+ original=readl(n->regs+NFCONT);
-+ if(!(original&1)) return -ENODEV;
-+ /* Do not defeat controller lock-tight/soft-lock state. */
-+ if(write_op && (original&(BIT(16)|BIT(17)))) return -EROFS;
-+ writel((original&~BIT(1))|BIT(6)|BIT(7),n->regs+NFCONT);
-+ for(i=0;i<op->ninstrs;i++) {
-+  in=&op->instrs[i];
-+  switch(in->type) {
-+  case NAND_OP_CMD_INSTR:
-+   writeb(in->ctx.cmd.opcode,n->regs+NFCMD); break;
-+  case NAND_OP_ADDR_INSTR:
-+   for(j=0;j<in->ctx.addr.naddrs;j++)
-+    writeb(in->ctx.addr.addrs[j],n->regs+NFADDR);
-+   break;
-+  case NAND_OP_DATA_IN_INSTR:
-+   ioread8_rep(n->regs+NFDATA,in->ctx.data.buf.in,in->ctx.data.len); break;
-+  case NAND_OP_DATA_OUT_INSTR:
-+   iowrite8_rep(n->regs+NFDATA,in->ctx.data.buf.out,in->ctx.data.len); break;
-+  case NAND_OP_WAITRDY_INSTR:
-+   ret=readl_poll_timeout(n->regs+NFSTAT,status,status&1,1,
-+           min_t(unsigned,in->ctx.waitrdy.timeout_ms,1000)*1000);
-+   break;
-+  default: ret=-ENOTSUPP;
-+  }
-+  if(ret) break;
-+  if(in->delay_ns) ndelay(in->delay_ns);
-+ }
-+ writel(original,n->regs+NFCONT);
-+ if(ret) n->guard.mode=n->guard.addressed=0;
-+ else n->guard=next;
-+ return ret;
++	struct u2_nand *n = nand_get_controller_data(chip);
++	struct u2_nand_guard next = n->guard;
++	const struct nand_op_instr *in;
++	unsigned int i, j;
++	u32 original, status;
++	bool write_op = false;
++	int ret = 0;
++
++	if (op->cs)
++		return -ENOTSUPP;
++
++	/* check_only describes capabilities, independent of prior I/O. */
++	for (i = 0; i < op->ninstrs; i++) {
++		in = &op->instrs[i];
++		switch (in->type) {
++		case NAND_OP_CMD_INSTR:
++			if (!u2_command_supported(in->ctx.cmd.opcode))
++				return -ENOTSUPP;
++			break;
++		case NAND_OP_ADDR_INSTR:
++			if (!in->ctx.addr.naddrs || in->ctx.addr.naddrs > 8)
++				return -ENOTSUPP;
++			break;
++		case NAND_OP_DATA_IN_INSTR:
++		case NAND_OP_DATA_OUT_INSTR:
++		case NAND_OP_WAITRDY_INSTR:
++			break;
++		default:
++			return -ENOTSUPP;
++		}
++	}
++	if (check_only)
++		return 0;
++
++	/* Validate the complete operation on a copy before the first write. */
++	for (i = 0; i < op->ninstrs; i++) {
++		in = &op->instrs[i];
++		switch (in->type) {
++		case NAND_OP_CMD_INSTR:
++			ret = u2_guard_command(&next, in->ctx.cmd.opcode);
++			if (in->ctx.cmd.opcode == NAND_CMD_SEQIN ||
++			    in->ctx.cmd.opcode == NAND_CMD_PAGEPROG ||
++			    in->ctx.cmd.opcode == NAND_CMD_ERASE1 ||
++			    in->ctx.cmd.opcode == NAND_CMD_ERASE2)
++				write_op = true;
++			if (!n->writable && (next.mode ||
++			    in->ctx.cmd.opcode == NAND_CMD_PAGEPROG ||
++			    in->ctx.cmd.opcode == NAND_CMD_ERASE2))
++				ret = -EROFS;
++			break;
++		case NAND_OP_ADDR_INSTR:
++			ret = u2_guard_address(&next, in->ctx.addr.addrs,
++					      in->ctx.addr.naddrs);
++			break;
++		case NAND_OP_DATA_OUT_INSTR:
++			write_op = true;
++			ret = n->writable ?
++				u2_guard_output(&next, in->ctx.data.len) : -EROFS;
++			break;
++		default:
++			break;
++		}
++		if (ret) {
++			n->guard.mode = 0;
++			n->guard.addressed = 0;
++			return -EROFS;
++		}
++	}
++
++	original = readl(n->regs + NFCONT);
++	if (!(original & BIT(0)))
++		return -ENODEV;
++	/* Preserve controller lock-tight and soft-lock protections. */
++	if (write_op && (original & (BIT(16) | BIT(17))))
++		return -EROFS;
++	writel((original & ~BIT(1)) | BIT(6) | BIT(7), n->regs + NFCONT);
++	for (i = 0; i < op->ninstrs; i++) {
++		in = &op->instrs[i];
++		switch (in->type) {
++		case NAND_OP_CMD_INSTR:
++			writeb(in->ctx.cmd.opcode, n->regs + NFCMD);
++			break;
++		case NAND_OP_ADDR_INSTR:
++			for (j = 0; j < in->ctx.addr.naddrs; j++)
++				writeb(in->ctx.addr.addrs[j], n->regs + NFADDR);
++			break;
++		case NAND_OP_DATA_IN_INSTR:
++			ioread8_rep(n->regs + NFDATA, in->ctx.data.buf.in,
++				    in->ctx.data.len);
++			break;
++		case NAND_OP_DATA_OUT_INSTR:
++			iowrite8_rep(n->regs + NFDATA, in->ctx.data.buf.out,
++				     in->ctx.data.len);
++			break;
++		case NAND_OP_WAITRDY_INSTR:
++			ret = readl_poll_timeout(n->regs + NFSTAT, status,
++						status & BIT(0), 1,
++				min_t(unsigned int, in->ctx.waitrdy.timeout_ms,
++				      1000) * 1000);
++			break;
++		default:
++			ret = -ENOTSUPP;
++		}
++		if (ret)
++			break;
++		if (in->delay_ns)
++			ndelay(in->delay_ns);
++	}
++	writel(original, n->regs + NFCONT);
++	if (ret) {
++		n->guard.mode = 0;
++		n->guard.addressed = 0;
++	} else {
++		n->guard = next;
++	}
++	return ret;
 +}
++
 +static int u2_attach_chip(struct nand_chip *chip)
 +{
-+ struct mtd_info *mtd=nand_to_mtd(chip);
-+ if(chip->options&NAND_BUSWIDTH_16 || chip->id.data[0]!=0xec ||
-+    chip->id.data[1]!=0xdc || mtd->size!=U2_NAND_BYTES ||
-+    mtd->writesize!=U2_PAGE_BYTES || mtd->oobsize!=U2_OOB_BYTES ||
-+    mtd->erasesize!=U2_ERASE_BYTES || !nand_is_slc(chip)) return -EINVAL;
-+ chip->ecc.engine_type=NAND_ECC_ENGINE_TYPE_SOFT;
-+ chip->ecc.algo=NAND_ECC_ALGO_BCH;
-+ chip->ecc.size=512;
-+ chip->ecc.strength=8;
-+ chip->options |= NAND_NO_SUBPAGE_WRITE;
-+ /* Always RAM-only BBT for this qualification driver. Scanning cannot
-+  * silently create or update BBT pages in the protected tail. */
-+ chip->bbt_options &= ~NAND_BBT_USE_FLASH;
-+ return 0;
++	struct mtd_info *mtd = nand_to_mtd(chip);
++
++	/* The board policy and factory format are specific to this geometry. */
++	if (chip->options & NAND_BUSWIDTH_16 || chip->id.data[0] != 0xec ||
++	    chip->id.data[1] != 0xdc || mtd->size != U2_NAND_BYTES ||
++	    mtd->writesize != U2_PAGE_BYTES || mtd->oobsize != U2_OOB_BYTES ||
++	    mtd->erasesize != U2_ERASE_BYTES || !nand_is_slc(chip))
++		return -EINVAL;
++	chip->ecc.engine_type = NAND_ECC_ENGINE_TYPE_SOFT;
++	chip->ecc.algo = NAND_ECC_ALGO_BCH;
++	chip->ecc.size = 512;
++	chip->ecc.strength = 8;
++	chip->options |= NAND_NO_SUBPAGE_WRITE;
++	/* Do not create Linux BBT pages over the factory's reserved tables. */
++	chip->bbt_options &= ~NAND_BBT_USE_FLASH;
++	return 0;
 +}
-+static const struct nand_controller_ops u2_ops={
-+ .exec_op=u2_exec_op,.attach_chip=u2_attach_chip,
++
++static const struct nand_controller_ops u2_ops = {
++	.exec_op = u2_exec_op,
++	.attach_chip = u2_attach_chip,
 +};
-+static void add_part(struct u2_nand *n,const char *name,u32 start,u32 end,bool rw)
++
++static void u2_add_partition(struct u2_nand *n, const char *name,
++			     u32 start, u32 end, bool writable)
 +{
-+ struct mtd_partition *p;
-+ if(start==end) return;
-+ p=&n->partitions[n->nr_parts++];
-+ p->name=name; p->offset=start; p->size=end-start;
-+ p->mask_flags=rw?0:MTD_WRITEABLE;
++	struct mtd_partition *p;
++
++	if (start == end)
++		return;
++	p = &n->partitions[n->nr_parts++];
++	p->name = name;
++	p->offset = start;
++	p->size = end - start;
++	p->mask_flags = writable ? 0 : MTD_WRITEABLE;
 +}
++
 +static int u2_nand_probe(struct platform_device *pdev)
 +{
-+ struct device *dev=&pdev->dev;
-+ struct u2_nand *n;
-+ struct mtd_info *mtd;
-+ u32 window[2];
-+ int ret;
-+ n=devm_kzalloc(dev,sizeof(*n),GFP_KERNEL);
-+ if(!n) return -ENOMEM;
-+ n->regs=devm_platform_ioremap_resource(pdev,0);
-+ if(IS_ERR(n->regs)) return PTR_ERR(n->regs);
-+ if(!(readl(n->regs+NFCONT)&1) || (readl(n->regs+NFCONF)&1))
-+  return dev_err_probe(dev,-ENODEV,"requires inherited enabled 8-bit NAND\n");
-+ if(of_find_property(dev->of_node,"hims,write-window",NULL)) {
-+  ret=of_property_read_u32_array(dev->of_node,"hims,write-window",window,2);
-+  if(ret || !u2_guard_window(window[0],window[1]))
-+   return dev_err_probe(dev,-EINVAL,"invalid bounded write window\n");
-+  n->writable=true;
-+  n->guard.first=window[0]; n->guard.end=window[0]+window[1];
-+ }
-+ nand_controller_init(&n->controller);
-+ n->controller.ops=&u2_ops; n->chip.controller=&n->controller;
-+ nand_set_controller_data(&n->chip,n);
-+ nand_set_flash_node(&n->chip,dev->of_node);
-+ mtd=nand_to_mtd(&n->chip); mtd->dev.parent=dev;
-+ mtd->owner=THIS_MODULE; mtd->name="h432b-nand";
-+ platform_set_drvdata(pdev,n);
-+ ret=nand_scan(&n->chip,1);
-+ if(ret) return dev_err_probe(dev,ret,"NAND scan/BCH setup failed\n");
-+ if(n->chip.ecc.total!=52 || mtd->ecc_strength!=8) {
-+  ret=-EINVAL; goto cleanup;
-+ }
-+ add_part(n,"factory-boot",0,U2_BOOT_END,false);
-+ if(n->writable) {
-+  add_part(n,"linux-before",U2_BOOT_END,n->guard.first,false);
-+  add_part(n,n->guard.first==U2_BOOT_END && n->guard.end==U2_BBT_START ?
-+           "linux-ubi" : "nand-scratch",n->guard.first,n->guard.end,true);
-+  add_part(n,"linux-after",n->guard.end,U2_BBT_START,false);
-+ } else add_part(n,"linux-reserved",U2_BOOT_END,U2_BBT_START,false);
-+ add_part(n,"bbt-reserved",U2_BBT_START,U2_NAND_BYTES,false);
-+ ret=mtd_device_register(mtd,n->partitions,n->nr_parts);
-+ if(ret) goto cleanup;
-+ dev_info(dev,"BCH8/512, OOB ECC12..63, boot/tail protected; window %08x..%08x\n",
-+          n->guard.first,n->guard.end);
-+ return 0;
++	struct device *dev = &pdev->dev;
++	struct u2_nand *n;
++	struct mtd_info *mtd;
++	u32 window[2];
++	int ret;
++
++	n = devm_kzalloc(dev, sizeof(*n), GFP_KERNEL);
++	if (!n)
++		return -ENOMEM;
++	n->regs = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(n->regs))
++		return PTR_ERR(n->regs);
++	if (!(readl(n->regs + NFCONT) & BIT(0)) ||
++	    (readl(n->regs + NFCONF) & BIT(0)))
++		return dev_err_probe(dev, -ENODEV,
++				     "requires inherited enabled 8-bit NAND\n");
++	if (of_find_property(dev->of_node, "hims,write-window", NULL)) {
++		ret = of_property_read_u32_array(dev->of_node, "hims,write-window",
++						window, ARRAY_SIZE(window));
++		if (ret || !u2_guard_window(window[0], window[1]))
++			return dev_err_probe(dev, -EINVAL,
++					     "invalid NAND write window\n");
++		n->writable = true;
++		n->guard.first = window[0];
++		n->guard.end = window[0] + window[1];
++	}
++	nand_controller_init(&n->controller);
++	n->controller.ops = &u2_ops;
++	n->chip.controller = &n->controller;
++	nand_set_controller_data(&n->chip, n);
++	nand_set_flash_node(&n->chip, dev->of_node);
++	mtd = nand_to_mtd(&n->chip);
++	mtd->dev.parent = dev;
++	mtd->owner = THIS_MODULE;
++	mtd->name = "h432b-nand";
++	platform_set_drvdata(pdev, n);
++	ret = nand_scan(&n->chip, 1);
++	if (ret)
++		return dev_err_probe(dev, ret, "NAND scan/BCH setup failed\n");
++	if (n->chip.ecc.total != 52 || mtd->ecc_strength != 8) {
++		ret = -EINVAL;
++		goto cleanup;
++	}
++	u2_add_partition(n, "factory-boot", 0, U2_BOOT_END, false);
++	if (n->writable) {
++		u2_add_partition(n, "linux-before", U2_BOOT_END,
++				 n->guard.first, false);
++		u2_add_partition(n, n->guard.first == U2_BOOT_END &&
++				 n->guard.end == U2_BBT_START ?
++				 "linux-ubi" : "nand-scratch",
++				 n->guard.first, n->guard.end, true);
++		u2_add_partition(n, "linux-after", n->guard.end,
++				 U2_BBT_START, false);
++	} else {
++		u2_add_partition(n, "linux-reserved", U2_BOOT_END,
++				 U2_BBT_START, false);
++	}
++	u2_add_partition(n, "bbt-reserved", U2_BBT_START, U2_NAND_BYTES, false);
++	ret = mtd_device_register(mtd, n->partitions, n->nr_parts);
++	if (ret)
++		goto cleanup;
++	dev_dbg(dev, "BCH8/512; writable range %08x..%08x\n",
++		n->guard.first, n->guard.end);
++	return 0;
++
 +cleanup:
-+ nand_cleanup(&n->chip);
-+ return ret;
++	nand_cleanup(&n->chip);
++	return ret;
 +}
++
 +static void u2_nand_remove(struct platform_device *pdev)
 +{
-+ struct u2_nand *n=platform_get_drvdata(pdev);
-+ int ret=mtd_device_unregister(nand_to_mtd(&n->chip));
-+ if(ret) dev_warn(&pdev->dev,"MTD unregister: %d\n",ret);
-+ nand_cleanup(&n->chip);
++	struct u2_nand *n = platform_get_drvdata(pdev);
++	int ret;
++
++	ret = mtd_device_unregister(nand_to_mtd(&n->chip));
++	if (ret)
++		dev_warn(&pdev->dev, "MTD unregister: %d\n", ret);
++	nand_cleanup(&n->chip);
 +}
-+static const struct of_device_id u2_nand_match[]={
-+ {.compatible="hims,u2-nand-bch"},{ }
++
++static const struct of_device_id u2_nand_match[] = {
++	{ .compatible = "hims,h432b-nand" },
++	{ .compatible = "hims,u2-nand-bch" },
++	{ }
 +};
-+MODULE_DEVICE_TABLE(of,u2_nand_match);
-+static struct platform_driver u2_nand_driver={
-+ .probe=u2_nand_probe,.remove_new=u2_nand_remove,
-+ .driver={.name="hims-u2-nand-bch",.of_match_table=u2_nand_match},
++MODULE_DEVICE_TABLE(of, u2_nand_match);
++
++static struct platform_driver u2_nand_driver = {
++	.probe = u2_nand_probe,
++	.remove_new = u2_nand_remove,
++	.driver = {
++		.name = "h432b-nand",
++		.of_match_table = u2_nand_match,
++	},
 +};
 +module_platform_driver(u2_nand_driver);
++
 +MODULE_LICENSE("GPL");
-+MODULE_DESCRIPTION("H432B bounded NAND BCH8 qualification");
++MODULE_DESCRIPTION("H432B S5PV210 NAND controller with software BCH");
+diff --git a/drivers/mtd/nand/raw/hims-u2-nand-guard.h b/drivers/mtd/nand/raw/hims-u2-nand-guard.h
 --- /dev/null
 +++ b/drivers/mtd/nand/raw/hims-u2-nand-guard.h
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,114 @@
 +/* SPDX-License-Identifier: GPL-2.0-only */
-+/* Pure NAND transaction guard; the executor validates a complete operation
-+ * using a copy of this state BEFORE any controller access. */
++/*
++ * Board storage boundaries, independent of the S5PV210 register interface.
++ * Validate a whole transaction on a state copy before controller access.
++ * Kept free of kernel dependencies for exhaustive native boundary tests.
++ */
 +#ifndef HIMS_U2_NAND_GUARD_H
 +#define HIMS_U2_NAND_GUARD_H
-+#define U2_NAND_BYTES 0x20000000U
-+#define U2_PAGE_BYTES 2048U
-+#define U2_OOB_BYTES 64U
-+#define U2_ERASE_BYTES 131072U
-+#define U2_BOOT_END 0x00400000U
-+#define U2_BBT_START 0x1ff00000U
++
++#define U2_NAND_BYTES	0x20000000U
++#define U2_PAGE_BYTES	2048U
++#define U2_OOB_BYTES	64U
++#define U2_ERASE_BYTES	131072U
++#define U2_BOOT_END	0x00400000U
++#define U2_BBT_START	0x1ff00000U
++
 +struct u2_nand_guard {
-+ unsigned first, end, mode, addressed, column, row, written;
++	unsigned int first, end, mode, addressed, column, row, written;
 +};
-+static int u2_guard_window(unsigned first,unsigned length)
++
++static int u2_guard_window(unsigned int first, unsigned int length)
 +{
-+ return first>=U2_BOOT_END && first<U2_BBT_START &&
-+        !(first&(U2_ERASE_BYTES-1)) && length &&
-+        !(length&(U2_ERASE_BYTES-1)) && length<=U2_BBT_START-first;
++	return first >= U2_BOOT_END && first < U2_BBT_START &&
++	       !(first & (U2_ERASE_BYTES - 1)) && length &&
++	       !(length & (U2_ERASE_BYTES - 1)) &&
++	       length <= U2_BBT_START - first;
 +}
-+static int u2_guard_command(struct u2_nand_guard *s,unsigned cmd)
++
++static int u2_guard_command(struct u2_nand_guard *s, unsigned int cmd)
 +{
-+ switch(cmd) {
-+ case 0x80: case 0x60:
-+  s->mode=cmd; s->addressed=s->written=0; return 0;
-+ case 0x10:
-+  if(s->mode!=0x80 || !s->addressed || !s->written) return -1;
-+  s->mode=0; return 0;
-+ case 0xd0:
-+  if(s->mode!=0x60 || !s->addressed) return -1;
-+  s->mode=0; return 0;
-+ case 0x70: /* status must not invalidate a split program operation */
-+  return 0;
-+ case 0x00: case 0x05: case 0x30: case 0x90:
-+ case 0xe0: case 0xec: case 0xee: case 0xff:
-+  s->mode=0; s->addressed=0; return 0;
-+ default: return -1;
-+ }
++	switch (cmd) {
++	case 0x80: /* SEQIN */
++	case 0x60: /* ERASE1 */
++		s->mode = cmd;
++		s->addressed = 0;
++		s->written = 0;
++		return 0;
++	case 0x10: /* PAGEPROG */
++		if (s->mode != 0x80 || !s->addressed || !s->written)
++			return -1;
++		s->mode = 0;
++		return 0;
++	case 0xd0: /* ERASE2 */
++		if (s->mode != 0x60 || !s->addressed)
++			return -1;
++		s->mode = 0;
++		return 0;
++	case 0x70: /* STATUS must preserve a split program operation. */
++		return 0;
++	case 0x00: /* READ0 */
++	case 0x05: /* RNDOUT */
++	case 0x30: /* READSTART */
++	case 0x90: /* READID */
++	case 0xe0: /* RNDOUTSTART */
++	case 0xec: /* PARAM */
++	case 0xee: /* GET_FEATURES */
++	case 0xff: /* RESET */
++		s->mode = 0;
++		s->addressed = 0;
++		return 0;
++	default:
++		return -1;
++	}
 +}
++
 +static int u2_guard_address(struct u2_nand_guard *s,
-+                           const unsigned char *a,unsigned n)
++			   const unsigned char *a, unsigned int n)
 +{
-+ unsigned row,col=0,bytes;
-+ if(!n || n>8) return -1;
-+ if(!s->mode) return 0;
-+ if(s->addressed) return -1;
-+ if(s->mode==0x80) {
-+  if(n!=5) return -1;
-+  col=a[0]|(unsigned)a[1]<<8;
-+  row=a[2]|(unsigned)a[3]<<8|(unsigned)a[4]<<16;
-+  if(col>=U2_PAGE_BYTES+U2_OOB_BYTES) return -1;
-+  bytes=U2_PAGE_BYTES;
-+ } else {
-+  if(n!=3) return -1;
-+  row=a[0]|(unsigned)a[1]<<8|(unsigned)a[2]<<16;
-+  if(row&63) return -1;
-+  bytes=U2_ERASE_BYTES;
-+ }
-+ if(row>=U2_NAND_BYTES/U2_PAGE_BYTES ||
-+    row*U2_PAGE_BYTES<s->first || row*U2_PAGE_BYTES>=s->end ||
-+    bytes>s->end-row*U2_PAGE_BYTES) return -1;
-+ s->row=row; s->column=col; s->addressed=1;
-+ return 0;
++	unsigned int row, col = 0, bytes;
++
++	if (!n || n > 8)
++		return -1;
++	if (!s->mode)
++		return 0;
++	if (s->addressed)
++		return -1;
++	if (s->mode == 0x80) {
++		if (n != 5)
++			return -1;
++		col = a[0] | (unsigned int)a[1] << 8;
++		row = a[2] | (unsigned int)a[3] << 8 | (unsigned int)a[4] << 16;
++		if (col >= U2_PAGE_BYTES + U2_OOB_BYTES)
++			return -1;
++		bytes = U2_PAGE_BYTES;
++	} else {
++		if (n != 3)
++			return -1;
++		row = a[0] | (unsigned int)a[1] << 8 | (unsigned int)a[2] << 16;
++		if (row & (U2_ERASE_BYTES / U2_PAGE_BYTES - 1))
++			return -1;
++		bytes = U2_ERASE_BYTES;
++	}
++	if (row >= U2_NAND_BYTES / U2_PAGE_BYTES ||
++	    row * U2_PAGE_BYTES < s->first || row * U2_PAGE_BYTES >= s->end ||
++	    bytes > s->end - row * U2_PAGE_BYTES)
++		return -1;
++	s->row = row;
++	s->column = col;
++	s->addressed = 1;
++	return 0;
 +}
-+static int u2_guard_output(struct u2_nand_guard *s,unsigned length)
++
++static int u2_guard_output(struct u2_nand_guard *s, unsigned int length)
 +{
-+ if(s->mode!=0x80 || !s->addressed || !length ||
-+    s->column>U2_PAGE_BYTES+U2_OOB_BYTES ||
-+    length>U2_PAGE_BYTES+U2_OOB_BYTES-s->column) return -1;
-+ s->column+=length; s->written+=length;
-+ return 0;
++	if (s->mode != 0x80 || !s->addressed || !length ||
++	    s->column > U2_PAGE_BYTES + U2_OOB_BYTES ||
++	    length > U2_PAGE_BYTES + U2_OOB_BYTES - s->column)
++		return -1;
++	s->column += length;
++	s->written += length;
++	return 0;
 +}
-+#endif
++
++#endif /* HIMS_U2_NAND_GUARD_H */

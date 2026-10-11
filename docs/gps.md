@@ -20,8 +20,10 @@ improvement have not been demonstrated.
 
 The shared `h432b-gps-power` sequencer asserts reset, enables the supply,
 waits 100 ms and releases reset. Removal asserts reset and disables the
-supply. It performs no PMIC transaction and leaves the receiver powered while
-bound. NMEA reception after runtime deep sleep has passed. Inactivity power saving, assistance retention and automatic
+supply. It performs no PMIC transaction and retains receiver power across
+system sleep. Device detach and shutdown assert reset and disable the supply,
+with balanced regulator ownership. NMEA reception after runtime deep sleep
+has passed. Inactivity power saving, assistance retention and automatic
 re-aiding after resume remain unqualified.
 The UART is not a console.
 

@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-only
 / {
-	aliases { i2c10 = &fm_bus; };
+	aliases {
+		i2c10 = &fm_bus;
+	};
+
+	fm_supply: regulator-fm {
+		compatible = "regulator-fixed";
+		regulator-name = "fm-vdd";
+		gpio = <&gpe0 4 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
 	fm_bus: i2c-fm {
 		compatible = "i2c-gpio";
 		sda-gpios = <&gpd1 0 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
@@ -11,12 +21,23 @@
 		#size-cells = <0>;
 
 		tuner@10 {
-			compatible = "hims,h432b-si4702";
+			compatible = "silabs,si4702-c19";
 			reg = <0x10>;
-			enable-gpios = <&gpe0 4 GPIO_ACTIVE_HIGH>;
+			vdd-supply = <&fm_supply>;
 			reset-gpios = <&gph3 2 GPIO_ACTIVE_LOW>;
-			/* Factory drives this high; tuner-side role not yet proven. */
-			mode-gpios = <&gph1 4 GPIO_ACTIVE_HIGH>;
+			silabs,channel-spacing-khz = <100>;
+			silabs,deemphasis-us = <50>;
+			silabs,use-crystal;
 		};
+	};
+};
+
+&gph1 {
+	/* Board control held high by the factory; not a Si4702 protocol signal. */
+	fm-mode-hog {
+		gpio-hog;
+		gpios = <4 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "fm-mode";
 	};
 };

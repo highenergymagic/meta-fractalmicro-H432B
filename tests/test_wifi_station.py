@@ -17,28 +17,34 @@ NET = (FILES / "h432b-wifi-net.h").read_text()
 class WifiStation(unittest.TestCase):
     def test_security_scope(self):
         for token in ("NL80211_WPA_VERSION_2", "WLAN_CIPHER_SUITE_CCMP",
-                      "WLAN_AKM_SUITE_PSK", "NL80211_MFP_NO", "params->ie_len >"):
+                      "WLAN_AKM_SUITE_PSK", "NL80211_MFP_NO", "wifi_ht_assoc_ies_valid"):
             self.assertIn(token, ASSOC)
         self.assertIn("wifi_write(net->func, 1, 0x250, 0", ASSOC)
         self.assertIn("REGULATORY_COUNTRY_IE_IGNORE", NET)
         self.assertIn('crypto_alloc_aead("ccm(aes)", 0, CRYPTO_ALG_ASYNC)', DATA)
-        self.assertNotIn("wifi_h2c_send", DATA)  # key material never goes to firmware
+        key_ops = DATA.split("static int wifi_net_add_key", 1)[1].split(
+            "static int wifi_net_default_key", 1)[0]
+        self.assertNotIn("wifi_h2c_send", key_ops)  # key material never goes to firmware
 
     def test_controlled_port_and_replay(self):
         self.assertIn("!net->authorized && skb->protocol != htons(ETH_P_PAE)", DATA)
-        self.assertIn("(!encrypted || !net->authorized) && protocol != ETH_P_PAE", DATA)
+        self.assertIn("(!metadata.encrypted || !net->authorized) && protocol != ETH_P_PAE", DATA)
         self.assertIn("pn <= key->rx_pn[tid]", DATA)
         self.assertIn("key->tx_pn >= 0xffffffffffffULL", DATA)
         self.assertLess(DATA.index("crypto_aead_setkey"), DATA.index("key->tfm = tfm"))
         rx = DATA.split("static void wifi_net_receive", 1)[1]
-        self.assertLess(rx.index("wifi_ccmp_crypt"), rx.index("key->rx_pn[tid] = pn"))
+        self.assertLess(rx.index("wifi_ccmp_crypt"), rx.index("wifi_reorder_insert"))
+        release = DATA.split("static void wifi_net_rx_release", 1)[1].split(
+            "static void wifi_net_rx_discard", 1)[0]
+        self.assertLess(release.index("metadata.pn <= key->rx_pn"),
+                        release.index("key->rx_pn[metadata.tid] = metadata.pn"))
         self.assertLess(DATA.index("!memcmp(key->material"), DATA.index("memzero_explicit(key"))
         self.assertIn("CRYPTO_ALG_ASYNC", DATA)
         self.assertIn("aead_request_free(request)", CCMP)
 
     def test_no_unbounded_transmit_or_join(self):
         self.assertIn("tries < 100", DATA)
-        self.assertIn("net->faulted = true", DATA)
+        self.assertIn("wifi_net_fault(net, error)", DATA)
         self.assertIn("net->join_timeout, 20 * HZ", ASSOC)
         self.assertIn("net->cache[i].seen + 30 * HZ", ASSOC)
         self.assertIn("memset(packet, 0, transfer)", H2C)

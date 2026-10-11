@@ -5,14 +5,21 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=6bc538ed5bd9a7fc9398086aedcd7e46"
 LINUX_VERSION = "6.12.111"
 SRC_URI = "https://www.kernel.org/pub/linux/kernel/projects/cip/6.12/linux-cip-6.12.111-cip32.tar.xz;name=kernel \
     https://www.kernel.org/pub/linux/kernel/projects/rt/6.12/patch-6.12.111-rt21.patch.xz;name=rt \
+    file://0000-hardware-vendor-prefixes.patch \
+    file://0040-samsung-gpio-hog-binding.patch \
     file://0001-readonly-storage-integration.patch \
     file://0002-nand-reader.patch \
     file://0004-usb-host-required-power-bit.patch \
+    file://0034-dwc2-hardware-defaults.patch \
+    file://0035-samsung-usb2-optional-vbus.patch \
     file://0005-sdio-cis-end.patch \
     file://0006-audio-clock-codec.patch \
     file://0007-hims-u2-audio.patch \
     file://0026-h432b-audio-dma-request-clock.patch \
     file://0008-nand-bch-window.patch file://0015-nand-word-reads.patch file://test-nand-guard.c file://nand-profile.py \
+    file://0037-nand-clock-ownership.patch \
+    file://0038-h432b-board-bindings.patch \
+    file://0039-s5pv210-dt-schema-corrections.patch \
     file://s5pv210-hims-u2.dts \
     file://u2-ram.config file://u2-storage.config file://u2-sdio.config \
     file://u2-audio.config file://u2-systemd.config file://u2-input.config file://u2-ethernet.config \
@@ -51,8 +58,8 @@ do_configure:append() {
         grep -qx "CONFIG_$option=y" ${B}/.config ||
             bbfatal "Missing required board/guard option: $option"
     done
-    grep -qx '# CONFIG_MODULES is not set' ${B}/.config ||
-        bbfatal "This baseline has no module-installation contract yet"
+    # Runtime recipes select and verify their final module policy after all
+    # device fragments have been merged; the baseline does not constrain it.
 }
 
 # kernel.org release patches do not carry OE's local provenance header.

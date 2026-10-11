@@ -10,6 +10,7 @@
 #include <usbdescriptors.h>
 #include <linux/usb/gadget.h>
 #include <libfdt.h>
+#include <version.h>
 #include "u2fastboot.h"
 
 #define RX_SIZE 16384U
@@ -115,14 +116,19 @@ int u2fastboot_configure(struct usb_gadget *g, unsigned config)
  online=1;
  return queue_rx();
 }
+extern const char *u2_identity_board_id(void);
+
 static void getvar(const char *name)
 {
  char value[32];
  const char *v=NULL;
  if (!strcmp(name,"version")) v="0.4";
- else if (!strcmp(name,"version-bootloader")) v="H432B-ram53-fastboot";
+ else if (!strcmp(name,"version-bootloader")) v=U_BOOT_VERSION;
  else if (!strcmp(name,"product")) v="h432b";
- else if (!strcmp(name,"serialno")) v="OPENH432-FASTBOOT";
+ else if (!strcmp(name,"serialno")) {
+  v=u2_identity_board_id();
+  if(!v) v="";
+ }
  else if (!strcmp(name,"max-download-size")) v="0x02000000";
  else if (!strcmp(name,"is-userspace")) v="no";
  else if (!strcmp(name,"secure")) v="no";

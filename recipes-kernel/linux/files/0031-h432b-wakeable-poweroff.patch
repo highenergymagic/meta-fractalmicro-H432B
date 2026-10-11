@@ -49,7 +49,7 @@ This is retained-memory soft-off, not battery isolation or PMIC cutoff.
 
  	s3c_pm_do_save(s5pv210_core_save, ARRAY_SIZE(s5pv210_core_save));
  	if (h432b_sromc)
-@@ -276,6 +283,138 @@
+@@ -276,6 +283,137 @@
  	.resume		= s5pv210_pm_resume,
  };
 
@@ -70,7 +70,6 @@ This is retained-memory soft-off, not battery isolation or PMIC cutoff.
 +
 +static void __iomem *h432b_power_gpio;
 +static void __iomem *h432b_vic[4];
-+extern void h432b_poweroff_resume(void);
 +
 +static void h432b_power_off(void)
 +{
@@ -219,3 +218,31 @@ This is retained-memory soft-off, not battery isolation or PMIC cutoff.
 +	.align 2
 +1:	.word	0xe0102000	/* SWRESET */
 +ENDPROC(h432b_poweroff_resume)
+diff --git a/arch/arm/mach-s5pv210/common.h b/arch/arm/mach-s5pv210/common.h
+--- a/arch/arm/mach-s5pv210/common.h
++++ b/arch/arm/mach-s5pv210/common.h
+@@ -11,5 +11,6 @@
+ #ifdef CONFIG_PM_SLEEP
+ void s5pv210_cpu_resume(void);
++void h432b_poweroff_resume(void);
+ void s5pv210_pm_init(void);
+ #else
+ static inline void s5pv210_pm_init(void) {}
+diff --git a/arch/arm/mach-s5pv210/pm.c b/arch/arm/mach-s5pv210/pm.c
+--- a/arch/arm/mach-s5pv210/pm.c
++++ b/arch/arm/mach-s5pv210/pm.c
+@@ -113,6 +113,6 @@
+  * WARNING: Do not put any debug in here that may effect memory or use
+  * peripherals, as things may be changing!
+-*/
++ */
+
+ static void s3c_pm_do_restore_core(const struct sleep_save *ptr, int count)
+ {
+@@ -145,2 +145,4 @@
+-	/* issue the standby signal into the pm unit. Note, we
+-	 * issue a write-buffer drain just in case */
++	/*
++	 * Issue the standby signal into the PM unit. Drain the write buffer
++	 * before entering sleep.
++	 */

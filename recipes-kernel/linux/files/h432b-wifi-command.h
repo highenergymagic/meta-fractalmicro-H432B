@@ -5,7 +5,6 @@
  * 2237e98dacd8421b38beb2d1aad88aa2b9f79dd8.
  * SDIO descriptor, FIFO and block-mode command transport match the factory HAL.
  */
-#include "sdio_ops.h"
 #include "h432b-wifi-rx.h"
 
 /* Non-atomic, ordered snapshots; reads do not acknowledge or drain RX. */
@@ -104,6 +103,7 @@ static int wifi_command_wait(struct sdio_func *func,
 }
 
 /* Host held. Keep failures visible separately from the command result. */
+#ifdef CONFIG_H432B_WIFI_DIAGNOSTICS
 static void wifi_command_snapshot(struct sdio_func *func,
 				  struct h432b_command_result *r, u8 phase)
 {
@@ -148,6 +148,8 @@ static void wifi_command_snapshot(struct sdio_func *func,
  * so omit factory HIMR=0x000f until a matching interrupt handler exists.
  * These are live initialization writes, not registers to restore afterward.
  */
+#endif
+
 static int wifi_command_mac_init(struct sdio_func *func,
 				 struct h432b_command_result *r)
 {
@@ -207,6 +209,7 @@ static int wifi_command_mac_init(struct sdio_func *func,
 	return 0;
 }
 
+#ifdef CONFIG_H432B_WIFI_DIAGNOSTICS
 static void wifi_loopback_packet(u8 *packet, u8 seq)
 {
 	u8 *p = packet + 40;
@@ -269,13 +272,14 @@ static bool wifi_loopback_matches(const u8 *p, unsigned int length, u8 seq)
 		p[8] == 2 && p[9] == 0x11 + seq * 0x10 &&
 		p[10] == 0x33 + seq * 0x10 && p[11] == 1;
 }
+#endif
 
 /* Host held. Returns 1 for a consumed batch, 0 for empty, or negative errno. */
 static int wifi_command_drain(struct sdio_func *func,
 			      struct h432b_command_result *r, u8 *data)
 {
 	struct h432b_event_result parsed = {};
-	unsigned int pending, offset, packet, length;
+	unsigned int pending, offset, packet, length, max_batches;
 	u16 count;
 	u8 code, seq;
 	int error = 0;
@@ -286,12 +290,12 @@ static int wifi_command_drain(struct sdio_func *func,
 	pending = (u16)(count - r->consumed);
 	if (!pending)
 		return 0;
-	if (pending > WIFI_EVENT_MAX / 512 || (!r->irq_owned && r->batches >= (r->stress ? 512 : (r->survey ? 256 : 64))))
+	max_batches = r->stress ? 512 : (r->survey ? 256 : 64);
+	if (pending > WIFI_EVENT_MAX / 512 || (!r->irq_owned && r->batches >= max_batches))
 		return -EOVERFLOW;
 	/* Factory FIFO reads use block mode even for exactly one block. */
-	error = mmc_io_rw_extended(func->card, 0, func->num,
-				  WIFI_C2H_FIFO | (r->port_seq & 3), 1,
-				  data, pending, 512);
+	error = wifi_sdio_blocks(func, false, WIFI_C2H_FIFO | (r->port_seq & 3),
+				 data, pending);
 	if (error)
 		return error;
 	r->port_seq = (r->port_seq + 1) & 3;
@@ -311,10 +315,12 @@ static int wifi_command_drain(struct sdio_func *func,
 		r->event_seq = (r->event_seq + 1) & 0x7f;
 		r->events++;
 		if (r->report_event) {
-			error = r->report_event(r->report_context, code, data + offset + 32, length);
+			error = r->report_event(r->report_context, code,
+						data + offset + 32, length);
 			if (error)
 				return error;
 		}
+#ifdef CONFIG_H432B_WIFI_DIAGNOSTICS
 		if (code == 19) {
 			r->debug_events++;
 			memset(r->debug_head, 0, sizeof(r->debug_head));
@@ -331,6 +337,7 @@ static int wifi_command_drain(struct sdio_func *func,
 			r->matched = true;
 			r->replies++;
 		}
+#endif
 		if (r->scanning && code == 8) {
 			const u8 *bss = data + offset + 32;
 
@@ -339,7 +346,7 @@ static int wifi_command_drain(struct sdio_func *func,
 			    get_unaligned_le32(bss) > length ||
 			    get_unaligned_le32(bss + 12) > 32 ||
 			    get_unaligned_le32(bss + 112) > length - 116 ||
-			    r->survey_events >= 64 || r->survey_done)
+			    (!r->persistent && r->survey_events >= 64) || r->survey_done)
 				return -EBADMSG;
 			if (r->report_bss) {
 				error = r->report_bss(r->report_context, bss, length);
@@ -358,6 +365,7 @@ static int wifi_command_drain(struct sdio_func *func,
 			r->matched = true;
 		}
 		if (code == 18) {
+#ifdef CONFIG_H432B_WIFI_DIAGNOSTICS
 			if (r->opmode)
 				return -EPROTO;
 			if (!r->sent || r->matched)
@@ -370,11 +378,15 @@ static int wifi_command_drain(struct sdio_func *func,
 				return -EBADMSG;
 			r->matched = true;
 			r->replies++;
+#else
+			return -EPROTO;
+#endif
 		}
 	}
 	return 1;
 }
 
+#ifdef CONFIG_H432B_WIFI_DIAGNOSTICS
 static int wifi_command_test(struct sdio_func *func,
 			     struct h432b_command_result *r, u16 baseline,
 			     sdio_irq_handler_t *handler)
@@ -509,8 +521,7 @@ static int wifi_command_test(struct sdio_func *func,
 		 * The interface callback at +0x38 is io_ops +0x18 (block write),
 		 * not +0x1c (byte write): intf_hdl embeds io_ops at +0x20.
 		 */
-		error = mmc_io_rw_extended(func->card, 1, func->num, 0x18c80, 1,
-					  packet, 1, 512);
+		error = wifi_sdio_blocks(func, true, 0x18c80, packet, 1);
 		if (error)
 			goto out;
 		r->sent = true;
@@ -583,3 +594,4 @@ out:
 	kfree(data);
 	return error;
 }
+#endif

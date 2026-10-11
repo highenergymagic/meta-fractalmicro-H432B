@@ -1,0 +1,63 @@
+Subject: [PATCH] dt-bindings: describe hims,h432b-battery
+Upstream-Status: Pending
+
+Describe required device resources separately from board wiring, with
+explicit supplies and GPIO roles for validation of the runtime device tree.
+
+---
+--- /dev/null
++++ b/Documentation/devicetree/bindings/power/supply/hims,h432b-battery.yaml
+@@ -0,0 +1,53 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/power/supply/hims,h432b-battery.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: H432B split-GPIO battery gauge transport and power indications
++
++maintainers:
++  - Freya Fractal <24643711+highenergymagic@users.noreply.github.com>
++
++description: |
++  The H432B has a single-drop fuel-gauge bus with separate receive and
++  inverted-transmit pins, plus charger and external-source indications.
++  This describes board wiring, not a gauge model or charger-control interface.
++  The timed bus slots require GPIO controllers that do not sleep.
++
++properties:
++  compatible:
++    oneOf:
++      - const: hims,h432b-battery
++      - const: fractal,h432b-battery-inventory
++        deprecated: true
++
++  rx-gpios:
++    maxItems: 1
++    description: Active-high receive level from the single-wire bus.
++
++  pull-low-gpios:
++    maxItems: 1
++    description: Active-high output pulling the single-wire bus low.
++
++  charging-gpios:
++    maxItems: 1
++    description: Active-low charger activity indication.
++
++  secondary-present-gpios:
++    maxItems: 1
++    description: Active-low secondary external-source indication.
++
++  ac-present-gpios:
++    maxItems: 1
++    description: Active-low primary external-source indication.
++
++required:
++  - compatible
++  - rx-gpios
++  - pull-low-gpios
++  - charging-gpios
++  - secondary-present-gpios
++  - ac-present-gpios
++
++additionalProperties: false

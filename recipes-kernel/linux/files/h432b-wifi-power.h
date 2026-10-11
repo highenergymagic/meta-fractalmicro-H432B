@@ -229,6 +229,52 @@ static int wifi_power_sequence(struct sdio_func *func,
 		return -EIO;
 	return 0;
 }
+
+/*
+ * Radio-only shutdown, with the SDIO function enabled and host held. This
+ * sequence matches the factory SDIO HAL and the GPL RTL8712 SDIO HAL; the
+ * similarly named USB sequence has different isolation and analog values.
+ */
+static int wifi_power_off(struct sdio_func *func)
+{
+	static const struct wifi_power_op tail[] = {
+		P8(0x03, 0, 0x70),
+		P8(0x04, 0, 0x06),
+		P8(0x00, 0, 0xff),
+		P8(0x01, 0, 0xf6),
+		P8(0x28, 0, 0x00),
+		P8(0x20, 0, 0x54),
+		P8(0x03, 0, 0x50),
+		P8(0x10, 0, 0x00),
+	};
+	struct h432b_power_result result = {};
+	unsigned int i;
+	int error;
+	u8 clock;
+
+	/* HIMR is in the local window, unlike the remaining WLAN registers. */
+	sdio_writew(func, 0, 0x09, &error);
+	if (error)
+		return error;
+	wifi_write(func, 1, 0x1f, 0, &error);
+	if (error)
+		return error;
+	usleep_range(100, 200);
+	wifi_write(func, 1, 0x09, 0x38, &error);
+	if (error)
+		return error;
+	for (i = 0; i <= 60; i++) {
+		clock = wifi_read(func, 1, 0x09, &error);
+		if (error)
+			return error;
+		if (clock & BIT(6))
+			return wifi_power_ops(func, &result, tail, ARRAY_SIZE(tail));
+		if (i < 60)
+			usleep_range(10000, 11000);
+	}
+	return -ETIMEDOUT;
+}
+
 #undef P8
 #undef P16
 #undef P32

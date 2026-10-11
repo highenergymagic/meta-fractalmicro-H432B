@@ -17,13 +17,32 @@ The Si4702 has no RDS decoder; station names and programme text are unavailable.
 | Reset | GPH3[2], active low |
 | Additional control | GPH1[4] held high; tuner-side role not independently established |
 
-The upstream Si470x I2C driver is extended with board sequencing, crystal
-startup and bounded tune-completion polling. No interrupt pin is assumed.
-The configured band is 87.5–108 MHz, with 100 kHz spacing and 50 microsecond
-de-emphasis. Startup defaults to muted audio and preserves reserved values.
-Muted reopening and tuning after deep sleep have passed. Hardware seek,
-reception across sleep and a tuner handle held open across suspend remain
-unqualified.
+The BSP extends the upstream Si470x I2C driver with Si4702-C19 part support,
+crystal startup and bounded tune-completion polling. It contains no H432B callbacks or pin
+numbers. The device tree supplies the regulator, reset GPIO, crystal selection,
+100 kHz spacing and 50 microsecond de-emphasis. A separate GPIO hog holds the
+additional board control high. No interrupt pin is assumed. The default band
+is 87.5–108 MHz; V4L2 also exposes the part's 76–108 and 76–90 MHz bands.
+Startup defaults to muted audio and preserves reserved values.
+Muted reopening and tuning after deep sleep have passed. The polled hardware
+seek implementation, reception across sleep and a tuner handle held open
+across suspend require qualification on the combined image.
+The driver serializes PM with control accesses, leaves a stopped
+tuner stopped on resume, and restores the configured channel and audio
+controls when resuming an active tuner. Shutdown asserts reset and removes
+the board enable rail. Unbinding blocks further device access while preserving
+open-file state until its final release. Supply teardown and detach require
+qualification on the combined image.
+
+RDS is absent from the Si4702 hardware. Hardware seek supports upward/downward
+direction, wrap-around or bounded operation, and 50/100/200 kHz spacing.
+Completion is polled every 20 ms with separate tune and seek timeouts.
+The driver clears the operation flag on every exit and restores the original
+frequency if no station is found or the operation fails, as required by the
+[V4L2 seek interface](https://docs.kernel.org/userspace-api/media/v4l/vidioc-s-hw-freq-seek.html).
+These capabilities follow the component protocol, not board GPIO wiring.
+See the [Si4702/03-C19 data sheet](https://www.sparkfun.com/datasheets/BreakoutBoards/Si4702-03-C19-1.pdf)
+for the part's register and frequency-band definitions.
 
 ## Audio and antenna
 

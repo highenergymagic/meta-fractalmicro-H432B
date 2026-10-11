@@ -7,7 +7,7 @@
      * Release both lines through standard open-drain GPIO emulation.
      * No bus scan and no automatic PMIC register writes.
      */
-    pmic_inventory_bus: i2c-pmic-inventory {
+    pmic_inventory_bus: i2c-pmic {
         compatible = "i2c-gpio";
         sda-gpios = <&gpd1 4 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
         scl-gpios = <&gpd1 5 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;

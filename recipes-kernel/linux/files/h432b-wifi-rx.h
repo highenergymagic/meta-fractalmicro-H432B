@@ -7,10 +7,14 @@
  */
 #define WIFI_RX_COUNT 0x40
 #define WIFI_RX_FIFO 0x18e40
-#define WIFI_RX_MAX 49152
+/* A 65535-byte aggregate, up to 64 descriptors, maximal driver information
+ * and 512-byte record padding fit below 128 KiB. This is a host allocation
+ * bound, not a write to the chip's FIFO-size configuration.
+ */
+#define WIFI_RX_MAX 131072
 
 struct h432b_rx_result {
-	void (*receive)(void *context, const u8 *frame, unsigned int length, u32 descriptor);
+	void (*receive)(void *context, const u8 *frame, unsigned int length, u32 rate);
 	void *context;
 	u16 consumed;
 	u8 port_seq;
@@ -35,18 +39,16 @@ static int wifi_rx_parse(const u8 *data, unsigned int size,
 		stride = ALIGN(24 + info + length, 512);
 		if (stride > size - offset)
 			return -EMSGSIZE;
-		if (descriptor & BIT(14))
+		if (descriptor & BIT(14)) {
 			r->crc_errors++;
-		else if (descriptor & BIT(15))
+		} else if (descriptor & BIT(15)) {
 			r->icv_errors++;
-		else {
+		} else {
 			r->frames++;
 			if (r->receive)
-				r->receive(r->context, data + offset + 24 + info, length, descriptor);
+				r->receive(r->context, data + offset + 24 + info,
+					   length, get_unaligned_le32(data + offset + 12));
 		}
-		/* Association and controlled-port delivery are not implemented yet.
-		 * Never feed unassociated frames or raw 802.11 bytes to Ethernet.
-		 */
 		offset += stride;
 	}
 	return 0;
@@ -71,9 +73,8 @@ static int wifi_rx_drain(struct sdio_func *func, struct h432b_rx_result *r,
 	r->high_water = max(r->high_water, pending);
 	if (pending > WIFI_RX_MAX / 512)
 		return -EOVERFLOW;
-	error = mmc_io_rw_extended(func->card, 0, func->num,
-				  WIFI_RX_FIFO | (r->port_seq & 3), 1,
-				  data, pending, 512);
+	error = wifi_sdio_blocks(func, false, WIFI_RX_FIFO | (r->port_seq & 3),
+				 data, pending);
 	if (error)
 		return error;
 	r->port_seq = (r->port_seq + 1) & 3;

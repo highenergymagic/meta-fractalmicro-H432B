@@ -6,6 +6,14 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE = ROOT / "recipes-bsp/u-boot"
 
 class FactoryIdentity(unittest.TestCase):
+    def test_fastboot_uses_built_version_and_shared_identity(self):
+        source = (BASE / "files/fastboot/u2fastboot.c").read_text()
+        self.assertIn("#include <version.h>", source)
+        self.assertIn('!strcmp(name,"version-bootloader")) v=U_BOOT_VERSION', source)
+        self.assertIn("v=u2_identity_board_id();", source)
+        self.assertNotIn('v="H432B-ram53-fastboot"', source)
+        self.assertNotIn('v="OPENH432-FASTBOOT"', source)
+
     def test_shared_linux_stage_integration(self):
         recipe = (BASE / "u-boot-h432b-fastboot_2012.10.bb").read_text()
         self.assertIn('SRC_URI:append = " file://0010-factory-identity.patch', recipe)

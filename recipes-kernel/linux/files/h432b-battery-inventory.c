@@ -1,22 +1,26 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * H432B read-only battery telemetry, not a charger-control driver.
+ * H432B battery telemetry, not a charger-control driver.
  * Polls verified capacity/status every five seconds through power_supply.
  * GPC0[4] high pulls the external 1-Wire bus low; low releases it.
  * GPC0[3] samples the bus. These are not one bidirectional GPIO.
  */
 #include <linux/delay.h>
+#include <linux/debugfs.h>
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
+#include <linux/jiffies.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/pm.h>
+#include <linux/power_supply.h>
+#include <linux/seq_file.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
-#include <linux/jiffies.h>
-#include <linux/power_supply.h>
 #include <linux/workqueue.h>
+
 #include "h432b-battery-policy.h"
 
 struct battery_sample {
@@ -28,6 +32,7 @@ struct battery_sample {
 
 struct h432b_battery_inventory {
 	struct gpio_desc *pull_low, *rx, *charge, *usb, *ac;
+	/* Serializes the bus, cached sample and suspend/teardown state. */
 	struct mutex transaction;
 	raw_spinlock_t slot;
 	struct power_supply *psy;
@@ -35,27 +40,34 @@ struct h432b_battery_inventory {
 	struct battery_sample cached;
 	unsigned long sampled;
 	bool have_sample;
+	bool stopped;
 };
 
 /* No sleeps or sleeping GPIO controllers are permitted inside a timed slot. */
 static int battery_reset(struct h432b_battery_inventory *b)
 {
 	unsigned long flags;
-	int present;
+	int level;
 
-	if (!gpiod_get_value(b->rx))
+	level = gpiod_get_value(b->rx);
+	if (level < 0)
+		return level;
+	if (!level)
 		return -EBUSY;
 	raw_spin_lock_irqsave(&b->slot, flags);
 	gpiod_set_value(b->pull_low, 1);
 	udelay(480);
 	gpiod_set_value(b->pull_low, 0);
 	udelay(70);
-	present = !gpiod_get_value(b->rx);
+	level = gpiod_get_value(b->rx);
 	raw_spin_unlock_irqrestore(&b->slot, flags);
 	usleep_range(410, 500);
-	if (!present)
+	if (level < 0)
+		return level;
+	if (level)
 		return -ENODEV;
-	return gpiod_get_value(b->rx) ? 0 : -EIO;
+	level = gpiod_get_value(b->rx);
+	return level < 0 ? level : level ? 0 : -EIO;
 }
 
 static void battery_write_byte(struct h432b_battery_inventory *b, u8 value)
@@ -76,11 +88,11 @@ static void battery_write_byte(struct h432b_battery_inventory *b, u8 value)
 	}
 }
 
-static u8 battery_read_byte(struct h432b_battery_inventory *b)
+static int battery_read_byte(struct h432b_battery_inventory *b)
 {
 	unsigned long flags;
 	u8 value = 0;
-	int bit;
+	int bit, level;
 
 	for (bit = 0; bit < 8; bit++) {
 		raw_spin_lock_irqsave(&b->slot, flags);
@@ -88,10 +100,13 @@ static u8 battery_read_byte(struct h432b_battery_inventory *b)
 		udelay(5);
 		gpiod_set_value(b->pull_low, 0);
 		udelay(8);
-		if (gpiod_get_value(b->rx))
+		level = gpiod_get_value(b->rx);
+		if (level > 0)
 			value |= BIT(bit);
 		udelay(55);
 		raw_spin_unlock_irqrestore(&b->slot, flags);
+		if (level < 0)
+			return level;
 	}
 	return value;
 }
@@ -116,17 +131,21 @@ static int battery_read_rom(struct h432b_battery_inventory *b, u8 rom[8])
 	ret = battery_reset(b);
 	if (ret)
 		return ret;
-	/* Stock firmware uses Skip ROM: this is a single-drop inventory. */
+	/* Read ROM is valid because the board has one device on this bus. */
 	battery_write_byte(b, 0x33);
-	for (i = 0; i < 8; i++)
-		rom[i] = battery_read_byte(b);
+	for (i = 0; i < 8; i++) {
+		ret = battery_read_byte(b);
+		if (ret < 0)
+			return ret;
+		rom[i] = ret;
+	}
 	if (!rom[0] || rom[0] == 0xff || battery_crc(rom, 8))
 		return -EBADMSG;
 	return 0;
 }
 
 static int battery_read_capacity(struct h432b_battery_inventory *b,
-				const u8 rom[8], u8 *capacity)
+				 const u8 rom[8], u8 *capacity)
 {
 	int ret, i;
 
@@ -139,7 +158,10 @@ static int battery_read_capacity(struct h432b_battery_inventory *b,
 		battery_write_byte(b, rom[i]);
 	battery_write_byte(b, 0x69); /* Read Data, not Write Data. */
 	battery_write_byte(b, 0x06); /* Stock remaining active relative capacity. */
-	*capacity = battery_read_byte(b);
+	ret = battery_read_byte(b);
+	if (ret < 0)
+		return ret;
+	*capacity = ret;
 	return *capacity <= 100 ? 0 : -ERANGE;
 }
 
@@ -154,7 +176,7 @@ static int battery_signed16(const u8 *p)
 }
 
 static int battery_read_measurements(struct h432b_battery_inventory *b,
-		const u8 rom[8], struct h432b_measurements *m)
+				     const u8 rom[8], struct h432b_measurements *m)
 {
 	u8 raw[8], sense, confirm;
 	int ret;
@@ -219,6 +241,10 @@ static void battery_poll(struct work_struct *work)
 	bool changed;
 
 	mutex_lock(&b->transaction);
+	if (b->stopped) {
+		mutex_unlock(&b->transaction);
+		return;
+	}
 	battery_sample_read(b, &next);
 	changed = !b->have_sample || next.error != b->cached.error ||
 		  next.capacity != b->cached.capacity || next.family != b->cached.family ||
@@ -240,6 +266,10 @@ static void battery_stop_poll(void *data)
 {
 	struct h432b_battery_inventory *b = data;
 
+	mutex_lock(&b->transaction);
+	b->stopped = true;
+	b->have_sample = false;
+	mutex_unlock(&b->transaction);
 	cancel_delayed_work_sync(&b->poll);
 	gpiod_set_value(b->pull_low, 0);
 }
@@ -291,10 +321,18 @@ static int battery_get_property(struct power_supply *psy,
 		state = h432b_charge_state(sample.error, sample.capacity, fresh,
 					   sample.charge, sample.ac, sample.secondary);
 		switch (state) {
-		case H432B_CHARGING: value->intval = POWER_SUPPLY_STATUS_CHARGING; break;
-		case H432B_DISCHARGING: value->intval = POWER_SUPPLY_STATUS_DISCHARGING; break;
-		case H432B_NOT_CHARGING: value->intval = POWER_SUPPLY_STATUS_NOT_CHARGING; break;
-		default: value->intval = POWER_SUPPLY_STATUS_UNKNOWN; break;
+		case H432B_CHARGING:
+			value->intval = POWER_SUPPLY_STATUS_CHARGING;
+			break;
+		case H432B_DISCHARGING:
+			value->intval = POWER_SUPPLY_STATUS_DISCHARGING;
+			break;
+		case H432B_NOT_CHARGING:
+			value->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
+			break;
+		default:
+			value->intval = POWER_SUPPLY_STATUS_UNKNOWN;
+			break;
 		}
 		return 0;
 	default:
@@ -310,26 +348,35 @@ static const struct power_supply_desc battery_supply = {
 	.get_property = battery_get_property,
 };
 
-static ssize_t snapshot_show(struct device *dev,
-			     struct device_attribute *attr, char *buf)
+#if IS_ENABLED(CONFIG_H432B_BATTERY_DEBUG)
+static int snapshot_show(struct seq_file *seq, void *unused)
 {
-	struct h432b_battery_inventory *b = dev_get_drvdata(dev);
+	struct h432b_battery_inventory *b = seq->private;
 	struct battery_sample sample;
 
 	if (mutex_lock_interruptible(&b->transaction))
 		return -ERESTARTSYS;
+	if (b->stopped) {
+		mutex_unlock(&b->transaction);
+		return -EBUSY;
+	}
 	battery_sample_read(b, &sample);
 	mutex_unlock(&b->transaction);
-	if (sample.error)
-		return sysfs_emit(buf,
-			"sample_error=%d ac_input=%d secondary_input=%d charging_input=%d\n",
-			sample.error, sample.ac, sample.secondary, sample.charge);
+	if (sample.error) {
+		seq_printf(seq,
+			   "sample_error=%d ac_input=%d secondary_input=%d charging_input=%d\n",
+			   sample.error, sample.ac, sample.secondary, sample.charge);
+		return 0;
+	}
 	/* Deliberately do not export a pack's unique serial number. */
-	return sysfs_emit(buf,
-		"family=0x%02x rom_crc=ok capacity_percent=%u ac_input=%d secondary_input=%d charging_input=%d\n",
-		sample.family, sample.capacity, sample.ac, sample.secondary, sample.charge);
+	seq_printf(seq,
+		   "family=0x%02x rom_crc=ok capacity_percent=%u ac_input=%d secondary_input=%d charging_input=%d\n",
+		   sample.family, sample.capacity, sample.ac, sample.secondary, sample.charge);
+	return 0;
 }
-static DEVICE_ATTR(snapshot, 0400, snapshot_show, NULL);
+DEFINE_SHOW_ATTRIBUTE(snapshot);
+#endif
+
 /*
  * Fixed read-only windows, not an arbitrary register interface. Parameter
  * reads return shadow RAM; deliberately never issue Recall/Copy/Write Data.
@@ -339,13 +386,9 @@ static DEVICE_ATTR(snapshot, 0400, snapshot_show, NULL);
 static int battery_read_window(struct h432b_battery_inventory *b,
 			       const u8 rom[8], u8 address, u8 *data, size_t len)
 {
-	int ret, i;
+	size_t i;
+	int ret;
 
-	if (!((address == 0x01 && len == 27) ||
-	      (address == 0x60 && len == 29) ||
-	      (address == 0x08 && len == 8) ||
-	      (address == 0x69 && len == 1)))
-		return -EINVAL;
 	ret = battery_reset(b);
 	if (ret)
 		return ret;
@@ -354,21 +397,28 @@ static int battery_read_window(struct h432b_battery_inventory *b,
 		battery_write_byte(b, rom[i]);
 	battery_write_byte(b, 0x69);
 	battery_write_byte(b, address);
-	for (i = 0; i < len; i++)
-		data[i] = battery_read_byte(b);
+	for (i = 0; i < len; i++) {
+		ret = battery_read_byte(b);
+		if (ret < 0)
+			return ret;
+		data[i] = ret;
+	}
 	return 0;
 }
 
-static ssize_t registers_show(struct device *dev,
-			      struct device_attribute *attr, char *buf)
+#if IS_ENABLED(CONFIG_H432B_BATTERY_DEBUG)
+static int registers_show(struct seq_file *seq, void *unused)
 {
-	struct h432b_battery_inventory *b = dev_get_drvdata(dev);
+	struct h432b_battery_inventory *b = seq->private;
 	u8 rom[8], again[8], measurements[2][27], parameters[2][29];
 	int ret, pass, i, ac, secondary, charge;
-	ssize_t n = 0;
 
 	if (mutex_lock_interruptible(&b->transaction))
 		return -ERESTARTSYS;
+	if (b->stopped) {
+		mutex_unlock(&b->transaction);
+		return -EBUSY;
+	}
 	ac = gpiod_get_value(b->ac);
 	secondary = gpiod_get_value(b->usb);
 	charge = gpiod_get_value(b->charge);
@@ -388,26 +438,46 @@ static ssize_t registers_show(struct device *dev,
 	mutex_unlock(&b->transaction);
 	if (ret)
 		return ret;
-	n += sysfs_emit_at(buf, n,
-		"family=0x%02x rom_crc=ok ac_input=%d secondary_input=%d charging_input=%d parameters_equal=%u\n",
-		rom[0], ac, secondary, charge,
-		!memcmp(parameters[0], parameters[1], sizeof(parameters[0])));
+	seq_printf(seq,
+		   "family=0x%02x rom_crc=ok ac_input=%d secondary_input=%d charging_input=%d parameters_equal=%u\n",
+		   rom[0], ac, secondary, charge,
+		   !memcmp(parameters[0], parameters[1], sizeof(parameters[0])));
 	for (pass = 0; pass < 2; pass++) {
-		n += sysfs_emit_at(buf, n, "pass=%d registers_01_1b=", pass);
+		seq_printf(seq, "pass=%d registers_01_1b=", pass);
 		for (i = 0; i < 27; i++)
-			n += sysfs_emit_at(buf, n, "%02x", measurements[pass][i]);
-		n += sysfs_emit_at(buf, n, "\npass=%d shadow_60_7c=", pass);
+			seq_printf(seq, "%02x", measurements[pass][i]);
+		seq_printf(seq, "\npass=%d shadow_60_7c=", pass);
 		for (i = 0; i < 29; i++)
-			n += sysfs_emit_at(buf, n, "%02x", parameters[pass][i]);
-		n += sysfs_emit_at(buf, n, "\n");
+			seq_printf(seq, "%02x", parameters[pass][i]);
+		seq_putc(seq, '\n');
 	}
-	return n;
+	return 0;
 }
-static DEVICE_ATTR(registers, 0400, registers_show, NULL);
-static struct attribute *battery_attrs[] = {
-	&dev_attr_snapshot.attr, &dev_attr_registers.attr, NULL
-};
-ATTRIBUTE_GROUPS(battery);
+DEFINE_SHOW_ATTRIBUTE(registers);
+
+static void battery_remove_debugfs(void *data)
+{
+	debugfs_remove_recursive(data);
+}
+
+static int battery_debugfs_init(struct device *dev, struct h432b_battery_inventory *b)
+{
+	struct dentry *root;
+
+	root = debugfs_create_dir(dev_name(dev), NULL);
+	if (IS_ERR(root))
+		return PTR_ERR(root) == -ENODEV ? 0 : PTR_ERR(root);
+	debugfs_create_file("snapshot", 0400, root, b, &snapshot_fops);
+	debugfs_create_file("registers", 0400, root, b, &registers_fops);
+	/* Remove/drain debugfs before stopping work and freeing GPIO providers. */
+	return devm_add_action_or_reset(dev, battery_remove_debugfs, root);
+}
+#else
+static int battery_debugfs_init(struct device *dev, struct h432b_battery_inventory *b)
+{
+	return 0;
+}
+#endif
 
 static int battery_inventory_probe(struct platform_device *pdev)
 {
@@ -416,8 +486,6 @@ static int battery_inventory_probe(struct platform_device *pdev)
 	struct power_supply_config config = {};
 	int ret;
 
-	if (!of_machine_is_compatible("hims,braillesense-u2"))
-		return -ENODEV;
 	b = devm_kzalloc(dev, sizeof(*b), GFP_KERNEL);
 	if (!b)
 		return -ENOMEM;
@@ -440,7 +508,7 @@ static int battery_inventory_probe(struct platform_device *pdev)
 	if (gpiod_cansleep(b->rx) || gpiod_cansleep(b->pull_low) ||
 	    gpiod_cansleep(b->charge) || gpiod_cansleep(b->usb) ||
 	    gpiod_cansleep(b->ac))
-		return dev_err_probe(dev, -EINVAL, "requires on-SoC GPIOs\n");
+		return dev_err_probe(dev, -EINVAL, "requires non-sleeping GPIOs\n");
 	mutex_init(&b->transaction);
 	raw_spin_lock_init(&b->slot);
 	platform_set_drvdata(pdev, b);
@@ -455,24 +523,52 @@ static int battery_inventory_probe(struct platform_device *pdev)
 	ret = devm_add_action_or_reset(dev, battery_stop_poll, b);
 	if (ret)
 		return ret;
+	ret = battery_debugfs_init(dev, b);
+	if (ret)
+		return ret;
 	queue_delayed_work(system_power_efficient_wq, &b->poll, 0);
-	dev_info(dev, "read-only power_supply ready; five-second telemetry polling\n");
 	return 0;
 }
 
+static int battery_suspend(struct device *dev)
+{
+	battery_stop_poll(dev_get_drvdata(dev));
+	return 0;
+}
+
+static int battery_resume(struct device *dev)
+{
+	struct h432b_battery_inventory *b = dev_get_drvdata(dev);
+
+	mutex_lock(&b->transaction);
+	b->stopped = false;
+	mutex_unlock(&b->transaction);
+	queue_delayed_work(system_power_efficient_wq, &b->poll, 0);
+	return 0;
+}
+
+static DEFINE_SIMPLE_DEV_PM_OPS(battery_pm, battery_suspend, battery_resume);
+
+static void battery_shutdown(struct platform_device *pdev)
+{
+	battery_stop_poll(platform_get_drvdata(pdev));
+}
+
 static const struct of_device_id battery_inventory_of_match[] = {
+	{ .compatible = "hims,h432b-battery" },
 	{ .compatible = "fractal,h432b-battery-inventory" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, battery_inventory_of_match);
 static struct platform_driver battery_inventory_driver = {
 	.probe = battery_inventory_probe,
+	.shutdown = battery_shutdown,
 	.driver = {
 		.name = "h432b-battery-inventory",
 		.of_match_table = battery_inventory_of_match,
-		.dev_groups = battery_groups,
+		.pm = pm_sleep_ptr(&battery_pm),
 	},
 };
 module_platform_driver(battery_inventory_driver);
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Read-only H432B battery transport inventory");
+MODULE_DESCRIPTION("H432B battery gauge and power-source telemetry");

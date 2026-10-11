@@ -2,12 +2,9 @@
 /*
  * HIMS BrailleSense U2 (H432B)
  *
- * Initial evidence-led board description for Linux CIP 6.12.y-rt.
- *
- * This is intentionally conservative.  Nodes are enabled only where the
- * supplied Windows CE image or live read-only inventory establishes the SoC
- * peripheral and its role.  Board GPIO wiring is *not* inferred from a
- * similarly named S5PV210 development board.
+ * Shared board wiring. Runtime and qualification profiles add peripherals
+ * and select their storage/power policy in separate includes. GPIO wiring
+ * is specific to this board, not an S5PV210 reference design.
  */
 
 /dts-v1/;
@@ -22,12 +19,12 @@
 	compatible = "hims,braillesense-u2", "samsung,s5pv210";
 
 	chosen {
-		bootargs = "console=ttyGS0,115200 rdinit=/init loglevel=8 ignore_loglevel clk_ignore_unused g_serial.iProduct=OpenH432-RAM g_serial.iSerialNumber=H432-RAM-TEST";
+		bootargs = "console=ttyGS0,115200 rdinit=/init loglevel=8 ignore_loglevel clk_ignore_unused g_serial.iManufacturer=\"Fractal Microsystems\" g_serial.iProduct=\"Braille Sense U2 (Linux)\"";
 	};
 
 	/* GPH2[6] was correlated with four physical press/release pairs.
 	 * Keep the inherited pull configuration; gpio-keys owns the input/IRQ.
-	 * No wakeup-source until suspend and electrical power-off are qualified.
+	 * The suspend include adds the board's sole permitted wake source.
 	 */
 	power-keys {
 		compatible = "gpio-keys";
@@ -47,9 +44,8 @@
 	};
 
 	/*
-	 * Bindings for these bespoke devices will be added with their drivers.
-	 * Leaving them disabled makes the safe state explicit: no cell rail, no
-	 * guessed keys, and no guessed LCD or power GPIO is touched at first boot.
+	 * Peripheral includes supply the board-specific wiring and enable these
+	 * devices for the profiles which use them.
 	 */
 	braille {
 		compatible = "hims,braillesense-u2-braille";
@@ -61,10 +57,12 @@
 		status = "disabled";
 	};
 
-	/* Custom read-only diagnostic binding; no program/erase or guessed ECC. */
+	/* Factory-compatible BCH layout; the profile selects the writable window. */
 	nand@b0e00000 {
-		compatible = "hims,u2-nand-bch";
+		compatible = "hims,h432b-nand";
 		reg = <0xb0e00000 0x1000>;
+		clocks = <&clocks CLK_NFCON>, <&clocks CLK_NANDXL>;
+		clock-names = "nand", "bus";
 	};
 };
 
@@ -73,8 +71,7 @@
 &xxti { clock-frequency = <24000000>; };
 
 /*
- * CE's HSC1:/SDMMC_CH1 profile points to the internal flashdisk. This is a
- * candidate mapping until the live card identity and capacity are checked.
+ * Internal SD storage. The diagnostic base is read-only; runtime removes it.
  */
 &sdhci1 {
 	bus-width = <4>;
@@ -90,8 +87,7 @@
 	status = "okay";
 };
 
-/* CE CH2 configures the external card-detect GPIO; CH3 does not. Probe CH3
- * for the internally registered RTL8712 SDIO function. No Wi-Fi driver yet. */
+/* Onboard RTL8712S function; runtime includes its explicit firmware profile. */
 &sdhci3 {
 	/* This is the controller's input selector, NOT its channel number.
 	 * CE writes CONTROL2 baseclk=2; the upstream .3 label stalls its clock. */
@@ -112,16 +108,15 @@
 	status = "okay";
 };
 
-/* Diagnostic fixed-on state, not a final runtime-power binding. Exact CE
- * house.dll selector7 ON order: GPE0[3] high, then GPH1[0] low. GPIO banks
- * register in that order. Stock pinmux already configures both as outputs.
- * Neither line is a braille or PMIC control. */
+/* Board radio enable/reset ordering: GPE0[3] high, then GPH1[0] low.
+ * GPIO banks register in that order. The suspend profile retains both
+ * outputs; neither line is a braille or PMIC control. */
 &gpe0 {
 	wifi-enable-hog {
 		gpio-hog;
 		gpios = <3 GPIO_ACTIVE_HIGH>;
 		output-high;
-		line-name = "u2-wifi-enable-diagnostic";
+		line-name = "h432b-wifi-enable";
 	};
 };
 &gph1 {
@@ -129,7 +124,7 @@
 		gpio-hog;
 		gpios = <0 GPIO_ACTIVE_HIGH>;
 		output-low;
-		line-name = "u2-wifi-reset-diagnostic";
+		line-name = "h432b-wifi-reset";
 	};
 };
 
@@ -158,7 +153,7 @@
 		samsung,pins = "mp01-5", "mp01-6", "mp01-7";
 		samsung,pin-function = <2>;
 	};
-	ethernet_irq: ethernet-irq-pin {
+	ethernet_irq: ethernet-irq-pins {
 		samsung,pins = "gph1-1";
 		samsung,pin-function = <0xf>;
 		samsung,pin-pud = <2>;
@@ -187,26 +182,19 @@
 };
 
 /*
- * The EBOOT menu is UART-only, but no UART has been physically identified.
- * Keep every UART disabled until a non-invasive pin/path identification pass.
+ * UART0 Bluetooth and UART1 GPS are enabled by their peripheral includes.
+ * Unrouted/debug UARTs remain disabled.
  */
 &uart0 { status = "disabled"; };
 &uart1 { status = "disabled"; };
 &uart2 { status = "disabled"; };
 &uart3 { status = "disabled"; };
 
-/*
- * Do not enable external SD, LCD/FIMD, I2C, keypad,
- * Bluetooth, GPS, backlight, or regulators here.  Their board-level
- * address, GPIO, supply, interrupt, and/or polarity information is not yet
- * proven for H432B.
- */
-
-/* Audio wiring recovered from CE wavedev.dll, not a reference board.
- * Diagnostic playback only; no PMIC, system-5V, braille or mic controls.
+/* Board audio wiring. The input include adds microphone routing and jack
+ * detectors; the machine driver owns codec and amplifier sequencing.
  */
 &{/} {
-	codec_control: codec-spi {
+	codec_control: spi {
 		compatible = "spi-gpio";
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -226,7 +214,7 @@
 	};
 
 	sound {
-		compatible = "hims,u2-audio-diagnostic";
+		compatible = "hims,h432b-audio";
 		hims,i2s-controller = <&i2s0>;
 		hims,audio-codec = <&wm8983>;
 		unmute-gpios = <&gpd0 1 GPIO_ACTIVE_HIGH>;

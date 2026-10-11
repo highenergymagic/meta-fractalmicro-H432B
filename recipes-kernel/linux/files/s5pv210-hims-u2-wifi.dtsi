@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/* Select the board's RF/firmware profile, not a machine check in the driver. */
+&sdhci3 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	wifi@1 {
+		compatible = "hims,h432b-rtl8712s";
+		reg = <1>;
+	};
+};

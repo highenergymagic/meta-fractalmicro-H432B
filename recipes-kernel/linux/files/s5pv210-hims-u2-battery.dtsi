@@ -3,7 +3,7 @@
 
 / {
 	battery-inventory {
-		compatible = "fractal,h432b-battery-inventory";
+		compatible = "hims,h432b-battery";
 		pinctrl-names = "default";
 		pinctrl-0 = <&battery_inputs &battery_output>;
 		rx-gpios = <&gpc0 3 GPIO_ACTIVE_HIGH>;
@@ -15,12 +15,12 @@
 };
 
 &pinctrl0 {
-	battery_inputs: battery-inputs {
+	battery_inputs: battery-input-pins {
 		samsung,pins = "gpc0-0", "gpc0-1", "gpc0-2", "gpc0-3";
 		samsung,pin-function = <0>;
 		samsung,pin-pud = <0>;
 	};
-	battery_output: battery-output {
+	battery_output: battery-output-pins {
 		samsung,pins = "gpc0-4";
 		samsung,pin-pud = <0>;
 	};

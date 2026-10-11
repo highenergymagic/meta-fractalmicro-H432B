@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 / {
 	braille-display {
-		compatible = "fractal,h432b-braille";
+		compatible = "hims,h432b-braille";
 		enable-gpios = <&gpj0 3 GPIO_ACTIVE_HIGH>;
 		data-gpios = <&gpj1 5 GPIO_ACTIVE_HIGH>;
 		clock-gpios = <&gpj1 4 GPIO_ACTIVE_HIGH>;

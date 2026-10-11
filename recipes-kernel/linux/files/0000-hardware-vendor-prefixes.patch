@@ -1,0 +1,27 @@
+Subject: [PATCH] dt-bindings: vendor-prefixes: add Aichi Steel and HIMS
+Upstream-Status: Pending
+
+Register the manufacturers of the AMI603 sensor and H432B board. Board
+bindings describe the original hardware independently of the BSP publisher.
+
+diff --git a/Documentation/devicetree/bindings/vendor-prefixes.yaml b/Documentation/devicetree/bindings/vendor-prefixes.yaml
+--- a/Documentation/devicetree/bindings/vendor-prefixes.yaml
++++ b/Documentation/devicetree/bindings/vendor-prefixes.yaml
+@@ -71,6 +71,8 @@
+     description: Aeroflex Gaisler AB
+   "^aesop,.*":
+     description: AESOP Embedded Forum
++  "^aichi,.*":
++    description: Aichi Steel Corporation
+   "^airoha,.*":
+     description: Airoha
+   "^al,.*":
+@@ -617,6 +619,8 @@
+     description: HiDeep Inc.
+   "^himax,.*":
+     description: Himax Technologies, Inc.
++  "^hims,.*":
++    description: HIMS International Corporation
+   "^hirschmann,.*":
+     description: Hirschmann Automation and Control GmbH
+   "^hisi,.*":

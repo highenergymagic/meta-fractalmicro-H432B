@@ -1,0 +1,26 @@
+Subject: [PATCH] dt-bindings: pinctrl: samsung: describe GPIO hog children
+
+Upstream-Status: Pending
+
+Samsung pin banks are GPIO controllers and participate in the standard
+gpiolib OF hog scan. Permit their existing GPIO hog child nodes using the
+same naming convention as other GPIO controller bindings. Each accepted
+child must declare gpio-hog; the common GPIO hog schema validates its
+direction, GPIO specifier and line name.
+
+--- a/Documentation/devicetree/bindings/pinctrl/samsung,pinctrl-gpio-bank.yaml
++++ b/Documentation/devicetree/bindings/pinctrl/samsung,pinctrl-gpio-bank.yaml
+@@ -45,6 +45,13 @@
+     minItems: 1
+     maxItems: 8
+
++patternProperties:
++  "^.+-hog(-[0-9]+)?$":
++    type: object
++
++    required:
++      - gpio-hog
++
+ required:
+   - '#gpio-cells'
+   - gpio-controller

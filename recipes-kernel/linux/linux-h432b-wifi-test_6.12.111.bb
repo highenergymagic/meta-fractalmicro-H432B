@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 require linux-h432b-runtime_6.12.111.bb
+H432B_WIFI_CONFIG = "h432b-wifi-net.config"
+H432B_WIFI_DRIVER_MODE = "y"
 SUMMARY = "H432B explicit RTL8712 SDIO transport qualification"
 H432B_KERNEL_PROVIDER_REMOVE = "virtual/kernel"
 KERNEL_PACKAGE_NAME = "kernel-wifi-test"

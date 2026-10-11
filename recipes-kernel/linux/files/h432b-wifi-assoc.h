@@ -7,6 +7,9 @@ static void wifi_net_link_down(struct h432b_wifi_net *net, u16 reason, bool loca
 
 	net->associated = false;
 	net->authorized = false;
+	net->rx_legacy_rate = 0;
+	net->tx_ba_requested = 0;
+	memset(&net->ht, 0, sizeof(net->ht));
 	wifi_net_clear_keys(net);
 	skb_queue_purge(&net->tx_queue);
 	netif_carrier_off(net->dev);
@@ -52,6 +55,24 @@ static int wifi_net_event(void *context, u8 code, const u8 *data, unsigned int l
 					GFP_KERNEL);
 		netif_carrier_on(net->dev);
 		netif_start_queue(net->dev);
+	} else if (code == 25) {
+		unsigned int tid;
+		struct wifi_reorder *window;
+
+		/* ADDBA report: peer MAC[6], starting sequence LE16, TID byte.
+		 * Like the vendor driver, accept the first authenticated sequence:
+		 * some APs reset sequence numbers after the four-way handshake.
+		 */
+		if (length < 9 || data[8] >= ARRAY_SIZE(net->reorder))
+			return -EBADMSG;
+		if (!net->associated || !net->ht.ht || !ether_addr_equal(data, net->bssid))
+			return 0;
+		tid = data[8];
+		net->rx_addba_reports++;
+		window = &net->reorder[tid];
+		wifi_reorder_clear(window, wifi_net_rx_discard, net);
+		window->enabled = true;
+		net->reorder_deadline[tid] = 0;
 	} else if (code == 12 && length >= ETH_ALEN &&
 		   ether_addr_equal(data, net->bssid)) {
 		cancel_delayed_work(&net->join_timeout);
@@ -74,22 +95,20 @@ static void wifi_net_join_timeout(struct work_struct *work)
 	error = wifi_h2c_send(net->func, &net->owner->command, 15,
 			      disconnect, sizeof(disconnect));
 	sdio_release_host(net->func);
-	if (error) {
-		net->last_error = error;
-		WRITE_ONCE(net->faulted, true);
-	}
+	if (wifi_net_recoverable(error))
+		wifi_net_fault(net, error);
 	wifi_net_link_down(net, WLAN_REASON_UNSPECIFIED, true);
 out:
 	mutex_unlock(&net->owner->lock);
 }
 
 static int wifi_net_connect(struct wiphy *wiphy, struct net_device *dev,
-			     struct cfg80211_connect_params *params)
+			    struct cfg80211_connect_params *params)
 {
 	struct h432b_wifi_net *net = wiphy_priv(wiphy);
 	const u8 *selected = NULL;
 	u8 *join, mode[4] = { 1 }, auth[4] = { 2 };
-	unsigned int i, channel;
+	unsigned int i, channel, ie_length;
 	int error = 0;
 
 	/* No WEP, TKIP, WPA1, SAE, PMF or firmware-offloaded credentials. */
@@ -101,7 +120,8 @@ static int wifi_net_connect(struct wiphy *wiphy, struct net_device *dev,
 	    params->crypto.cipher_group != WLAN_CIPHER_SUITE_CCMP ||
 	    params->crypto.n_akm_suites != 1 ||
 	    params->crypto.akm_suites[0] != WLAN_AKM_SUITE_PSK ||
-	    params->mfp != NL80211_MFP_NO || params->ie_len > sizeof(net->join_ie))
+	    params->mfp != NL80211_MFP_NO ||
+	    !wifi_ht_assoc_ies_valid(params->ie, params->ie_len))
 		return -EOPNOTSUPP;
 	join = kzalloc(884, GFP_KERNEL);
 	if (!join)
@@ -136,17 +156,27 @@ static int wifi_net_connect(struct wiphy *wiphy, struct net_device *dev,
 		error = -ENOENT;
 		goto out;
 	}
-	/* Firmware builds SSID/rate IEs itself. Only fixed beacon fields plus
-	 * the supplicant's negotiated RSN IE belong in this command.
+	error = wifi_ht_select(selected + 128, get_unaligned_le32(selected + 112) - 12,
+			       &net->ht);
+	if (error)
+		goto out;
+	channel = get_unaligned_le32(selected + 72);
+	if (net->channels[channel - 1].flags & IEEE80211_CHAN_NO_HT40)
+		net->ht.capability[0] &= ~(BIT(1) | BIT(6));
+	/* Firmware builds SSID/rate IEs; the host supplies negotiated RSN and
+	 * its own WMM/HT capabilities, never a copy of the AP's capability IE.
 	 */
 	memcpy(join, selected, 128);
-	put_unaligned_le32(128 + params->ie_len, join);
-	put_unaligned_le32(12 + params->ie_len, join + 112);
 	memcpy(join + 128, params->ie, params->ie_len);
+	ie_length = params->ie_len + wifi_ht_join_ies(join + 128 + params->ie_len, &net->ht);
+	put_unaligned_le32(128 + ie_length, join);
+	put_unaligned_le32(12 + ie_length, join + 112);
 	memcpy(net->bssid, selected + 4, ETH_ALEN);
-	memcpy(net->join_ie, params->ie, params->ie_len);
-	net->join_ie_len = params->ie_len;
+	memcpy(net->join_ie, join + 128, ie_length);
+	net->join_ie_len = ie_length;
 	wifi_net_clear_keys(net);
+	memset(net->tx_sequence, 0, sizeof(net->tx_sequence));
+	net->tx_ba_requested = 0;
 	net->join_result = 0;
 	net->connecting = true;
 	net->authorized = false;
@@ -165,7 +195,8 @@ static int wifi_net_connect(struct wiphy *wiphy, struct net_device *dev,
 	if (error) {
 		net->connecting = false;
 		net->last_error = error;
-		WRITE_ONCE(net->faulted, true);
+		if (wifi_net_recoverable(error))
+			wifi_net_fault(net, error);
 	} else {
 		queue_delayed_work(net->workqueue, &net->join_timeout, 20 * HZ);
 		queue_delayed_work(net->workqueue, &net->event_work, 0);
@@ -177,7 +208,7 @@ out:
 }
 
 static int wifi_net_disconnect(struct wiphy *wiphy, struct net_device *dev,
-				u16 reason)
+			       u16 reason)
 {
 	struct h432b_wifi_net *net = wiphy_priv(wiphy);
 	u8 parameters[4] = {};
@@ -192,10 +223,8 @@ static int wifi_net_disconnect(struct wiphy *wiphy, struct net_device *dev,
 		sdio_release_host(net->func);
 	}
 	wifi_net_link_down(net, reason, true);
-	if (error) {
-		net->last_error = error;
-		WRITE_ONCE(net->faulted, true);
-	}
+	if (wifi_net_recoverable(error))
+		wifi_net_fault(net, error);
 	mutex_unlock(&net->owner->lock);
 	return error;
 }

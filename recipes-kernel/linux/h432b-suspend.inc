@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Merge last: peripheral diagnostic fragments may explicitly disable suspend.
-SRC_URI += "file://0009-factory-resume-test.patch file://0021-h432b-suspend-peripheral-retention.patch file://0022-smsc911x-suspend-irq-order.patch file://0023-smsc911x-bound-loopback-rx.patch file://0024-h432b-ethernet-full-resume.patch file://0025-h432b-rtc-no-alarm-wake.patch file://h432b-rtc.config file://s5pv210-hims-u2-suspend.dtsi file://u2-resume-test.config"
+SRC_URI += "file://0009-factory-resume-test.patch file://0021-h432b-suspend-peripheral-retention.patch file://0023-smsc911x-bound-loopback-rx.patch file://0024-h432b-ethernet-full-resume.patch file://0025-h432b-rtc-no-alarm-wake.patch file://h432b-rtc.config file://s5pv210-hims-u2-suspend.dtsi file://u2-resume-test.config"
 SRC_URI += "file://0031-h432b-wakeable-poweroff.patch"
+SRC_URI += "file://0033-irqchip-pinctrl-pm-debug.patch file://0036-fw-devlink-consumer.patch"
 do_configure:append() {
     install -m 0644 ${UNPACKDIR}/s5pv210-hims-u2-suspend.dtsi ${S}/arch/arm/boot/dts/samsung/
     KCONFIG_CONFIG=${B}/.config ${S}/scripts/kconfig/merge_config.sh -m -O ${B} \

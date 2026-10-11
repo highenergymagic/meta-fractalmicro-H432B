@@ -21,7 +21,9 @@ class BatteryInventoryTests(unittest.TestCase):
         self.assertNotIn("wakeup-source", DTS)
 
     def test_scope(self):
-        self.assertIn("DEVICE_ATTR(snapshot, 0400, snapshot_show, NULL)", SOURCE)
+        self.assertIn('debugfs_create_file("snapshot", 0400', SOURCE)
+        self.assertIn("#if IS_ENABLED(CONFIG_H432B_BATTERY_DEBUG)", SOURCE)
+        self.assertNotIn("DEVICE_ATTR", SOURCE)
         self.assertNotIn("DEVICE_ATTR_RW", SOURCE)
         self.assertNotIn("ioremap", SOURCE)
         self.assertIn("devm_power_supply_register", SOURCE)
@@ -40,9 +42,9 @@ class BatteryInventoryTests(unittest.TestCase):
         self.assertNotIn("0x6c", SOURCE.lower())
 
     def test_register_snapshot_bounds(self):
-        self.assertIn("DEVICE_ATTR(registers, 0400, registers_show, NULL)", SOURCE)
-        self.assertIn("address == 0x01 && len == 27", SOURCE)
-        self.assertIn("address == 0x60 && len == 29", SOURCE)
+        self.assertIn('debugfs_create_file("registers", 0400', SOURCE)
+        self.assertIn("battery_read_window(b, rom, 0x01, measurements[pass], 27)", SOURCE)
+        self.assertIn("battery_read_window(b, rom, 0x60, parameters[pass], 29)", SOURCE)
         self.assertIn("rom[0] != 0x32", SOURCE)
         self.assertIn("pass < 2", SOURCE)
         self.assertIn("parameters_equal=%u", SOURCE)
@@ -71,8 +73,12 @@ class BatteryInventoryTests(unittest.TestCase):
         recipe = (ROOT / "recipes-kernel/linux/linux-h432b-battery-test_6.12.111.bb").read_text()
         self.assertIn('KERNEL_PACKAGE_NAME = "kernel-battery-test"', recipe)
         self.assertIn("require h432b-battery.inc", recipe)
+        self.assertIn("h432b-battery-debug.config", recipe)
         runtime = (ROOT / "recipes-kernel/linux/linux-h432b-runtime_6.12.111.bb").read_text()
         self.assertIn("require h432b-battery.inc", runtime)
+        shared = (ROOT / "recipes-kernel/linux/h432b-battery.inc").read_text()
+        self.assertNotIn("h432b-battery-debug.config", shared)
+        self.assertNotIn("h432b-battery-debug.config", runtime)
 
 if __name__ == "__main__":
     unittest.main()

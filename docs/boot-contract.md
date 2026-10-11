@@ -42,6 +42,26 @@ format check, separate from device qualification.
 Physical DRAM starts at 0x40000000 and totals 256 MiB. Image/heap/stack overlap
 checks run during NAND-reader and bootstrap builds.
 
+### Cortex-A8 branch-predictor hardening
+
+Cortex-A8 requires ACTLR bit 6 (`IBE`) before its `BPIALL` operation can
+invalidate the branch predictor. The common U-Boot entry sets this CPU
+prerequisite independently of board clock and DRAM initialization, preserving
+the other ACTLR bits. Both the factory-address bootstrap and the high-RAM
+stage inherit the change. It is based on the
+[upstream U-Boot Cortex-A8 mitigation](https://github.com/u-boot/u-boot/commit/7b37a9c732bf).
+
+`u2 cpu` reads MIDR and ACTLR without modifying them; it succeeds only for a
+Cortex-A8 with IBE set. IBE is writable only in Secure state. A Nonsecure
+handoff cannot establish it, and a successful build does not prove that the
+installed firmware has done so.
+
+Linux must still enable and perform its own branch-predictor hardening. Its
+IBE validation and vulnerability reporting are retained. Qualification requires
+checking the live register and Linux mitigation status after normal boot,
+software reboot and suspend/resume; setting one firmware bit alone is not a
+claim that all speculative-execution vulnerabilities are mitigated.
+
 ## Linux payload
 
 Linux uses zImage, DTB and compressed initramfs. Fastboot and NAND readers

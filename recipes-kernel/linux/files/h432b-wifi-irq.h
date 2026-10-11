@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Explicit RTL8712 SDIO active-state acknowledgement test.
+ * Explicit RTL8712 SDIO active-state acknowledgment test.
  * Register definitions and request bits: Realtek GPL-2.0 SDIO headers and
  * pwrctrl/rtl871x_pwrctrl.c, vendor source commit
  * 2237e98dacd8421b38beb2d1aad88aa2b9f79dd8. Factory SDIO callback confirms
@@ -87,7 +87,7 @@ static int wifi_ack_test(struct sdio_func *func, struct h432b_ack_result *r,
 	r->old_request = wifi_sdio_readb(func, WIFI_HRPWM, &error);
 	if (error)
 		goto out;
-	/* Drain any old acknowledgement before requesting a new toggle. */
+	/* Drain any old acknowledgment before requesting a new toggle. */
 	r->before = wifi_sdio_readb(func, WIFI_HCPWM, &error);
 	if (error)
 		goto out;

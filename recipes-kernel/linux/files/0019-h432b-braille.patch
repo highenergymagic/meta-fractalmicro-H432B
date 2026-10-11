@@ -1,7 +1,23 @@
-Subject: Build H432B GPIO braille display transport
-Upstream-Status: Inappropriate [board-specific interface pending qualification]
+Subject: [PATCH] misc: integrate H432B GPIO braille display
+Upstream-Status: Pending
 
+Select the board's cell-frame and power sequencing interface independently
+of input support. Text rendering and translation remain in userspace.
+
+---
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -1,0 +2,9 @@
++config H432B_BRAILLE
++	tristate "H432B GPIO braille display"
++	depends on GPIOLIB && OF
++	help
++	  Provide the H432B 32-cell braille frame interface and cell supply
++	  sequencing. Translation, cursor rendering and application policy
++	  belong in userspace.
++	  The cell supply is removed on suspend, detach and system shutdown.
++
 --- a/drivers/misc/Makefile
 +++ b/drivers/misc/Makefile
 @@ -1,0 +2,1 @@
-+obj-y += h432b-braille.o
++obj-$(CONFIG_H432B_BRAILLE) += h432b-braille.o

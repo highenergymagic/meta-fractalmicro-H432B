@@ -4,7 +4,7 @@
 #include "s5pv210-hims-u2-gps.dtsi"
 
 &pmu_syscon {
-    compatible = "samsung-s5pv210-pmu", "syscon", "simple-mfd";
+    compatible = "samsung-s5pv210-pmu", "simple-mfd", "syscon";
     reboot-mode {
         compatible = "syscon-reboot-mode";
         /* PMU starts at e0108000: INFORM7 is e010f01c. */

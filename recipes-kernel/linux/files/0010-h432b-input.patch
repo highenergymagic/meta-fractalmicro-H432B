@@ -1,7 +1,28 @@
-Subject: Build H432B physically mapped input driver
-Upstream-Status: Inappropriate [board qualification driver]
+Subject: [PATCH] input: keyboard: integrate H432B matrix and direct controls
+Upstream-Status: Pending
 
+Provide an independently selectable input driver for the fixed H432B key
+matrix, routing buttons, direct controls and physical selectors.
+
+---
+--- a/drivers/input/keyboard/Kconfig
++++ b/drivers/input/keyboard/Kconfig
+@@ -14,5 +14,14 @@
+ if INPUT_KEYBOARD
+
++config KEYBOARD_H432B
++	tristate "H432B keyboard and controls"
++	depends on GPIOLIB && OF
++	help
++	  Scan the H432B keyboard, braille routing keys, media controls and
++	  selectors. Lock and notification policies belong in userspace.
++	  Expose separate standard input devices for keys, routing and switches.
++	  Polling stops during system sleep; this driver enables no wake source.
++
+ config KEYBOARD_ADC
+ 	tristate "ADC Ladder Buttons"
+ 	depends on IIO
 --- a/drivers/input/keyboard/Makefile
 +++ b/drivers/input/keyboard/Makefile
 @@ -1,0 +2,1 @@
-+obj-y += h432b-input.o
++obj-$(CONFIG_KEYBOARD_H432B) += h432b-input.o

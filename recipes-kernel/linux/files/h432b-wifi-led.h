@@ -23,7 +23,12 @@ static int wifi_led_set(struct led_classdev *cdev,
 	if (!owner->net || !netif_running(owner->net->dev) ||
 	    READ_ONCE(owner->net->stopping) ||
 	    READ_ONCE(owner->net->faulted)) {
-		error = -ENETDOWN;
+		/* Unregister requests OFF even after ndo_stop disabled SDIO.
+		 * Removal powers down the radio; do not access a disabled function.
+		 * Ordinary userspace requests still report unavailable hardware.
+		 */
+		error = brightness == LED_OFF &&
+			(cdev->flags & LED_UNREGISTERING) ? 0 : -ENETDOWN;
 		goto unlock;
 	}
 	sdio_claim_host(led->func);

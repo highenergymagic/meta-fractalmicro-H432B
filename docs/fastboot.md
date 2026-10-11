@@ -15,9 +15,16 @@ GPL-2.0-or-later; build metadata is MIT.
 
 Interface 0 retains the development EP0 diagnostic shell. Interface 1 is
 ff/42/03 with bulk IN 0x81 and OUT 0x02, 512-byte high-speed / 64-byte full-speed
-packets. It reuses the project's experimental USB identity and reports
-`OPENH432-FASTBOOT`, a development serial string, not a unique device ID.
-Only one such device should be selected by this serial.
+packets. The USB manufacturer is `Fractal Microsystems`, and the product is
+`Braille Sense U2 (Maintenance)`. The descriptor serial and `getvar serialno`
+use the same validated factory-Ethernet-MAC-derived `FM-H432B-MAC-…` board ID.
+This is not a verified manufacturer serial number. If no valid handoff exists,
+the descriptor omits a serial and `getvar serialno` returns an empty value;
+connect only that device and select it by USB transport.
+
+Earlier installed loaders report `OPENH432-FASTBOOT`, a shared development
+identifier. The low-address first-conversion bootstrap retains its older
+identity; it is not the Linux-capable fastboot stage described here.
 
 Supported commands: `getvar`, `download`, `boot`, `reboot`.
 Useful variables: product, version, version-bootloader, serialno,
@@ -56,9 +63,13 @@ After explicitly staging and launching the fastboot RAM loader using the
 [host tools](https://github.com/highenergymagic/openh432-tools/blob/main/docs/installation.md):
 
 ```sh
-fastboot -s OPENH432-FASTBOOT getvar version-bootloader
-fastboot -s OPENH432-FASTBOOT boot openh432-ram-boot.img
+fastboot devices
+fastboot -s DEVICE_ID getvar version-bootloader
+fastboot -s DEVICE_ID boot openh432-ram-boot.img
 ```
+
+Replace `DEVICE_ID` with the selected identifier from `fastboot devices`.
+Do not publish per-device identifiers in generic scripts or firmware artifacts.
 
 These host commands are separate from building. No build opens USB.
 Neither the loader nor the boot envelope should be sent to the factory

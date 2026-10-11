@@ -100,8 +100,7 @@ static int wifi_event_test(struct sdio_func *func, struct h432b_event_result *r,
 	/* First C2H FIFO read since chip startup: its two-bit sequence is zero.
 	 * One CMD53 per request; do not split and increment the port sequence.
 	 */
-	error = mmc_io_rw_extended(func->card, 0, func->num, WIFI_C2H_FIFO, 1,
-				  data, pending, 512);
+	error = wifi_sdio_blocks(func, false, WIFI_C2H_FIFO, data, pending);
 	if (error)
 		goto out;
 	r->bytes = pending * 512;

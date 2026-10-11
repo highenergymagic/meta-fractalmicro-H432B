@@ -1,6 +1,6 @@
 Subject: [PATCH] sdio cis end
 
-Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
+Upstream-Status: Inappropriate [board-specific malformed device CIS]
 
 --- a/drivers/mmc/core/sdio_cis.c
 +++ b/drivers/mmc/core/sdio_cis.c
@@ -17,7 +17,7 @@ Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
  
  		ptr += tpl_link;
 +		/*
-+		 * U2 bring-up quirk: this RTL8712 function1 has a valid FUNCE
++		 * The board's RTL8712 function 1 has a valid FUNCE
 +		 * at 0x1104 but no END after it. Unmodified enumeration scans
 +		 * NULLs to the CMD52 address limit and fails -EINVAL. Require
 +		 * the board opt-in AND the exact live-verified identity/layout;
@@ -29,7 +29,7 @@ Upstream-Status: Inappropriate [H432B experimental board bring-up baseline]
 +		    card->cis.device == 0x8712 &&
 +		    device_property_read_bool(card->host->parent,
 +					      "hims,rtl8712-cis-end-quirk")) {
-+			pr_warn("%s: U2 RTL8712 function1 missing CIS END; "
++			pr_debug("%s: RTL8712 function 1 missing CIS END; "
 +				"stop after validated FUNCE at 0x1130\n",
 +				mmc_hostname(card->host));
 +			break;

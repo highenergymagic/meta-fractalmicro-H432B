@@ -10,9 +10,9 @@ D += (ROOT / "h432b-wifi-debug.h").read_text()
 class WifiCommand(unittest.TestCase):
     def test_command_descriptor(self):
         for text in ("memset(packet, 0, 512)", "0x8c200028", "0x1300",
-                     "0x002c0020 | ((u32)seq << 24)", "packet + 40", "packet, 1, 512"):
+                     "0x002c0020 | ((u32)seq << 24)", "packet + 40", "packet, 1)"):
             self.assertIn(text, C)
-        self.assertIn("mmc_io_rw_extended(func->card, 1, func->num, 0x18c80, 1", C)
+        self.assertIn("wifi_sdio_blocks(func, true, 0x18c80", C)
 
     def test_factory_cmd53_argument(self):
         factory = (((0x18c80 | (1 << 19) | 0xffc60000) << 9) & 0xffffffff) | 1
@@ -30,15 +30,15 @@ class WifiCommand(unittest.TestCase):
         self.assertIn("wifi_event_parse(data, pending * 512, &parsed)", C)
 
     def test_c2h_single_block_is_not_byte_mode(self):
-        self.assertIn("mmc_io_rw_extended(func->card, 0, func->num", C)
-        self.assertIn("data, pending, 512", C)
+        self.assertIn("wifi_sdio_blocks(func, false", C)
+        self.assertIn("data, pending", C)
         self.assertNotIn("sdio_memcpy_fromio", C)
         self.assertEqual((1 << 28) | (1 << 27) | (1 << 26) |
                          (0x18e80 << 9) | 1, 0x1f1d0001)
 
     def test_reply_fields_and_bounds(self):
         for text in ("length == 12", "p[9] == 0x11 + seq * 0x10",
-                     "r->survey ? 3 : (r->opmode ? 16 : 2)", "r->replies++", "r->batches >= (r->stress ? 512 : (r->survey ? 256 : 64))",
+                     "r->survey ? 3 : (r->opmode ? 16 : 2)", "r->replies++", "r->batches >= max_batches",
                      "i < 32", "i < tries && !r->matched"):
             self.assertIn(text, C)
         self.assertIn("!r->sent || r->matched", C)

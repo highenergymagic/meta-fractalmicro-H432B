@@ -12,12 +12,14 @@ a 25 MHz frequency ceiling and no 1.8 V signaling. It uses the standard
 Samsung SDHCI driver and pin groups, with GPIO-based card detection.
 No additional power rail is inferred or switched.
 
-The external card retains the board's read-only block/ioctl guard in both
-profiles because writes and mechanical write-protect sensing remain
-unqualified. This guard remains active regardless of the card's lock tab.
-The normal runtime permits internal-SD and Linux UBI writes; the separate
-diagnostic additionally guards the internal card and rejects writable NAND
-profiles.
+The normal NAND runtime permits external-SD, internal-SD and Linux UBI writes.
+External-card writes and mechanical write-protect sensing remain unqualified;
+do not assume the card's lock tab prevents writes.
+
+The separate diagnostic profile retains the board's read-only block/ioctl
+guards on both SD cards and rejects writable NAND profiles. Its external-card
+guard remains active regardless of the lock tab. These diagnostic restrictions
+do not apply to the normal runtime.
 
 `openh432-external-sd-test` packages this kernel for RAM boot using the
 installed read-only NAND root. Builds do not access the device or install

@@ -30,15 +30,16 @@ class WifiLeds(unittest.TestCase):
         self.assertLess(remove.index("wifi_led_unregister"),
                         remove.index("wifi_net_unregister"))
         net = (FILES / "h432b-wifi-init.h").read_text()
-        start = net.split("static ssize_t initialize_store")[1].split(
-            "static DEVICE_ATTR_WO(initialize)")[0]
+        start = net.split("static int wifi_runtime_initialize")[1].split(
+            "#ifdef CONFIG_H432B_WIFI_DIAGNOSTICS")[0]
         self.assertLess(start.index("mutex_unlock"),
                         start.index("wifi_led_register"))
 
     def test_standard_build_inputs(self):
         recipe = (ROOT / "recipes-kernel/linux/h432b-wifi.inc").read_text()
         self.assertIn("file://h432b-wifi-led.h", recipe)
-        self.assertIn("${UNPACKDIR}/h432b-wifi-led.h", recipe)
+        self.assertIn("file://h432b-wifi-led.h", recipe)
+        self.assertIn("${UNPACKDIR}/h432b-wifi-*.h", recipe)
         config = (FILES / "h432b-wifi-net.config").read_text()
         self.assertIn("CONFIG_NEW_LEDS=y", config)
         self.assertIn("CONFIG_LEDS_CLASS=y", config)
@@ -57,7 +58,8 @@ class WifiLeds(unittest.TestCase):
 #include <assert.h>
 typedef uint8_t u8;
 enum led_brightness { LED_OFF, LED_FULL };
-struct led_classdev { int unused; };
+struct led_classdev { unsigned int flags; };
+#define LED_UNREGISTERING 1U
 struct sdio_func { int unused; };
 struct net_device { int running; };
 struct h432b_wifi_net { struct net_device *dev; int stopping, faulted; };
@@ -120,6 +122,11 @@ int main(void) {
   dev.running = mode != 1;
   net.stopping = mode == 2; net.faulted = mode == 3; ops = 0;
   assert(wifi_led_set(&led.cdev, LED_FULL) == -ENETDOWN);
+  assert(wifi_led_set(&led.cdev, LED_OFF) == -ENETDOWN);
+  led.cdev.flags = LED_UNREGISTERING;
+  assert(wifi_led_set(&led.cdev, LED_OFF) == 0);
+  assert(wifi_led_set(&led.cdev, LED_FULL) == -ENETDOWN);
+  led.cdev.flags = 0;
   assert(!ops && !held && !locked);
  }
  return 0;

@@ -5,12 +5,12 @@
  * Raw axes are sensor-package axes, not a calibrated compass heading.
  */
 #include <linux/delay.h>
-#include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/iio/iio.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/pm.h>
+#include <linux/regulator/consumer.h>
 #include <linux/unaligned.h>
 
 #define AMI603_DATA       0x06
@@ -25,7 +25,8 @@
 
 struct ami603 {
 	struct i2c_client *client;
-	struct gpio_desc *enable;
+	struct regulator *vdd;
+	/* Serializes register access with power transitions. */
 	struct mutex lock;
 	bool powered;
 	u16 sensitivity[6];
@@ -73,12 +74,38 @@ static int ami603_standby(struct ami603 *s)
 	return first ?: ret;
 }
 
+static int ami603_disable(struct ami603 *s)
+{
+	int ret;
+
+	if (!s->powered)
+		return 0;
+	ret = regulator_disable(s->vdd);
+	if (!ret)
+		s->powered = false;
+	return ret;
+}
+
+static void ami603_power_off(void *arg)
+{
+	struct ami603 *s = arg;
+	int ret = ami603_disable(s);
+
+	if (ret)
+		dev_err(&s->client->dev, "cannot disable sensor supply: %d\n", ret);
+}
+
 static int ami603_power_on(struct ami603 *s)
 {
 	u8 id;
 	int ret;
 
-	gpiod_set_value_cansleep(s->enable, 1);
+	if (s->powered)
+		return 0;
+	ret = regulator_enable(s->vdd);
+	if (ret)
+		return ret;
+	s->powered = true;
 	/* Datasheet requires at least 300 us after supply application. */
 	usleep_range(1000, 2000);
 	ret = ami603_read(s, AMI603_WIA, &id, 1);
@@ -87,19 +114,10 @@ static int ami603_power_on(struct ami603 *s)
 	if (!ret)
 		ret = ami603_standby(s);
 	if (ret) {
-		gpiod_set_value_cansleep(s->enable, 0);
+		ami603_power_off(s);
 		return ret;
 	}
-	s->powered = true;
 	return 0;
-}
-
-static void ami603_power_off(void *arg)
-{
-	struct ami603 *s = arg;
-
-	gpiod_set_value_cansleep(s->enable, 0);
-	s->powered = false;
 }
 
 /* OTP is read-only. Always leave the OTP bank, including on transfer failure. */
@@ -176,8 +194,8 @@ standby:
 }
 
 static int ami603_read_raw(struct iio_dev *indio,
-			  const struct iio_chan_spec *chan,
-			  int *val, int *val2, long mask)
+			   const struct iio_chan_spec *chan,
+			   int *val, int *val2, long mask)
 {
 	struct ami603 *s = iio_priv(indio);
 	int ret;
@@ -213,6 +231,7 @@ static int ami603_read_raw(struct iio_dev *indio,
 	.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) | \
 		BIT(IIO_CHAN_INFO_SCALE) | (_extra), \
 }
+
 static const struct iio_chan_spec ami603_channels[] = {
 	AMI603_CHANNEL(IIO_ACCEL, X, 0, BIT(IIO_CHAN_INFO_OFFSET)),
 	AMI603_CHANNEL(IIO_ACCEL, Y, 1, BIT(IIO_CHAN_INFO_OFFSET)),
@@ -240,18 +259,18 @@ static int ami603_probe(struct i2c_client *client)
 	s = iio_priv(indio);
 	s->client = client;
 	mutex_init(&s->lock);
-	s->enable = devm_gpiod_get(&client->dev, "enable", GPIOD_OUT_LOW);
-	if (IS_ERR(s->enable))
-		return dev_err_probe(&client->dev, PTR_ERR(s->enable),
+	s->vdd = devm_regulator_get(&client->dev, "vdd");
+	if (IS_ERR(s->vdd))
+		return dev_err_probe(&client->dev, PTR_ERR(s->vdd),
 				     "cannot acquire sensor supply\n");
+	ret = devm_add_action_or_reset(&client->dev, ami603_power_off, s);
+	if (ret)
+		return ret;
 	/* Datasheet requires >300 ms off before a fresh power-on. */
 	msleep(310);
 	ret = ami603_power_on(s);
 	if (ret)
 		return dev_err_probe(&client->dev, ret, "sensor identification failed\n");
-	ret = devm_add_action_or_reset(&client->dev, ami603_power_off, s);
-	if (ret)
-		return ret;
 	ret = ami603_parameters(s);
 	if (ret)
 		return dev_err_probe(&client->dev, ret, "invalid factory calibration\n");
@@ -267,11 +286,12 @@ static int ami603_probe(struct i2c_client *client)
 static int ami603_suspend(struct device *dev)
 {
 	struct ami603 *s = iio_priv(dev_get_drvdata(dev));
+	int ret;
 
 	mutex_lock(&s->lock);
-	ami603_power_off(s);
+	ret = ami603_disable(s);
 	mutex_unlock(&s->lock);
-	return 0;
+	return ret;
 }
 
 static int ami603_resume(struct device *dev)
@@ -286,7 +306,17 @@ static int ami603_resume(struct device *dev)
 	mutex_unlock(&s->lock);
 	return ret;
 }
+
 static DEFINE_SIMPLE_DEV_PM_OPS(ami603_pm, ami603_suspend, ami603_resume);
+
+static void ami603_shutdown(struct i2c_client *client)
+{
+	struct ami603 *s = iio_priv(i2c_get_clientdata(client));
+
+	mutex_lock(&s->lock);
+	ami603_power_off(s);
+	mutex_unlock(&s->lock);
+}
 
 static const struct of_device_id ami603_of_match[] = {
 	{ .compatible = "aichi,ami603" },
@@ -301,6 +331,7 @@ static struct i2c_driver ami603_driver = {
 		.pm = pm_sleep_ptr(&ami603_pm),
 	},
 	.probe = ami603_probe,
+	.shutdown = ami603_shutdown,
 };
 module_i2c_driver(ami603_driver);
 MODULE_DESCRIPTION("Aichi AMI603 magnetometer and accelerometer");

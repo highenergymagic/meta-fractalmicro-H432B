@@ -19,7 +19,7 @@ class UsbHubIntegrationTests(unittest.TestCase):
 
     def test_reset_has_no_duplicate_mux_claim(self):
         text=(FILES/"s5pv210-hims-u2-usb-host-test.dtsi").read_text()
-        reset=text.split("usb_hub_reset_pin: usb-hub-reset-pin {",1)[1].split("};",1)[0]
+        reset=text.split("usb_hub_reset_pin: usb-hub-reset-pins {",1)[1].split("};",1)[0]
         self.assertIn('samsung,pins = "gpj4-2"',reset)
         self.assertIn("samsung,pin-pud = <0>",reset)
         self.assertNotIn("samsung,pin-function",reset)

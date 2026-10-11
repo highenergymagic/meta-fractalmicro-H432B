@@ -4,10 +4,16 @@
 #include <libfdt.h>
 #include <asm/io.h>
 #include "identity.h"
+#include "usb-identity.h"
 
 static unsigned char factory_mac[6];
 static int factory_valid;
 static char board_id[32];
+
+const char *u2_identity_board_id(void)
+{
+    return factory_valid ? board_id : NULL;
+}
 
 void u2_identity_capture(void)
 {
@@ -31,7 +37,24 @@ void u2_identity_capture(void)
  * Update both properties: Linux prefers mac-address when both are present. */
 void ft_board_setup(void *blob, bd_t *bd)
 {
-    int node, ret;
+    char commandline[H432B_KERNEL_COMMAND_LINE_SIZE];
+    const char *args;
+    int node, ret, len;
+
+    /* fdt_chosen() has already copied the environment's final A/B arguments.
+     * Set USB identity here for both NAND and explicit RAM Linux boots. */
+    node = fdt_path_offset(blob, "/chosen");
+    args = node < 0 ? NULL : fdt_getprop(blob, node, "bootargs", &len);
+    if (!args || len < 1 ||
+        h432b_usb_bootargs(args, len, u2_identity_board_id(),
+                          commandline, sizeof(commandline))) {
+        puts("USB identity not applied: invalid or oversized kernel arguments\n");
+    } else {
+        ret = fdt_setprop_string(blob, node, "bootargs", commandline);
+        if (ret)
+            printf("USB identity FDT fixup failed: %s\n", fdt_strerror(ret));
+    }
+
     if (!factory_valid)
         return;
     node = fdt_path_offset(blob, "/ethernet@a8000000");

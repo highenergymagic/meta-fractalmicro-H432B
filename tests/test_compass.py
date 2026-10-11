@@ -22,6 +22,17 @@ class Compass(unittest.TestCase):
                       "ami603_suspend", "ami603_resume", "msleep(310)"):
             self.assertIn(value, src)
         self.assertNotIn("enable_irq_wake", src)
+        self.assertNotIn("gpiod_", src)
+        self.assertIn('devm_regulator_get(&client->dev, "vdd")', src)
+        self.assertIn("ret = regulator_enable(s->vdd)", src)
+        self.assertIn("ret = regulator_disable(s->vdd)", src)
+        self.assertIn("ret = ami603_disable(s)", src)
+        dt = (FILES / "s5pv210-hims-u2-compass.dtsi").read_text()
+        self.assertIn("vdd-supply = <&compass_supply>", dt)
+        self.assertIn('compatible = "regulator-fixed"', dt)
+        include = (ROOT / "recipes-kernel/linux/h432b-compass.inc").read_text()
+        self.assertIn("0026a-ami603-binding.patch", include)
+        self.assertIn("REGULATOR_FIXED_VOLTAGE", include)
 
     def test_factory_parameters_read_only_and_page_restored(self):
         src = (FILES / "ami603.c").read_text()

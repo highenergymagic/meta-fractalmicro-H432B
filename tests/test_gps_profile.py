@@ -45,7 +45,8 @@ class GpsProfileTests(unittest.TestCase):
     def test_runtime_does_not_claim_suspend_support(self):
         driver=(FILES/"h432b-gps-power.c").read_text()
         self.assertNotIn(".pm =",driver)
-        self.assertIn("no runtime or system PM",driver)
+        self.assertIn("Supply is retained across system sleep",driver)
+        self.assertIn(".shutdown = h432b_gps_shutdown", driver)
         config=(FILES/"u2-gps.config").read_text()
         self.assertIn("CONFIG_H432B_GPS_POWER=y",config)
         self.assertIn("CONFIG_REGULATOR_FIXED_VOLTAGE=y",config)

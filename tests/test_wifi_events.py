@@ -21,8 +21,8 @@ class WifiEvents(unittest.TestCase):
     def test_bounded_single_first_fifo_read(self):
         self.assertIn("#define WIFI_EVENT_MAX 16384", EVENT)
         self.assertIn("#define WIFI_C2H_FIFO 0x18e80", EVENT)
-        self.assertEqual(EVENT.count("mmc_io_rw_extended("), 1)
-        self.assertIn("data, pending, 512", EVENT)
+        self.assertEqual(EVENT.count("wifi_sdio_blocks("), 1)
+        self.assertIn("data, pending", EVENT)
         self.assertNotIn("sdio_memcpy_fromio", EVENT)
         self.assertIn("host->max_blk_count < WIFI_EVENT_MAX / 512", EVENT)
         self.assertIn("sample->power.warm", DRIVER)

@@ -4,15 +4,17 @@ Upstream-Status: Inappropriate [H432B board-specific wiring]
 
 --- a/sound/soc/samsung/hims-u2-audio.c
 +++ b/sound/soc/samsung/hims-u2-audio.c
-@@ -9,6 +9,8 @@
+@@ -9,8 +9,10 @@
  #include <linux/delay.h>
  #include <linux/gpio/consumer.h>
  #include <linux/module.h>
 +#include <linux/mutex.h>
-+#include <sound/jack.h>
  #include <linux/of.h>
  #include <linux/platform_device.h>
++#include <sound/jack.h>
  #include <sound/pcm_params.h>
+ #include <sound/soc.h>
+ #include "../codecs/wm8983.h"
 @@ -22,31 +24,71 @@
  	struct snd_soc_dai_link_component cpu, codec, platform;
  	struct gpio_desc *unmute, *speaker;
@@ -149,7 +151,7 @@ Upstream-Status: Inappropriate [H432B board-specific wiring]
 +				     &u2->microphone_gpio);
 +	if (ret)
 +		return ret;
- 	dev_info(card->dev, "HP/SPK analogue volume limited to %u/63\n",
+ 	dev_dbg(card->dev, "HP/SPK analogue volume limited to %u/63\n",
  		 U2_ANALOG_VOLUME_MAX);
  	return 0;
 @@ -195,6 +276,7 @@

@@ -14,8 +14,8 @@ Other boards and wake-enabled configurations retain the existing path.
 +#include <linux/regulator/consumer.h>
 +#include <linux/rtnetlink.h>
 @@ -117,1 +118,2 @@
--	u32 suspend_int_cfg;
-+	u32 suspend_int_cfg;
+-	unsigned int software_irq_signal;
++	unsigned int software_irq_signal;
 +	bool h432b_reopen;
 @@ -2610,2 +2612,11 @@
 -	if (netif_running(ndev)) {

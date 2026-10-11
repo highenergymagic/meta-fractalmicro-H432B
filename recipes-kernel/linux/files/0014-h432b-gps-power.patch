@@ -1,16 +1,22 @@
 Subject: [PATCH] misc: add H432B GPS power/reset sequencing
 
-Upstream-Status: Inappropriate [board-specific power sequencer; PM not implemented]
+Upstream-Status: Inappropriate [board power sequencing]
 
+Keep receiver power and reset sequencing separate from the UART interface.
+The board supply remains enabled during sleep and is released on shutdown.
+
+---
 --- a/drivers/misc/Kconfig
 +++ b/drivers/misc/Kconfig
-@@ -1,0 +2,7 @@
+@@ -1,0 +2,9 @@
 +config H432B_GPS_POWER
 +	bool "H432B GPS power/reset sequencing"
-+	depends on ARCH_S5PV210 && GPIOLIB && REGULATOR
++	depends on OF && GPIOLIB && REGULATOR
 +	help
-+	  Enable the qualified board GPS rail and release reset after 100 ms.
-+	  Receiver remains powered; runtime and system PM are not implemented.
++	  Enable the board GPS rail and release reset after 100 ms.
++	  Retain power across sleep; remove it on detach and system shutdown.
++	  Receiver communication uses the separately configured UART.
++	  This is board wiring support rather than a GNSS protocol driver.
 +
 --- a/drivers/misc/Makefile
 +++ b/drivers/misc/Makefile

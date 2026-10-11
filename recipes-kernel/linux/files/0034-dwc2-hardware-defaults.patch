@@ -1,0 +1,33 @@
+Subject: [PATCH] usb: dwc2: choose valid hardware-derived defaults
+
+The parameter validator should diagnose invalid overrides, not defaults which
+the core already knows cannot work. BESL requires core revision 3.00a and FIFO
+defaults must not exceed the synthesized hardware depth. Retain the existing
+legacy defaults on hardware which supports them and retain override validation.
+
+Upstream-Status: Pending
+
+diff --git a/drivers/usb/dwc2/params.c b/drivers/usb/dwc2/params.c
+--- a/drivers/usb/dwc2/params.c
++++ b/drivers/usb/dwc2/params.c
+@@ -486,7 +486,7 @@ static void dwc2_set_param_lpm(struct dwc2_hsotg *hsotg)
+ 	p->lpm = hsotg->hw_params.lpm_mode;
+ 	if (p->lpm) {
+ 		p->lpm_clock_gating = true;
+-		p->besl = true;
++		p->besl = hsotg->hw_params.snpsid >= DWC2_CORE_REV_3_00a;
+ 		p->hird_threshold_en = true;
+ 		p->hird_threshold = 4;
+ 	} else {
+@@ -563,8 +563,9 @@ static void dwc2_set_default_params(struct dwc2_hsotg *hsotg)
+ 		 * auto-detect if the hardware does not support the
+ 		 * default.
+ 		 */
+-		p->g_rx_fifo_size = 2048;
+-		p->g_np_tx_fifo_size = 1024;
++		p->g_rx_fifo_size = min_t(u32, 2048, hw->rx_fifo_size);
++		p->g_np_tx_fifo_size = min_t(u32, 1024,
++					    hw->dev_nperio_tx_fifo_size);
+ 		dwc2_set_param_tx_fifo_sizes(hsotg);
+ 	}
+ }

@@ -1,20 +1,115 @@
-Subject: Add H432B RTL8712 SDIO station driver
-Upstream-Status: Inappropriate [board-specific station driver]
+Subject: Add RTL8712S SDIO cfg80211 station driver
+Upstream-Status: Pending
 
---- a/drivers/mmc/core/Makefile
-+++ b/drivers/mmc/core/Makefile
-@@ -1,0 +2,1 @@
-+obj-y += h432b-wifi-transport.o
+The transport is a wireless device driver, not part of the MMC core. The
+board's SDIO function node selects its verified RF and firmware profile.
 
---- a/drivers/mmc/core/Kconfig
-+++ b/drivers/mmc/core/Kconfig
-@@ -1,0 +2,9 @@
+diff --git a/drivers/net/wireless/realtek/Makefile b/drivers/net/wireless/realtek/Makefile
+--- a/drivers/net/wireless/realtek/Makefile
++++ b/drivers/net/wireless/realtek/Makefile
+@@ -9,4 +9,5 @@
+ obj-$(CONFIG_RTL8XXXU)		+= rtl8xxxu/
+ obj-$(CONFIG_RTW88)		+= rtw88/
+ obj-$(CONFIG_RTW89)		+= rtw89/
++obj-$(CONFIG_RTL8712S)		+= rtl8712s/
+
+diff --git a/drivers/net/wireless/realtek/Kconfig b/drivers/net/wireless/realtek/Kconfig
+--- a/drivers/net/wireless/realtek/Kconfig
++++ b/drivers/net/wireless/realtek/Kconfig
+@@ -17,5 +17,6 @@
+ source "drivers/net/wireless/realtek/rtl8xxxu/Kconfig"
+ source "drivers/net/wireless/realtek/rtw88/Kconfig"
+ source "drivers/net/wireless/realtek/rtw89/Kconfig"
++source "drivers/net/wireless/realtek/rtl8712s/Kconfig"
+
+ endif # WLAN_VENDOR_REALTEK
+diff --git a/drivers/net/wireless/realtek/rtl8712s/Kconfig b/drivers/net/wireless/realtek/rtl8712s/Kconfig
+new file mode 100644
+--- /dev/null
++++ b/drivers/net/wireless/realtek/rtl8712s/Kconfig
+@@ -0,0 +1,24 @@
++# SPDX-License-Identifier: GPL-2.0-only
++config RTL8712S
++	tristate "Realtek RTL8712S SDIO wireless support"
++	depends on MMC && CFG80211 && OF
++	depends on LEDS_CLASS
++	select FW_LOADER
++	select CRYPTO
++	select CRYPTO_AES
++	select CRYPTO_CCM
++	help
++	  SDIO station support for RTL8712S with firmware-assisted association
++	  and host-managed CCMP. A supported device-tree RF/firmware profile
++	  is required. Only the H432B profile is currently implemented.
++	  This driver is separate from the USB-only r8712u driver.
++
 +config H432B_WIFI_DIAGNOSTICS
-+	bool "H432B RTL8712 hardware experiment interfaces"
-+	depends on ARCH_S5PV210 && MMC
++	bool "RTL8712S hardware experiment interfaces"
++	depends on RTL8712S
 +	default n
 +	help
 +	  Expose manual transport, power, firmware and command experiments.
 +	  These controls are not required for station operation and must stay
 +	  disabled in normal runtime images.
 +
+diff --git a/drivers/net/wireless/realtek/rtl8712s/Makefile b/drivers/net/wireless/realtek/rtl8712s/Makefile
+new file mode 100644
+--- /dev/null
++++ b/drivers/net/wireless/realtek/rtl8712s/Makefile
+@@ -0,0 +1,3 @@
++# SPDX-License-Identifier: GPL-2.0-only
++obj-$(CONFIG_RTL8712S) += rtl8712s.o
++rtl8712s-y := h432b-wifi-transport.o
+diff --git a/Documentation/devicetree/bindings/net/wireless/hims,h432b-rtl8712s.yaml b/Documentation/devicetree/bindings/net/wireless/hims,h432b-rtl8712s.yaml
+new file mode 100644
+--- /dev/null
++++ b/Documentation/devicetree/bindings/net/wireless/hims,h432b-rtl8712s.yaml
+@@ -0,0 +1,47 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/net/wireless/hims,h432b-rtl8712s.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: HIMS H432B RTL8712S SDIO wireless module
++
++maintainers:
++  - Freya Fractal <24643711+highenergymagic@users.noreply.github.com>
++
++description: |
++  The H432B module uses the RTL8712S SDIO transport with a board-specific
++  firmware, RF initialization and calibration profile. The SDIO vendor and
++  product IDs alone do not identify that profile. This compatible selects
++  the module fitted to the H432B board; it must not be used for arbitrary
++  RTL8712S cards or the RTL8712 USB transport.
++
++  Board supply sequencing, pin control and the in-band SDIO interrupt are
++  described by the parent MMC controller. Firmware selection and RF setup
++  belong to this module profile, not to a generic RTL8712S ID or arbitrary
++  devicetree register values. The firmware is provided separately from the
++  driver.
++
++properties:
++  compatible:
++    const: hims,h432b-rtl8712s
++
++  reg:
++    maxItems: 1
++    description: SDIO function number, which is 1 for this module.
++
++required:
++  - compatible
++  - reg
++
++additionalProperties: false
++
++examples:
++  - |
++    mmc {
++        #address-cells = <1>;
++        #size-cells = <0>;
++        wifi@1 {
++            compatible = "hims,h432b-rtl8712s";
++            reg = <1>;
++        };
++    };

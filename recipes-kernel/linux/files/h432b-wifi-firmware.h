@@ -10,7 +10,7 @@
 #include <linux/mmc/host.h>
 #include <linux/unaligned.h>
 
-#include "sdio_ops.h"
+#include "h432b-wifi-io.h"
 
 #define WIFI_FW_NAME "h432b/rtl8712s.bin"
 #define WIFI_FW_CHUNK 49152
@@ -73,8 +73,8 @@ static int wifi_fw_section(struct sdio_func *func, struct h432b_fw_result *r,
 		 * Factory CMD53 has WRITE, BLOCK_MODE and INCREMENT all set.
 		 * Each firmware packet starts at the same FIFO address.
 		 */
-		error = mmc_io_rw_extended(func->card, 1, func->num,
-					  WIFI_FW_FIFO, 1, packet, transfer / 512, 512);
+		error = wifi_sdio_blocks(func, true, WIFI_FW_FIFO,
+					 packet, transfer / 512);
 		if (error)
 			return error;
 		r->bytes += length;
@@ -122,7 +122,7 @@ static int wifi_fw_cpu_bit(struct sdio_func *func, unsigned int offset)
 }
 
 /*
- * Factory SDIO configuration, including the board registry overrides.
+ * Factory SDIO configuration, with the driver's HT20 bandwidth policy.
  * Unspecified bytes remain zero. This is not the USB configuration carried
  * inside the firmware file, nor the trailing file DMEM data.
  */
@@ -134,7 +134,10 @@ static void wifi_fw_config(u8 config[48])
 	config[0x0e] = 1; /* turbo mode */
 	config[0x12] = 2; /* virtual carrier sense: automatic */
 	config[0x13] = 2; /* carrier sense type: CTS-to-self */
-	config[0x19] = 1; /* factory 40 MHz capability */
+	/* Firmware rebuilds the on-air HT width from this field, not just the
+	 * host's JoinBss IE. Disable 40 MHz here as well as in cfg80211.
+	 */
+	config[0x19] = 0;
 	/* MPMode, LowPower and PowerGain are all zero in the board registry. */
 }
 

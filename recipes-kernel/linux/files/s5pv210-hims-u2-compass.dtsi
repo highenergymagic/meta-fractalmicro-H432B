@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-only
 / {
-	aliases { i2c11 = &compass_bus; };
+	aliases {
+		i2c11 = &compass_bus;
+	};
+
+	compass_supply: regulator-compass {
+		compatible = "regulator-fixed";
+		regulator-name = "compass-vdd";
+		gpio = <&gpe1 2 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
 	compass_bus: i2c-compass {
 		compatible = "i2c-gpio";
 		sda-gpios = <&gpb 6 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
@@ -13,7 +23,7 @@
 		motion-sensor@f {
 			compatible = "aichi,ami603";
 			reg = <0x0f>;
-			enable-gpios = <&gpe1 2 GPIO_ACTIVE_HIGH>;
+			vdd-supply = <&compass_supply>;
 			/* Poll STA1; DRDY and INT are deliberately not wake sources. */
 		};
 	};

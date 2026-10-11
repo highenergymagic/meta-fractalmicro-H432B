@@ -16,7 +16,7 @@
     };
 };
 &pinctrl0 {
-    bluetooth_enable_pin: bluetooth-enable-pin {
+    bluetooth_enable_pin: bluetooth-enable-pins {
         samsung,pins = "gpe0-2";
         samsung,pin-function = <1>;
         samsung,pin-pud = <0>;

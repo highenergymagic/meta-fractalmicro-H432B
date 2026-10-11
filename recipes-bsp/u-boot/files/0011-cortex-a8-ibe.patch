@@ -1,0 +1,85 @@
+Subject: [PATCH] arm: enable Cortex-A8 IBE independently of board low-level init
+
+Apply the CPU prerequisite for the OS Spectre-v2 BPIALL mitigation to H432B.
+The EBOOT handoff deliberately skips generic clock/DDR initialization, so
+put the CPU-specific setting before that gate. Do not change cache, MMU,
+security-state or unrelated ACTLR bits. A read-only command reports live
+MIDR and ACTLR, and fails if this CPU cannot satisfy the IBE prerequisite.
+
+Adapted from the upstream Cortex-A8 workaround by Nishanth Menon in commit
+7b37a9c732bf (ARM: Introduce ability to enable ACR::IBE on Cortex-A8 for
+CVE-2017-5715). The 2012.10 tree predates that configuration and helper.
+
+Upstream-Status: Backport [https://github.com/u-boot/u-boot/commit/7b37a9c732bf; adapted for EBOOT low-level-init bypass]
+
+diff --git a/arch/arm/cpu/armv7/start.S b/arch/arm/cpu/armv7/start.S
+--- a/arch/arm/cpu/armv7/start.S
++++ b/arch/arm/cpu/armv7/start.S
+@@ -132,6 +132,18 @@
+ 	bic	r0, r0, #0x1f
+ 	orr	r0, r0, #0xd3
+ 	msr	cpsr,r0
++#ifdef CONFIG_ARM_CORTEX_A8_CVE_2017_5715
++	/*
++	 * Cortex-A8 BPIALL is a NOP unless ACTLR.IBE is set. This CPU
++	 * prerequisite is independent of board clock/DDR initialization.
++	 * Preserve all other ACTLR bits; the OS verifies IBE before enabling
++	 * its branch-predictor hardening. Nonsecure writes cannot set IBE.
++	 */
++	mrc	p15, 0, r0, c1, c0, 1
++	orr	r0, r0, #(1 << 6)
++	mcr	p15, 0, r0, c1, c0, 1
++	isb
++#endif
+ #ifdef CONFIG_HIMS_U2
+ 	/* EBOOT has cleared SCTLR.M. Keep the watchdog disabled while
+ 	 * this physical-address payload owns the board. */
+diff --git a/include/configs/hims_u2.h b/include/configs/hims_u2.h
+--- a/include/configs/hims_u2.h
++++ b/include/configs/hims_u2.h
+@@ -4,6 +4,7 @@
+ #define CONFIG_SAMSUNG		1
+ #define CONFIG_S5P		1
+ #define CONFIG_S5PC110		1
++#define CONFIG_ARM_CORTEX_A8_CVE_2017_5715	1
+ #define CONFIG_HIMS_U2		1
+ #define CONFIG_USB_GADGET		1
+ #define CONFIG_USB_GADGET_S3C_UDC_OTG	1
+diff --git a/board/hims/u2/u2.c b/board/hims/u2/u2.c
+--- a/board/hims/u2/u2.c
++++ b/board/hims/u2/u2.c
+@@ -178,8 +178,26 @@
+ 	return 0;
+ }
+
++/* Read back the firmware prerequisite; never modify security state here. */
++static int u2_cpu_status(void)
++{
++	u32 midr, actlr;
++
++	asm volatile("mrc p15, 0, %0, c0, c0, 0" : "=r" (midr));
++	asm volatile("mrc p15, 0, %0, c1, c0, 1" : "=r" (actlr));
++	printf("MIDR=%08x ACTLR=%08x Cortex-A8-IBE=%u\n",
++	       midr, actlr, (actlr >> 6) & 1);
++	if ((midr & 0xff0ffff0) != 0x410fc080) {
++		puts("IBE status is defined here only for Cortex-A8\n");
++		return CMD_RET_FAILURE;
++	}
++	return (actlr & (1U << 6)) ? 0 : CMD_RET_FAILURE;
++}
++
+ static int do_u2(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
+ {
++	if (argc == 2 && !strcmp(argv[1], "cpu"))
++		return u2_cpu_status();
+ 	if (argc == 3 && !strcmp(argv[1], "braille")) {
+ 		int result;
+
+@@ -234,6 +252,7 @@
+ 	"U2 board diagnostics",
+ 	"map <physical-hex> - show a whitelisted physical USB register\n"
+ 	"u2 braille brand|kernel - display the fixed Grade 2 status (no boot/power change)\n"
++	"u2 cpu - read CPU identification and Cortex-A8 IBE status\n"
+ 	"u2 probe - start the USB control command interface\n"
+ 	"u2 nand-scan <first-block> <count> - scan NAND block first pages read-only\n"
+ 	"u2 nand-pages <first-page> <count> - scan all selected page heads read-only\n"

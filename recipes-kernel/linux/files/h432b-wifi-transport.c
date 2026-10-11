@@ -25,7 +25,7 @@ struct h432b_wifi_led;
 struct h432b_wifi_sample {
 	struct h432b_wifi_led *leds;
 	struct h432b_wifi_net *net;
-	struct mutex lock;
+	struct mutex lock; /* Serializes configuration, FIFO I/O, keys and link state. */
 	bool attempted;
 	bool startup_attempted;
 	int startup_error;
@@ -43,6 +43,7 @@ struct h432b_wifi_sample {
 };
 
 static void wifi_net_irq_notify(struct h432b_wifi_net *net);
+static int wifi_runtime_restart(struct h432b_wifi_net *net);
 
 static void h432b_wifi_irq(struct sdio_func *func)
 {
@@ -52,9 +53,9 @@ static void h432b_wifi_irq(struct sdio_func *func)
 		wifi_command_irq(func, &sample->command);
 		if (sample->command.irq_owned && sample->net)
 			wifi_net_irq_notify(sample->net);
-	}
-	else
+	} else {
 		wifi_ack_irq(func, &sample->ack);
+	}
 }
 
 #include "h432b-wifi-net.h"
@@ -63,10 +64,10 @@ static void h432b_wifi_irq(struct sdio_func *func)
 #include "h432b-wifi-debug.h"
 #endif
 
+#ifdef CONFIG_H432B_WIFI_DIAGNOSTICS
 static struct attribute *h432b_wifi_attrs[] = {
 	&dev_attr_initialize.attr,
 	&dev_attr_network_result.attr,
-#ifdef CONFIG_H432B_WIFI_DIAGNOSTICS
 	&dev_attr_network_start.attr,
 	&dev_attr_command_test.attr,
 	&dev_attr_command_result.attr,
@@ -80,35 +81,61 @@ static struct attribute *h432b_wifi_attrs[] = {
 	&dev_attr_power_result.attr,
 	&dev_attr_firmware_load.attr,
 	&dev_attr_firmware_result.attr,
-#endif
 	NULL,
 };
+
 static const struct attribute_group h432b_wifi_group = {
 	.attrs = h432b_wifi_attrs,
 };
+#endif
 
 static int h432b_wifi_probe(struct sdio_func *func,
-			   const struct sdio_device_id *id)
+			    const struct sdio_device_id *id)
 {
 	struct h432b_wifi_sample *sample;
+#ifndef CONFIG_H432B_WIFI_DIAGNOSTICS
+	int error;
+#endif
 
+	/* RF topology and firmware configuration are a board integration input. */
 	if (func->num != 1 ||
-	    !of_machine_is_compatible("hims,braillesense-u2"))
+	    !of_device_is_compatible(func->dev.of_node, "hims,h432b-rtl8712s"))
 		return -ENODEV;
 	sample = devm_kzalloc(&func->dev, sizeof(*sample), GFP_KERNEL);
 	if (!sample)
 		return -ENOMEM;
 	mutex_init(&sample->lock);
 	sdio_set_drvdata(func, sample);
+#ifdef CONFIG_H432B_WIFI_DIAGNOSTICS
 	return device_add_group(&func->dev, &h432b_wifi_group);
+#else
+	error = wifi_runtime_initialize(func);
+	if (error && sample->startup_attempted) {
+		int cleanup = wifi_runtime_shutdown(func);
+
+		if (cleanup)
+			dev_warn(&func->dev, "probe shutdown failed: %d\n", cleanup);
+	}
+	return error;
+#endif
 }
 
 static void h432b_wifi_remove(struct sdio_func *func)
 {
+	struct h432b_wifi_sample *owner = sdio_get_drvdata(func);
+	int error;
+
 	/* Removing sysfs waits for any active sample before devres frees data. */
+#ifdef CONFIG_H432B_WIFI_DIAGNOSTICS
 	device_remove_group(&func->dev, &h432b_wifi_group);
-	wifi_led_unregister(sdio_get_drvdata(func));
-	wifi_net_unregister(sdio_get_drvdata(func));
+#endif
+	wifi_led_unregister(owner);
+	wifi_net_unregister(owner);
+	if (owner->startup_attempted) {
+		error = wifi_runtime_shutdown(func);
+		if (error)
+			dev_warn(&func->dev, "radio shutdown failed: %d\n", error);
+	}
 }
 
 /*
@@ -154,9 +181,9 @@ static int h432b_wifi_resume(struct device *dev)
 	rtnl_lock();
 	if (owner->resume_net && net && netif_running(net->dev)) {
 		error = wifi_net_open(net->dev);
-		if (!error)
+		if (!error) {
 			netif_device_attach(net->dev);
-		else {
+		} else {
 			net->last_error = error;
 			WRITE_ONCE(net->faulted, true);
 			dev_err(dev, "cannot restart station after sleep: %d\n", error);
@@ -177,7 +204,7 @@ static const struct sdio_device_id h432b_wifi_ids[] = {
 MODULE_DEVICE_TABLE(sdio, h432b_wifi_ids);
 
 static struct sdio_driver h432b_wifi_driver = {
-	.name = "h432b-wifi-transport",
+	.name = "rtl8712s",
 	.id_table = h432b_wifi_ids,
 	.probe = h432b_wifi_probe,
 	.remove = h432b_wifi_remove,
@@ -186,4 +213,5 @@ static struct sdio_driver h432b_wifi_driver = {
 module_sdio_driver(h432b_wifi_driver);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("H432B RTL8712 SDIO station driver");
+MODULE_FIRMWARE(WIFI_FW_NAME);
+MODULE_DESCRIPTION("RTL8712S SDIO wireless station driver");

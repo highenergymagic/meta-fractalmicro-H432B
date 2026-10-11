@@ -9,31 +9,37 @@
 #include <linux/kref.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
-#include <linux/of.h>
 #include <linux/mutex.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
 #include <linux/uaccess.h>
+
 #include "h432b-braille-wire.h"
 
 struct h432_braille {
 	struct miscdevice misc;
 	struct gpio_desc *data, *clock, *latch, *enable;
+	/* Serializes frame transfers, file ownership and power/lifetime state. */
 	struct mutex lock;
 	struct kref refs;
 	bool opened, dead, suspended, frame_valid;
 	u8 frame[32];
 };
+
 static void free_display(struct kref *ref)
 {
 	kfree(container_of(ref, struct h432_braille, refs));
 }
+
 static void shift_frame(struct h432_braille *h, const u8 cells[32])
 {
 	int cell, bit;
+
 	gpiod_set_value_cansleep(h->latch, 0);
 	for (cell = 31; cell >= 0; cell--) {
 		u8 wire = h432_braille_wire(cells[cell]);
+
 		for (bit = 7; bit >= 0; bit--) {
 			gpiod_set_value_cansleep(h->data, !!(wire & BIT(bit)));
 			udelay(1);
@@ -46,17 +52,19 @@ static void shift_frame(struct h432_braille *h, const u8 cells[32])
 	udelay(1);
 	gpiod_set_value_cansleep(h->latch, 0);
 }
+
 static int display_open(struct inode *inode, struct file *file)
 {
 	struct h432_braille *h = container_of(file->private_data,
 					     struct h432_braille, misc);
 	int ret = 0;
+
 	mutex_lock(&h->lock);
-	if (h->dead)
+	if (h->dead) {
 		ret = -ENODEV;
-	else if (h->opened)
+	} else if (h->opened) {
 		ret = -EBUSY;
-	else {
+	} else {
 		h->opened = true;
 		kref_get(&h->refs);
 		file->private_data = h;
@@ -65,21 +73,25 @@ static int display_open(struct inode *inode, struct file *file)
 	mutex_unlock(&h->lock);
 	return ret;
 }
+
 static int display_release(struct inode *inode, struct file *file)
 {
 	struct h432_braille *h = file->private_data;
+
 	mutex_lock(&h->lock);
 	h->opened = false;
 	mutex_unlock(&h->lock);
 	kref_put(&h->refs, free_display);
 	return 0;
 }
+
 static ssize_t display_write(struct file *file, const char __user *buf,
 			     size_t count, loff_t *offset)
 {
 	struct h432_braille *h = file->private_data;
 	u8 cells[32];
 	int ret;
+
 	if (count != sizeof(cells))
 		return -EINVAL;
 	if (copy_from_user(cells, buf, sizeof(cells)))
@@ -87,15 +99,15 @@ static ssize_t display_write(struct file *file, const char __user *buf,
 	ret = mutex_lock_interruptible(&h->lock);
 	if (ret)
 		return ret;
-	if (h->dead)
+	if (h->dead) {
 		ret = -ENODEV;
-	else if (h->suspended)
+	} else if (h->suspended) {
 		ret = -EHOSTDOWN;
-	else {
+	} else {
 		ret = gpiod_get_value_cansleep(h->enable);
-		if (ret == 0)
+		if (ret == 0) {
 			ret = -EHOSTDOWN;
-		else if (ret > 0) {
+		} else if (ret > 0) {
 			shift_frame(h, cells);
 			memcpy(h->frame, cells, sizeof(cells));
 			h->frame_valid = true;
@@ -105,17 +117,22 @@ static ssize_t display_write(struct file *file, const char __user *buf,
 	mutex_unlock(&h->lock);
 	return ret;
 }
+
 static const struct file_operations display_fops = {
 	.owner = THIS_MODULE,
 	.open = display_open,
 	.release = display_release,
 	.write = display_write,
 };
+
 static int display_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct h432_braille *h;
+	const u8 blank[32] = {};
+	bool enabled;
 	int ret;
+
 	h = kzalloc(sizeof(*h), GFP_KERNEL);
 	if (!h)
 		return -ENOMEM;
@@ -126,18 +143,19 @@ static int display_probe(struct platform_device *pdev)
 		ret = PTR_ERR(h->enable);
 		goto fail;
 	}
-	/* Do not turn an unknown/off display on. EBOOT supplies the live state. */
+	/* Preserve a bootloader greeting, but do not require its power setup. */
 	ret = gpiod_get_direction(h->enable);
-	if (ret != 0) {
-		ret = ret < 0 ? ret : -EHOSTDOWN;
+	if (ret < 0)
 		goto fail;
+	if (ret > 0) {
+		ret = gpiod_direction_output(h->enable, 0);
+		if (ret)
+			goto fail;
 	}
 	ret = gpiod_get_value_cansleep(h->enable);
-	if (ret <= 0) {
-		ret = ret < 0 ? ret : -EHOSTDOWN;
+	if (ret < 0)
 		goto fail;
-	}
-	dev_info(dev, "cell supply GPJ0[3] inherited high; suspend control ready\n");
+	enabled = ret;
 	h->latch = devm_gpiod_get(dev, "latch", GPIOD_OUT_LOW);
 	if (IS_ERR(h->latch)) {
 		ret = PTR_ERR(h->latch);
@@ -153,30 +171,47 @@ static int display_probe(struct platform_device *pdev)
 		ret = PTR_ERR(h->data);
 		goto fail;
 	}
+	if (!enabled) {
+		shift_frame(h, blank);
+		gpiod_set_value_cansleep(h->enable, 1);
+		msleep(100);
+	}
 	h->misc.minor = MISC_DYNAMIC_MINOR;
 	h->misc.name = "h432b-braille";
 	h->misc.fops = &display_fops;
 	h->misc.parent = dev;
 	h->misc.mode = 0600;
 	ret = misc_register(&h->misc);
-	if (ret)
+	if (ret) {
+		if (!enabled)
+			gpiod_set_value_cansleep(h->enable, 0);
 		goto fail;
+	}
 	platform_set_drvdata(pdev, h);
 	return 0;
 fail:
 	kref_put(&h->refs, free_display);
 	return dev_err_probe(dev, ret, "display GPIO setup\n");
 }
+
 static void display_remove(struct platform_device *pdev)
 {
 	struct h432_braille *h = platform_get_drvdata(pdev);
+	const u8 blank[32] = {};
+
 	/* Stop new opens before removing the provider's lifetime reference. */
 	misc_deregister(&h->misc);
 	mutex_lock(&h->lock);
+	if (!h->dead && !h->suspended) {
+		shift_frame(h, blank);
+		msleep(100);
+		gpiod_set_value_cansleep(h->enable, 0);
+	}
 	h->dead = true;
 	mutex_unlock(&h->lock);
 	kref_put(&h->refs, free_display);
 }
+
 static int display_suspend(struct device *dev)
 {
 	struct h432_braille *h = dev_get_drvdata(dev);
@@ -206,7 +241,7 @@ static int display_resume(struct device *dev)
 	mutex_lock(&h->lock);
 	if (h->suspended) {
 		gpiod_set_value_cansleep(h->enable, 1);
-		/* Conservative settling interval, pending electrical qualification. */
+		/* Match the cell-drive settling interval used by the board. */
 		msleep(100);
 		if (h->frame_valid)
 			shift_frame(h, h->frame);
@@ -215,6 +250,7 @@ static int display_resume(struct device *dev)
 	mutex_unlock(&h->lock);
 	return 0;
 }
+
 static DEFINE_SIMPLE_DEV_PM_OPS(display_pm, display_suspend, display_resume);
 
 /* Power-off and reboot: lower every dot and remove cell drive, as on suspend.
@@ -239,6 +275,7 @@ static void display_shutdown(struct platform_device *pdev)
 }
 
 static const struct of_device_id display_matches[] = {
+	{ .compatible = "hims,h432b-braille" },
 	{ .compatible = "fractal,h432b-braille" }, {}
 };
 MODULE_DEVICE_TABLE(of, display_matches);

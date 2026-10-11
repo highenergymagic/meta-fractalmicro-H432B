@@ -21,9 +21,9 @@ class WifiReceive(unittest.TestCase):
     def test_independent_fifo_and_captured_count(self):
         for token in ("WIFI_RX_COUNT 0x40", "WIFI_RX_FIFO 0x18e40",
                       "(u16)(count - r->consumed)", "pending > WIFI_RX_MAX / 512",
-                      "WIFI_RX_FIFO | (r->port_seq & 3)", "data, pending, 512"):
+                      "WIFI_RX_FIFO | (r->port_seq & 3)", "data, pending"):
             self.assertIn(token, RX)
-        call = RX.index("error = mmc_io_rw_extended")
+        call = RX.index("error = wifi_sdio_blocks")
         self.assertLess(call, RX.index("r->consumed = count"))
         self.assertLess(RX.index("if (error)", call), RX.index("r->consumed = count"))
         self.assertNotIn("netif_rx", RX)
@@ -46,7 +46,7 @@ class WifiReceive(unittest.TestCase):
                         stop.index("sdio_release_irq"))
         self.assertIn("sdio_disable_func", stop)
         self.assertIn("r->next_command = 1", NET)
-        self.assertIn("r->consumed = owner->firmware.c2h_base", NET)
+        self.assertIn("r->consumed = net->owner->firmware.c2h_base", NET)
 
     @unittest.skipUnless(os.environ.get("WIFI_RX_NATIVE_CC"),
                          "actual C vectors require the pinned container compiler")

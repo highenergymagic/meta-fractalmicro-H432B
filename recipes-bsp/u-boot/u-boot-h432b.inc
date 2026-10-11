@@ -3,7 +3,7 @@ SUMMARY = "Historical H432B U-Boot port, raw artifact only"
 LICENSE = "GPL-2.0-or-later"
 LIC_FILES_CHKSUM = "file://COPYING;md5=1707d6db1d42237583f50183a5651ecb"
 SRC_URI = "git://github.com/u-boot/u-boot.git;protocol=https;nobranch=1 \
-    file://0001-hims-u2-rev51.patch file://0002-reproducible-timestamp.patch file://0007-gcc15-compatibility.patch"
+    file://0001-hims-u2-rev51.patch file://0002-reproducible-timestamp.patch file://0007-gcc15-compatibility.patch file://0011-cortex-a8-ibe.patch"
 SRCREV = "6528ff0109d81c1f21d20f9f1370782bccf87bcb"
 BB_GIT_SHALLOW = "1"
 BB_GIT_SHALLOW_DEPTH = "1"

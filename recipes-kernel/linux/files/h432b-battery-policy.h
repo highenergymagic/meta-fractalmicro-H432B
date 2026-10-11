@@ -16,7 +16,7 @@ static inline int h432b_capacity_usable(int error, int capacity, int fresh)
 
 static inline enum h432b_charge_state
 h432b_charge_state(int error, int capacity, int fresh,
-		  int charging, int primary, int secondary)
+		   int charging, int primary, int secondary)
 {
 	if (!h432b_capacity_usable(error, capacity, fresh) ||
 	    charging < 0 || primary < 0 || secondary < 0)
@@ -33,8 +33,8 @@ struct h432b_measurements {
 
 /* DS2780/2784/2788 register units; calibration is applied inside the gauge. */
 static inline int h432b_decode_measurements(int voltage, int temp,
-		int current_raw, int average, int conductance,
-		struct h432b_measurements *m)
+					    int current_raw, int average, int conductance,
+					    struct h432b_measurements *m)
 {
 	if (conductance <= 0 || conductance > 255 ||
 	    voltage <= 0 || voltage > 32767 ||
