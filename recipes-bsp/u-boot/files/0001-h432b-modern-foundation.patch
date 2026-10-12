@@ -1,0 +1,313 @@
+Subject: [PATCH] arm: add H432B RAM-entry board foundation
+
+Upstream-Status: Pending
+
+Keep the factory-initialized clock tree and DRAM, and use the H432B PWM4
+clocksource. USB and storage integration are intentionally not enabled in
+this compile-only foundation target.
+
+diff --git a/arch/arm/cpu/armv7/s5p-common/Makefile b/arch/arm/cpu/armv7/s5p-common/Makefile
+index 4660ff00..7634c61d 100644
+--- a/arch/arm/cpu/armv7/s5p-common/Makefile
++++ b/arch/arm/cpu/armv7/s5p-common/Makefile
+@@ -9,7 +9,9 @@ obj-$(CONFIG_S5P4418_ONEWIRE) += pwm.o
+ else
+ obj-y += cpu_info.o
+ ifndef CONFIG_XPL_BUILD
++ifndef CONFIG_TARGET_H432B
+ obj-y += timer.o
++endif
+ obj-y += sromc.o
+ endif
+ endif
+diff --git a/arch/arm/mach-s5pc1xx/Kconfig b/arch/arm/mach-s5pc1xx/Kconfig
+index d8b85f80..7684b19b 100644
+--- a/arch/arm/mach-s5pc1xx/Kconfig
++++ b/arch/arm/mach-s5pc1xx/Kconfig
+@@ -4,6 +4,12 @@ choice
+ 	prompt "S5PC1XX board select"
+ 	optional
+ 
++config TARGET_H432B
++	bool "Fractal Microsystems H432B"
++	help
++	  Build the RAM-entry foundation for the H432B board. Factory
++	  firmware must initialize DRAM and clocks before entering U-Boot.
++
+ config TARGET_S5P_GONI
+ 	bool "S5P Goni board"
+ 	select OF_CONTROL
+@@ -21,5 +27,6 @@ config SYS_SOC
+ 
+ source "board/samsung/goni/Kconfig"
+ source "board/samsung/smdkc100/Kconfig"
++source "board/fractalmicro/h432b/Kconfig"
+ 
+ endif
+diff --git a/board/fractalmicro/h432b/Kconfig b/board/fractalmicro/h432b/Kconfig
+new file mode 100644
+index 00000000..0fd1ab41
+--- /dev/null
++++ b/board/fractalmicro/h432b/Kconfig
+@@ -0,0 +1,12 @@
++if TARGET_H432B
++
++config SYS_BOARD
++	default "h432b"
++
++config SYS_VENDOR
++	default "fractalmicro"
++
++config SYS_CONFIG_NAME
++	default "h432b"
++
++endif
+diff --git a/board/fractalmicro/h432b/Makefile b/board/fractalmicro/h432b/Makefile
+new file mode 100644
+index 00000000..f56ce15d
+--- /dev/null
++++ b/board/fractalmicro/h432b/Makefile
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++obj-y += board.o timer.o
+diff --git a/board/fractalmicro/h432b/board.c b/board/fractalmicro/h432b/board.c
+new file mode 100644
+index 00000000..4b2f0cbf
+--- /dev/null
++++ b/board/fractalmicro/h432b/board.c
+@@ -0,0 +1,32 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/* RAM-entry board foundation. EBOOT has already initialized clocks and DRAM. */
++#include <config.h>
++#include <init.h>
++#include <asm/global_data.h>
++
++DECLARE_GLOBAL_DATA_PTR;
++
++int board_init(void)
++{
++	gd->bd->bi_boot_params = CFG_SYS_SDRAM_BASE + 0x100;
++	return 0;
++}
++
++int dram_init(void)
++{
++	gd->ram_size = CFG_SYS_SDRAM_SIZE;
++	return 0;
++}
++
++int dram_init_banksize(void)
++{
++	gd->dram[0].start = CFG_SYS_SDRAM_BASE;
++	gd->dram[0].size = CFG_SYS_SDRAM_SIZE;
++	return 0;
++}
++
++ulong board_get_usable_ram_top(ulong total_size)
++{
++	/* Keep relocation below the existing maintenance download window. */
++	return 0x47000000;
++}
+diff --git a/board/fractalmicro/h432b/timer.c b/board/fractalmicro/h432b/timer.c
+new file mode 100644
+index 00000000..32e533b9
+--- /dev/null
++++ b/board/fractalmicro/h432b/timer.c
+@@ -0,0 +1,118 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/* PWM4 clocksource: retain the PSYS mux, prescaler and PWM0..3 state. */
++#include <div64.h>
++#include <init.h>
++#include <time.h>
++#include <asm/global_data.h>
++#include <asm/io.h>
++#include <asm/arch/clk.h>
++#include <linux/delay.h>
++#include <linux/errno.h>
++
++DECLARE_GLOBAL_DATA_PTR;
++
++#define CLK(off) ((void __iomem *)(0xe0100000UL + (off)))
++#define PWM(off) ((void __iomem *)(0xe2500000UL + (off)))
++#define START BIT(20)
++#define UPDATE BIT(21)
++#define RELOAD BIT(22)
++
++static unsigned long input_rate(void)
++{
++	u32 src = readl(CLK(0x200)), div = readl(CLK(0x300));
++	unsigned long rate;
++
++	if (src & BIT(24)) {
++		rate = (src & BIT(0)) ? get_pll_clk(APLL) : 24000000;
++		rate /= ((div >> 4) & 7) + 1;
++	} else {
++		rate = (src & BIT(4)) ? get_pll_clk(MPLL) : 24000000;
++	}
++	rate /= ((div >> 24) & 15) + 1;
++	return rate / (((div >> 28) & 7) + 1);
++}
++
++unsigned long long get_ticks(void)
++{
++	u32 now = readl(PWM(0x40));
++	u32 delta = gd->arch.lastinc - now;
++	u32 old = gd->arch.tbl;
++
++	gd->arch.lastinc = now;
++	gd->arch.tbl += delta;
++	if (gd->arch.tbl < old)
++		gd->arch.tbu++;
++	return ((u64)gd->arch.tbu << 32) | gd->arch.tbl;
++}
++
++ulong get_tbclk(void)
++{
++	return gd->arch.timer_rate_hz;
++}
++
++static ulong elapsed_units(ulong units)
++{
++	u64 ticks = get_ticks(), fraction;
++	u32 remainder = do_div(ticks, gd->arch.timer_rate_hz);
++
++	fraction = (u64)remainder * units;
++	do_div(fraction, gd->arch.timer_rate_hz);
++	return ticks * units + fraction;
++}
++
++ulong get_timer(ulong base)
++{
++	return elapsed_units(CONFIG_SYS_HZ) - base;
++}
++
++ulong timer_get_us(void)
++{
++	return elapsed_units(1000000);
++}
++
++void __udelay(ulong usec)
++{
++	while (usec) {
++		u32 chunk = min(usec, 1000000UL);
++		u64 ticks = (u64)chunk * get_tbclk() + 999999;
++		u32 start = readl(PWM(0x40));
++
++		do_div(ticks, 1000000);
++		ticks++;
++		while ((u32)(start - readl(PWM(0x40))) < ticks)
++			;
++		get_ticks();
++		usec -= chunk;
++	}
++}
++
++int timer_init(void)
++{
++	ulong rate = input_rate();
++	u32 con, previous, i, prescale;
++
++	if (rate < 1000000 || rate > 200000000)
++		return -EINVAL;
++	setbits_le32(CLK(0x46c), BIT(23));
++	readl(CLK(0x46c));
++	prescale = ((readl(PWM(0)) >> 8) & 255) + 1;
++	gd->arch.timer_rate_hz = rate / prescale / 16;
++	con = readl(PWM(8)) & ~(START | UPDATE | RELOAD);
++	writel(con, PWM(8));
++	writel((readl(PWM(0x44)) & 15) | BIT(9), PWM(0x44));
++	clrsetbits_le32(PWM(4), 15 << 16, 4 << 16);
++	writel(0xffffffff, PWM(0x3c));
++	writel(con | UPDATE, PWM(8));
++	writel(con | START | RELOAD, PWM(8));
++	previous = readl(PWM(0x40));
++	for (i = 0; i < 1000000; i++) {
++		if (readl(PWM(0x40)) != previous)
++			break;
++	}
++	if (i == 1000000)
++		return -ETIMEDOUT;
++	gd->arch.lastinc = readl(PWM(0x40));
++	gd->arch.tbl = 0;
++	gd->arch.tbu = 0;
++	return 0;
++}
+diff --git a/configs/h432b_defconfig b/configs/h432b_defconfig
+new file mode 100644
+index 00000000..d27c6205
+--- /dev/null
++++ b/configs/h432b_defconfig
+@@ -0,0 +1,27 @@
++CONFIG_ARM=y
++CONFIG_ARCH_CPU_INIT=y
++CONFIG_ARCH_S5PC1XX=y
++CONFIG_TARGET_H432B=y
++CONFIG_TEXT_BASE=0x46000000
++CONFIG_SKIP_LOWLEVEL_INIT_ONLY=y
++CONFIG_ARM_CORTEX_A8_CVE_2017_5715=y
++CONFIG_OF_CONTROL=y
++CONFIG_DEFAULT_DEVICE_TREE="s5pv210-h432b"
++CONFIG_SYS_MALLOC_LEN=0x400000
++CONFIG_SYS_MALLOC_F_LEN=0x2000
++CONFIG_NR_DRAM_BANKS=1
++CONFIG_HAS_CUSTOM_SYS_INIT_SP_ADDR=y
++CONFIG_CUSTOM_SYS_INIT_SP_ADDR=0x46e00000
++CONFIG_SYS_LOAD_ADDR=0x42000000
++CONFIG_ENV_SIZE=0x1000
++CONFIG_ENV_IS_NOWHERE=y
++# CONFIG_AUTOBOOT is not set
++# CONFIG_DISPLAY_CPUINFO is not set
++# CONFIG_DISPLAY_BOARDINFO is not set
++# CONFIG_REQUIRE_SERIAL_CONSOLE is not set
++CONFIG_SYS_PROMPT="H432B => "
++CONFIG_CMD_CACHE=y
++# CONFIG_NET is not set
++# CONFIG_MMC is not set
++# CONFIG_SYS_L2CACHE_OFF is not set
++CONFIG_SYS_DCACHE_OFF=y
+diff --git a/include/configs/h432b.h b/include/configs/h432b.h
+new file mode 100644
+index 00000000..388adc0b
+--- /dev/null
++++ b/include/configs/h432b.h
+@@ -0,0 +1,10 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef __CONFIG_H432B_H
++#define __CONFIG_H432B_H
++
++#include <asm/arch/cpu.h>
++
++#define CFG_SYS_SDRAM_BASE 0x40000000
++#define CFG_SYS_SDRAM_SIZE 0x10000000
++
++#endif
+diff --git a/arch/arm/dts/Makefile b/arch/arm/dts/Makefile
+--- a/arch/arm/dts/Makefile
++++ b/arch/arm/dts/Makefile
+@@ -8,6 +8,7 @@
+ 
+ dtb-$(CONFIG_TARGET_SMDKC100) += s5pc1xx-smdkc100.dtb
+ dtb-$(CONFIG_TARGET_S5P_GONI) += s5pc1xx-goni.dtb
++dtb-$(CONFIG_TARGET_H432B) += s5pv210-h432b.dtb
+ dtb-$(CONFIG_ARCH_EXYNOS4) += exynos4210-origen.dtb \
+ 	exynos4210-smdkv310.dtb \
+ 	exynos4210-universal_c210.dtb \
+diff --git a/arch/arm/dts/s5pv210-h432b.dts b/arch/arm/dts/s5pv210-h432b.dts
+new file mode 100644
+--- /dev/null
++++ b/arch/arm/dts/s5pv210-h432b.dts
+@@ -0,0 +1,14 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/dts-v1/;
++
++/ {
++	model = "Fractal Microsystems H432B";
++	compatible = "hims,h432b", "samsung,s5pv210";
++	#address-cells = <1>;
++	#size-cells = <1>;
++
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0x40000000 0x10000000>;
++	};
++};

@@ -1,0 +1,70 @@
+From 4e7e34481bf1662c6c29b006e01c4d6e6a78305e Mon Sep 17 00:00:00 2001
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Date: Mon, 12 Oct 2026 21:56:31 +1300
+Subject: [PATCH] h432b: gate NAND data caching pending runtime qualification
+
+Upstream-Status: Inappropriate [board-specific qualification]
+---
+ board/fractalmicro/h432b/Kconfig | 8 ++++++++
+ board/fractalmicro/h432b/cache.c | 7 ++++++-
+ 2 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/board/fractalmicro/h432b/Kconfig b/board/fractalmicro/h432b/Kconfig
+index 45d4341f..21ce17c9 100644
+--- a/board/fractalmicro/h432b/Kconfig
++++ b/board/fractalmicro/h432b/Kconfig
+@@ -21,4 +21,12 @@ config BCH_CONST_T
+ 	int
+ 	default 8
+ 
++config H432B_NAND_BOOT_DCACHE
++	bool "Cache the CPU-only NAND boot interval"
++	default n
++	help
++	  Enable data caching after stopping USB DMA, and disable it before
++	  Linux handoff or returning to fastboot. Keep disabled until the
++	  cache-enabled handoff is qualified for sustained Linux operation.
++
+ endif
+diff --git a/board/fractalmicro/h432b/cache.c b/board/fractalmicro/h432b/cache.c
+index 59b6d9a5..d7587ed7 100644
+--- a/board/fractalmicro/h432b/cache.c
++++ b/board/fractalmicro/h432b/cache.c
+@@ -18,6 +18,7 @@ DECLARE_GLOBAL_DATA_PTR;
+ #define OTG_RESET ((void __iomem *)0xec000010)
+ 
+ static bool owned;
++static bool prepared;
+ static unsigned long saved_control, saved_ttbcr;
+ 
+ void enable_caches(void)
+@@ -30,6 +31,7 @@ void h432b_cache_leave(void)
+ {
+ 	unsigned long control;
+ 
++	prepared = false;
+ 	if (!owned)
+ 		return;
+ 	dcache_disable();
+@@ -49,7 +51,7 @@ int h432b_cache_enter(void)
+ {
+ 	int ret;
+ 
+-	if (owned)
++	if (prepared)
+ 		return 0;
+ 	if ((get_cr() & (CR_M | CR_C)) ||
+ 	    gd->arch.tlb_addr != 0x44000000 - 0x10000 ||
+@@ -73,6 +75,9 @@ int h432b_cache_enter(void)
+ 	ret = wait_for_bit_le32(OTG_RESET, BIT(31), true, 100, false);
+ 	if (ret)
+ 		return ret;
++	prepared = true;
++	if (!IS_ENABLED(CONFIG_H432B_NAND_BOOT_DCACHE))
++		return 0;
+ 	saved_control = get_cr();
+ 	asm volatile("mrc p15, 0, %0, c2, c0, 2" : "=r" (saved_ttbcr));
+ 	set_cr((saved_control & ~MMU_ATTRIBUTES) | BIT(23));
+-- 
+2.47.3
+

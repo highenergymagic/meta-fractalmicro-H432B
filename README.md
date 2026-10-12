@@ -14,10 +14,11 @@ by Fractal Microsystems as part of OpenH432.
 | Layer dependency | OpenEmbedded Core |
 
 This layer contains the machine configuration, Linux CIP kernel with
-PREEMPT_RT integration, device tree, U-Boot 2012.10 adaptations and
+PREEMPT_RT integration, device tree, U-Boot 2026.10 adaptations and
 board-specific image constraints. The A/B bootloader preserves the factory
 boot chain and uses redundant UBI bootstate for attempt tracking and fallback.
 Source versions and patch order are defined in the recipes.
+Legacy U-Boot 2012.10 targets remain for initial conversion and recovery.
 
 Distribution policy and userspace packages belong to
 [meta-fractalmicro-openh432](https://github.com/highenergymagic/meta-fractalmicro-openh432).

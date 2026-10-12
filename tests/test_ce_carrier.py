@@ -18,6 +18,61 @@ def envelope(payload):
     return c.build(payload, c.CE_BASE, c.CE_BASE)
 
 class Carrier(unittest.TestCase):
+    def modern_elf(self, data, address=0x40021000):
+        elf = bytearray(124)
+        elf[:7] = b'\x7fELF\x01\x01\x01'
+        struct.pack_into('<HH', elf, 16, 2, 40)
+        struct.pack_into('<II', elf, 24, address, 52)
+        struct.pack_into('<I', elf, 32, 84)
+        struct.pack_into('<HH', elf, 42, 32, 1)
+        struct.pack_into('<HH', elf, 46, 40, 1)
+        struct.pack_into('<8I', elf, 52, 1, 124, address, address,
+                         len(data), len(data), 5, 4)
+        struct.pack_into('<10I', elf, 84, 0, 1, 6, address, 124,
+                         len(data), 0, 0, 4, 0)
+        return bytes(elf) + data
+
+    def test_modern_elf_carrier(self):
+        data = code(0x30000, address=0)
+        payload = c.make_payload(data, modern_elf=self.modern_elf(data))
+        c.validate_cold_parser(envelope(payload))
+
+    def test_modern_objcopy_gap_fill(self):
+        data = bytearray(code())
+        data[40:44] = b'\xff' * 4
+        elf = bytearray(self.modern_elf(data)[:84]) + bytearray(80)
+        struct.pack_into('<H', elf, 48, 2)
+        struct.pack_into('<I', elf, 56, 164)
+        struct.pack_into('<10I', elf, 84, 0, 1, 6, 0x40021000, 164,
+                         40, 0, 0, 4, 0)
+        struct.pack_into('<10I', elf, 124, 0, 1, 2, 0x4002102c, 208,
+                         36, 0, 0, 4, 0)
+        elf += data
+        elf[204:208] = bytes(4)
+        c.make_payload(data, modern_elf=elf)
+        data[40] = 0
+        with self.assertRaises(ValueError):
+            c.make_payload(data, modern_elf=elf)
+
+    def test_modern_elf_wrong_entry_or_payload(self):
+        data = code()
+        for elf in (b'', self.modern_elf(data, 0x42000000),
+                    self.modern_elf(data[:-1] + b'X')):
+            with self.assertRaises(ValueError):
+                c.make_payload(data, modern_elf=elf)
+
+    def test_modern_elf_truncation_and_invalid_segment(self):
+        data = code()
+        elf = self.modern_elf(data)
+        for length in (0, 51, 83, len(elf) - 1):
+            with self.assertRaises(ValueError):
+                c.make_payload(data, modern_elf=elf[:length])
+        for offset, value in ((60, 0), (64, 0), (76, 4)):
+            bad = bytearray(elf)
+            struct.pack_into('<I', bad, offset, value)
+            with self.assertRaises(ValueError):
+                c.make_payload(data, modern_elf=bad)
+
     def test_normal_boot_pointer_pair(self):
         payload = c.make_payload(code())
         self.assertEqual(struct.unpack_from("<II", payload, 0x44), (0x80020100, 0x100))

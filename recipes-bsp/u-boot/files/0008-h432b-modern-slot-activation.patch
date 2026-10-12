@@ -1,0 +1,205 @@
+From 41fa9cda0df66391777776eeab37b4c741061c25 Mon Sep 17 00:00:00 2001
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Date: Mon, 12 Oct 2026 20:05:01 +1300
+Subject: [PATCH] fastboot: h432b: verify slot pairs before activation
+
+Upstream-Status: Inappropriate [H432B board integration]
+
+Signed-off-by: Fractal Microsystems <bsp@fractalmicro.org>
+---
+ board/fractalmicro/h432b/storage.c | 106 +++++++++++++++++++++++++++++
+ drivers/fastboot/fb_command.c      |   5 ++
+ drivers/fastboot/fb_getvar.c       |   4 +-
+ include/fastboot.h                 |   2 +
+ 4 files changed, 116 insertions(+), 1 deletion(-)
+
+diff --git a/board/fractalmicro/h432b/storage.c b/board/fractalmicro/h432b/storage.c
+index a52d3d28..78d9ee88 100644
+--- a/board/fractalmicro/h432b/storage.c
++++ b/board/fractalmicro/h432b/storage.c
+@@ -2,18 +2,40 @@
+ #include <command.h>
+ #include <env.h>
+ #include <fastboot.h>
++#include <linux/libfdt.h>
+ #include <nand.h>
+ #include <ubi_uboot.h>
+ #include <u-boot/sha256.h>
++#include <u-boot/schedule.h>
+ #include "u2fastboot.h"
+ #define H432B_BOOTSTATE_UBOOT
+ #include "bootstate.h"
+ #include "fastboot-slots.h"
+ #include "fastboot-targets.h"
++#include "slot-pair.h"
+ 
+ static struct h432b_bootstate state;
+ static bool state_valid;
+ 
++int fastboot_board_part_info(const char *name, size_t *size, char *response)
++{
++	struct h432b_fastboot_target target;
++	struct ubi_volume *vol;
++
++	if (!ubi_devices[0] || h432b_fastboot_resolve(name, &target) ||
++	    target.storage != H432B_FASTBOOT_UBI)
++		goto missing;
++	vol = ubi_find_volume(target.name);
++	if (!vol || vol->vol_type != UBI_STATIC_VOLUME)
++		goto missing;
++	if (size)
++		*size = (size_t)vol->reserved_pebs * vol->usable_leb_size;
++	return vol->vol_id;
++missing:
++	fastboot_fail("Unknown or unavailable image target", response);
++	return -ENODEV;
++}
++
+ static int verify_kernel(unsigned int slot)
+ {
+ 	const char *name = slot ? "kernel_b" : "kernel_a";
+@@ -80,6 +102,89 @@ static int replace_state(void *context, unsigned int copy,
+ 	return ret || vol->upd_marker || vol->corrupted ? -EIO : 0;
+ }
+ 
++static void verity_hash(const unsigned char *salt, const unsigned char *block,
++			unsigned char *digest)
++{
++	sha256_context ctx;
++
++	sha256_starts(&ctx);
++	sha256_update(&ctx, salt, 32);
++	sha256_update(&ctx, block, 4096);
++	sha256_finish(&ctx, digest);
++	schedule();
++}
++
++static int verify_pair(unsigned int slot)
++{
++	struct h432b_verity descriptor;
++	struct u2_fb_image layout;
++	struct ubi_volume *vol;
++	u8 *buffer = (void *)U2_FB_ADDRESS;
++	const u8 *text;
++	const void *fdt;
++	size_t length, offset = 0;
++	int ret, leb = 0, chosen, text_length;
++
++	ret = verify_kernel(slot);
++	if (ret)
++		return ret;
++	vol = ubi_find_volume(slot ? "kernel_b" : "kernel_a");
++	if (u2_fb_layout(buffer, vol->used_bytes, &layout))
++		return -EINVAL;
++	fdt = buffer + layout.dtb;
++	if (fdt_check_full(fdt, layout.dtb_size))
++		return -EINVAL;
++	chosen = fdt_path_offset(fdt, "/chosen");
++	if (chosen < 0)
++		return -EINVAL;
++	text = fdt_getprop(fdt, chosen, "fractalmicro,systembase-verity-v1", &text_length);
++	if (!text || text_length < 2 || text_length > 257 || text[text_length - 1] ||
++	    h432b_verity_parse(text, text_length - 1, &descriptor))
++		return -EINVAL;
++	vol = ubi_find_volume(slot ? "systembase_b" : "systembase_a");
++	if (!vol || vol->vol_type != UBI_STATIC_VOLUME || vol->updating ||
++	    vol->upd_marker || vol->corrupted || vol->used_bytes != descriptor.bytes ||
++	    vol->used_bytes > CONFIG_FASTBOOT_BUF_SIZE)
++		return -EINVAL;
++	while (offset < vol->used_bytes) {
++		length = min_t(size_t, vol->used_bytes - offset, vol->usable_leb_size);
++		ret = ubi_eba_read_leb(ubi_devices[0], vol, leb++, buffer + offset,
++				       0, length, 1);
++		if (ret)
++			return ret;
++		offset += length;
++	}
++	return h432b_verity_verify(buffer, vol->used_bytes, &descriptor, verity_hash);
++}
++
++void fastboot_set_active(char *slot, char *response)
++{
++	struct h432b_bootstore store = {
++		.read = read_state, .replace = replace_state,
++	};
++	u8 scratch[2 * H432B_ENV_BYTES];
++	int ret;
++
++	if (!slot || (slot[0] != 'a' && slot[0] != 'b') || slot[1] ||
++	    !ubi_devices[0]) {
++		fastboot_fail("Invalid or unavailable slot", response);
++		return;
++	}
++	/* Pair verification uses the download window as scratch. */
++	fastboot_invalidate_image();
++	if (verify_pair(slot[0] - 'a')) {
++		fastboot_fail("Kernel/systembase verification failed; state unchanged", response);
++		return;
++	}
++	ret = h432b_fastboot_set_active(&store, scratch, slot);
++	state_valid = h432b_bootstate_load(&store, scratch, &state) >= 0;
++	if (ret || !state_valid) {
++		fastboot_fail("Slot state persistence/readback failed", response);
++		return;
++	}
++	fastboot_okay("Verified slot activated", response);
++}
++
+ /* Hash through corrected NAND reads and independently checked static LEBs. */
+ static int volume_digest(struct ubi_volume *vol, u8 *digest)
+ {
+@@ -197,6 +302,7 @@ static int do_h432b_storage(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	       ret, 'A' + state.order[0], 'A' + state.order[1],
+ 	       state.left[0], state.left[1]);
+ 	env_set("fastboot.h432b-nand", "512MiB BCH8/512 OOB12");
++	env_set("fastboot.slot-count", "2");
+ 	env_set("fastboot.h432b-ubi", "attached-bounded-writes");
+ 	ret = verify_kernel(state.order[0]);
+ 	if (ret) {
+diff --git a/drivers/fastboot/fb_command.c b/drivers/fastboot/fb_command.c
+index b838ea5c..e2b7bfc4 100644
+--- a/drivers/fastboot/fb_command.c
++++ b/drivers/fastboot/fb_command.c
+@@ -22,6 +22,11 @@
+  */
+ static u32 image_size;
+ 
++void fastboot_invalidate_image(void)
++{
++	image_size = 0;
++}
++
+ /**
+  * fastboot_bytes_received - number of bytes received in the current download
+  */
+diff --git a/drivers/fastboot/fb_getvar.c b/drivers/fastboot/fb_getvar.c
+index 89f76ed3..cfdcec94 100644
+--- a/drivers/fastboot/fb_getvar.c
++++ b/drivers/fastboot/fb_getvar.c
+@@ -116,7 +116,9 @@ static int getvar_get_part_info(const char *part_name, char *response,
+ 	struct disk_partition disk_part;
+ 	struct part_info *part_info;
+ 
+-	if (IS_ENABLED(CONFIG_FASTBOOT_FLASH_BLOCK)) {
++	if (IS_ENABLED(CONFIG_FASTBOOT_FLASH_BOARD)) {
++		r = fastboot_board_part_info(part_name, size, response);
++	} else if (IS_ENABLED(CONFIG_FASTBOOT_FLASH_BLOCK)) {
+ 		r = fastboot_block_get_part_info(part_name, &dev_desc, &disk_part,
+ 						 response);
+ 		if (r >= 0 && size)
+diff --git a/include/fastboot.h b/include/fastboot.h
+index 10d67395..63e39ac0 100644
+--- a/include/fastboot.h
++++ b/include/fastboot.h
+@@ -95,6 +95,8 @@ void fastboot_okay(const char *reason, char *response);
+ 
+ /* Storage integrations override these only with persistent slot support. */
+ void fastboot_set_active(char *slot, char *response);
++int fastboot_board_part_info(const char *name, size_t *size, char *response);
++void fastboot_invalidate_image(void);
+ void fastboot_get_current_slot(char *response);
+ 
+ /**
+-- 
+2.47.3
+

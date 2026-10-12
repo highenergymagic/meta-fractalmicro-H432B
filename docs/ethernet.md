@@ -8,6 +8,11 @@ SSH have been exercised on hardware. Deep-sleep recovery has passed DHCP,
 SSH and checksum-verified bidirectional transfers on one device cycle;
 long-duration and repeated-cycle qualification remain outstanding.
 
+Intermittent whole-system stalls have also been observed while Ethernet was
+active. The cause is unresolved: disabling Ethernet allowed a verified Wi-Fi
+transfer, but subsequent Ethernet tests also passed. Successful transfers do
+not establish that the stall has been fixed.
+
 ## Hardware configuration
 
 The H432B's wired controller was identified by live register reads as an
@@ -39,6 +44,15 @@ The normal systemd-networkd configuration reacquires DHCP. Wake-on-LAN is not
 enabled; only the power switch wakes this board.
 
 ## Diagnostics
+
+`linux-h432b-ethernet-watch` is an opt-in kernel target inheriting the integrated
+runtime drivers. It adds soft-lockup and hung-task detection, SysRq, and
+function tracing, with separate output in `kernel-ethernet-watch`. It does not
+replace `virtual/kernel`, automatically enable function tracing, or install
+itself. Its output is a kernel and DTB, not a directly flashable slot image.
+These detectors cannot guarantee a report when the CPU is stalled on a bus
+transaction or interrupts cannot run. Keep an independent USB log capture
+when reproducing network faults.
 
 The optional `h432b-ethernet-probe` recipe builds two explicit tools:
 

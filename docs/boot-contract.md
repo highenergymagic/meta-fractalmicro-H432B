@@ -10,13 +10,15 @@ not hardware revisions or a request to install successive versions.
 
 | Recipe | Deploy directory | Role and link address |
 | --- | --- | --- |
+| `u-boot-h432b-modern-nand` | `modern-nand-ce-carrier` | Standard U-Boot 2026.10 CE carrier at 0x40021000, with cached NAND boot, A/B policy and fastboot. |
+| `u-boot-h432b-modern` | `modern-ram-fastboot` | Modern RAM-entry loader at 0x42000000; not a flashable carrier. |
 | `u-boot-h432b` | `nand51-raw` | USB-shell bootstrap at 0x40021000; raw binary requires CE packaging. |
 | `u-boot-h432b-fastboot` | `ram53-fastboot-only` | Fastboot RAM loader at 0x46000000. |
 | `u-boot-h432b-nand` | `ram54-nand-reader` | Interactive read-only NAND loader at 0x46000000. |
 | `u-boot-h432b-bootstate` | `ram-bootstate` | Explicit bootstate diagnostic shell at 0x46000000; no automatic Linux boot. |
 | `u-boot-h432b-bootstate-chain` | `nand-bootstate-test-ce-carrier` | CE carrier for the bootstate diagnostic stage; not the runtime selector. |
 | `u-boot-h432b-ab` | `ram-ab` | Persistent A/B selector and one-shot fastboot stage at 0x46000000. |
-| `u-boot-h432b-ab-chain` | `nand-ab-chain-raw` and `nand-ab-ce-carrier` | Factory-compatible carrier containing the A/B stage. |
+| `u-boot-h432b-ab-chain` | `nand-ab-chain-raw` and `nand-ab-ce-carrier` | Legacy two-stage A/B carrier. |
 | `u-boot-h432b-maintenance` | `ram-maintenance-b` | Legacy fixed kernel-B reader and one-shot fastboot stage at 0x46000000. |
 | `u-boot-h432b-maintenance-chain` | `nand-maintenance-chain-raw` and `nand-maintenance-ce-carrier` | Legacy fixed-B carrier; ignores persistent A/B state. |
 | `u-boot-h432b-nand-profile` | `ram57-nand-profile` | RAM-only NAND timing and instruction-cache experiment. |
@@ -34,10 +36,15 @@ loads at CE address 0x80020000: ECEC at +0x40, ROMHDR pointer 0x80020100 at +0x4
 and relative offset 0x100 at +0x48. Both pointer fields are required for normal
 NAND boot as well as recovery-assisted launch.
 
-The two-stage bootstrap embeds a checked high-RAM automatic reader, copies it
+The legacy two-stage bootstrap embeds a checked high-RAM automatic reader, copies it
 to 0x46000000 and transfers control. The carrier is explicitly bounded.
 The packager's byte-for-byte regression against a historical carrier is a
 format check, separate from device qualification.
+
+The standard modern carrier instead contains one U-Boot image, which relocates
+itself and provides both NAND boot and fastboot. Its ELF-validated carrier
+metadata is accepted by the host tools; it does not use the legacy link-word
+test. See the [modern loader reference](modern-uboot.md).
 
 Physical DRAM starts at 0x40000000 and totals 256 MiB. Image/heap/stack overlap
 checks run during NAND-reader and bootstrap builds.
@@ -114,7 +121,9 @@ both the kernel and systembase, then activate the pair in one environment
 transaction. Never update the mounted systembase. A legacy fixed-B carrier
 ignores this policy and must not be mistaken for the A/B carrier.
 
-Hardware-watchdog recovery, signed update-bundle installation and persistent
+The separate [hardware watchdog](watchdog.md) provides runtime reset recovery;
+it is not part of the A/B state format and does not guarantee recovery from
+every hang. Signed update-bundle installation and persistent
 userdata migration are not provided by this policy. RAUC-compatible variable
 names do not imply that a RAUC installer is installed. Software fallback on
 detected root-handoff failure requests a reset; it does not guarantee recovery

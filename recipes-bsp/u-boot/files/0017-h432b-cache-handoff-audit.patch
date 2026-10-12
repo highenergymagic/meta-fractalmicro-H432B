@@ -1,0 +1,127 @@
+From b784d5b26d01b1f549c53d7ea37330b8a0058c7e Mon Sep 17 00:00:00 2001
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Date: Mon, 12 Oct 2026 22:07:02 +1300
+Subject: [PATCH] h432b: add opt-in cached handoff RAM comparison
+
+Upstream-Status: Inappropriate [board-specific qualification]
+---
+ board/fractalmicro/h432b/Kconfig   |  9 ++++++++
+ board/fractalmicro/h432b/cache.c   | 34 ++++++++++++++++++++++++++++++
+ board/fractalmicro/h432b/cache.h   |  2 ++
+ board/fractalmicro/h432b/storage.c | 10 ++++++---
+ 4 files changed, 52 insertions(+), 3 deletions(-)
+
+diff --git a/board/fractalmicro/h432b/Kconfig b/board/fractalmicro/h432b/Kconfig
+index 21ce17c9..d927363b 100644
+--- a/board/fractalmicro/h432b/Kconfig
++++ b/board/fractalmicro/h432b/Kconfig
+@@ -29,4 +29,13 @@ config H432B_NAND_BOOT_DCACHE
+ 	  Linux handoff or returning to fastboot. Keep disabled until the
+ 	  cache-enabled handoff is qualified for sustained Linux operation.
+ 
++config H432B_CACHE_HANDOFF_AUDIT
++	bool "Verify cached boot buffers after disabling the MMU"
++	depends on H432B_NAND_BOOT_DCACHE
++	default n
++	help
++	  Compare CRCs of the final kernel, initramfs and device tree before
++	  and after cache shutdown. Refuse Linux handoff on mismatch. This
++	  diagnostic adds uncached reads and is not a normal boot feature.
++
+ endif
+diff --git a/board/fractalmicro/h432b/cache.c b/board/fractalmicro/h432b/cache.c
+index d7587ed7..94ec0de6 100644
+--- a/board/fractalmicro/h432b/cache.c
++++ b/board/fractalmicro/h432b/cache.c
+@@ -9,6 +9,8 @@
+ #include <asm/io.h>
+ #include <asm/system.h>
+ #include <linux/errno.h>
++#include <u-boot/crc.h>
++#include <stdio.h>
+ #include "cache.h"
+ 
+ DECLARE_GLOBAL_DATA_PTR;
+@@ -47,6 +49,38 @@ void h432b_cache_leave(void)
+ 	owned = false;
+ }
+ 
++int h432b_cache_check_handoff(unsigned long kernel_size,
++			    unsigned long ramdisk_size, unsigned long fdt_size)
++{
++	static const unsigned long addresses[] = { 0x42000000, 0x44400000,
++						  0x44000000 };
++	unsigned long sizes[] = { kernel_size, ramdisk_size, fdt_size };
++	unsigned long actlr;
++	u32 before[3], after;
++	int i;
++
++	if (!IS_ENABLED(CONFIG_H432B_CACHE_HANDOFF_AUDIT)) {
++		h432b_cache_leave();
++		return 0;
++	}
++	asm volatile("mrc p15, 0, %0, c1, c0, 1" : "=r" (actlr));
++	printf("H432B cache audit: SCTLR=%08lx ACTLR=%08lx cached=%u\n",
++	       (unsigned long)get_cr(), actlr, owned);
++	for (i = 0; i < 3; i++)
++		before[i] = crc32(0, (void *)addresses[i], sizes[i]);
++	h432b_cache_leave();
++	for (i = 0; i < 3; i++) {
++		after = crc32(0, (void *)addresses[i], sizes[i]);
++		printf("H432B cache audit: %08lx bytes=%lu CRC=%08x/%08x\n",
++		       addresses[i], sizes[i], before[i], after);
++		if (before[i] != after)
++			return -EIO;
++	}
++	printf("H432B cache audit: RAM comparison passed SCTLR=%08lx\n",
++	       (unsigned long)get_cr());
++	return 0;
++}
++
+ int h432b_cache_enter(void)
+ {
+ 	int ret;
+diff --git a/board/fractalmicro/h432b/cache.h b/board/fractalmicro/h432b/cache.h
+index c4c2b61d..fef852b8 100644
+--- a/board/fractalmicro/h432b/cache.h
++++ b/board/fractalmicro/h432b/cache.h
+@@ -4,5 +4,7 @@
+ 
+ int h432b_cache_enter(void);
+ void h432b_cache_leave(void);
++int h432b_cache_check_handoff(unsigned long kernel_size,
++			    unsigned long ramdisk_size, unsigned long fdt_size);
+ 
+ #endif
+diff --git a/board/fractalmicro/h432b/storage.c b/board/fractalmicro/h432b/storage.c
+index 390cefd3..77e70616 100644
+--- a/board/fractalmicro/h432b/storage.c
++++ b/board/fractalmicro/h432b/storage.c
+@@ -432,9 +432,11 @@ static int h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+ 		       " openh432.loader_attach_ms=%lu"
+ 		       " openh432.loader_kernel_ms=%lu"
+ 		       " openh432.loader_hash_ms=%lu"
+-		       " openh432.loader_total_ms=%lu", args,
++		       " openh432.loader_total_ms=%lu"
++		       " openh432.loader_cache_audit=%u", args,
+ 		       'A' + slot, state.serial, attach_ms, read_ms, hash_ms,
+-		       storage_ms + get_timer(started));
++		       storage_ms + get_timer(started),
++		       IS_ENABLED(CONFIG_H432B_CACHE_HANDOFF_AUDIT));
+ 	if (ret >= sizeof(handoff) ||
+ 	    fdt_setprop_string(fdt, chosen, "bootargs", handoff))
+ 		return CMD_RET_FAILURE;
+@@ -455,7 +457,9 @@ static int h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+ 		 layout.ramdisk_size);
+ 	printf("H432B: booting NAND slot %c, attempt %u\n", 'A' + slot, state.serial);
+ 	(void)u2_braille_brf(U2_BRAILLE_KERNEL_BRF);
+-	h432b_cache_leave();
++	if (h432b_cache_check_handoff(layout.kernel_size, layout.ramdisk_size,
++				     fdt_totalsize(fdt)))
++		return CMD_RET_FAILURE;
+ 	return run_command(command, 0) ? CMD_RET_FAILURE : CMD_RET_SUCCESS;
+ }
+ 
+-- 
+2.47.3
+

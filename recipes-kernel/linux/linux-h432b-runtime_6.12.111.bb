@@ -47,8 +47,11 @@ do_configure:append() {
     KCONFIG_CONFIG=${B}/.config ${S}/scripts/kconfig/merge_config.sh -m -O ${B} \
         ${B}/.config ${UNPACKDIR}/h432b-runtime.config
     oe_runmake -C ${S} O=${B} olddefconfig
-    for option in BPF_SYSCALL BPF_JIT CGROUP_BPF CRYPTO_AES_ARM BLK_DEV_DM DM_VERITY CRYPTO_SHA256_ARM; do
+    for option in BPF_SYSCALL BPF_JIT CGROUP_BPF CRYPTO_AES_ARM BLK_DEV_DM DM_VERITY CRYPTO_SHA256_ARM WATCHDOG WATCHDOG_CORE WATCHDOG_SYSFS S3C2410_WATCHDOG; do
         grep -qx "CONFIG_$option=y" ${B}/.config || bbfatal "Missing runtime isolation option: $option"
+    done
+    for option in FAT_FS VFAT_FS EXFAT_FS NLS_CODEPAGE_437 NLS_ISO8859_1 NLS_UTF8 EXT4_FS EXT4_FS_POSIX_ACL EXT4_FS_SECURITY; do
+        grep -qx "CONFIG_$option=y" ${B}/.config || bbfatal "Missing runtime filesystem option: $option"
     done
     if [ "${H432B_WIFI_DRIVER_MODE}" = "m" ]; then
         grep -qx "CONFIG_MODULES=y" ${B}/.config || bbfatal "Runtime module loading is disabled"

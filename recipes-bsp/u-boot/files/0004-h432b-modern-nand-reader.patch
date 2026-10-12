@@ -1,0 +1,275 @@
+From 912702adf5ea52e846f806d53227ad49a474f393 Mon Sep 17 00:00:00 2001
+From: BSP development <development@localhost>
+Date: Mon, 12 Oct 2026 19:14:26 +1300
+Subject: [PATCH] board: h432b: attach Linux-format NAND and read persistent
+ slot state
+
+Upstream-Status: Pending
+---
+ arch/arm/mach-s5pc1xx/Kconfig      |   3 +
+ board/fractalmicro/h432b/Makefile  |   2 +-
+ board/fractalmicro/h432b/nand.c    | 122 +++++++++++++++++++++++++++++
+ board/fractalmicro/h432b/storage.c |  73 +++++++++++++++++
+ configs/h432b_defconfig            |  11 ++-
+ 5 files changed, 209 insertions(+), 2 deletions(-)
+ create mode 100644 board/fractalmicro/h432b/nand.c
+ create mode 100644 board/fractalmicro/h432b/storage.c
+
+diff --git a/arch/arm/mach-s5pc1xx/Kconfig b/arch/arm/mach-s5pc1xx/Kconfig
+index 39902bf1..20cd776d 100644
+--- a/arch/arm/mach-s5pc1xx/Kconfig
++++ b/arch/arm/mach-s5pc1xx/Kconfig
+@@ -6,6 +6,9 @@ choice
+ 
+ config TARGET_H432B
+ 	bool "Fractal Microsystems H432B"
++	select SYS_NAND_SELF_INIT if MTD_RAW_NAND
++	select NAND_ECC_BCH if MTD_RAW_NAND
++	select BCH if MTD_RAW_NAND
+ 	help
+ 	  Build the RAM-entry foundation for the H432B board. Factory
+ 	  firmware must initialize DRAM and clocks before entering U-Boot.
+diff --git a/board/fractalmicro/h432b/Makefile b/board/fractalmicro/h432b/Makefile
+index ba9d8058..f86deedc 100644
+--- a/board/fractalmicro/h432b/Makefile
++++ b/board/fractalmicro/h432b/Makefile
+@@ -1,2 +1,2 @@
+ # SPDX-License-Identifier: GPL-2.0-or-later
+-obj-y += board.o timer.o usb.o
++obj-y += board.o timer.o usb.o nand.o storage.o
+diff --git a/board/fractalmicro/h432b/nand.c b/board/fractalmicro/h432b/nand.c
+new file mode 100644
+index 00000000..d0160f81
+--- /dev/null
++++ b/board/fractalmicro/h432b/nand.c
+@@ -0,0 +1,122 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/* H432B NAND integration. EBOOT supplies the controller clock and timing. */
++#include <config.h>
++#include <nand.h>
++#include <asm/io.h>
++#include <linux/errno.h>
++#include <linux/mtd/rawnand.h>
++
++#define NFREG(offset) ((void __iomem *)(0xb0e00000UL + (offset)))
++
++static struct nand_chip h432b_nand;
++static u32 saved_control;
++static bool blocked;
++
++static void h432b_cmd_ctrl(struct mtd_info *mtd, int cmd, unsigned int ctrl)
++{
++	u32 value;
++
++	if (ctrl & NAND_CTRL_CHANGE) {
++		value = readl(NFREG(4));
++		if (ctrl & NAND_NCE)
++			value = (value & ~2U) | 0xc0;
++		else
++			value = saved_control | 2;
++		writel(value, NFREG(4));
++	}
++	if (cmd == NAND_CMD_NONE)
++		return;
++	if (ctrl & NAND_CLE) {
++		/* No program/erase/feature writes during reader qualification. */
++		switch (cmd) {
++		case NAND_CMD_READ0:
++		case NAND_CMD_RNDOUT:
++		case NAND_CMD_READSTART:
++		case NAND_CMD_STATUS:
++		case NAND_CMD_READID:
++		case NAND_CMD_RNDOUTSTART:
++		case NAND_CMD_PARAM:
++		case NAND_CMD_GET_FEATURES:
++		case NAND_CMD_RESET:
++			blocked = false;
++			break;
++		default:
++			blocked = true;
++		}
++		if (!blocked)
++			writeb(cmd, NFREG(8));
++	} else if ((ctrl & NAND_ALE) && !blocked) {
++		writeb(cmd, NFREG(12));
++	}
++}
++
++static int h432b_ready(struct mtd_info *mtd)
++{
++	return !!(readl(NFREG(0x28)) & 1);
++}
++
++static void h432b_read_buf(struct mtd_info *mtd, u8 *buf, int len)
++{
++	while (len > 0 && ((unsigned long)buf & 3)) {
++		*buf++ = readb(NFREG(0x10));
++		len--;
++	}
++	while (len >= 4) {
++		*(u32 *)buf = readl(NFREG(0x10));
++		buf += 4;
++		len -= 4;
++	}
++	while (len-- > 0)
++		*buf++ = readb(NFREG(0x10));
++}
++
++static void h432b_write_buf(struct mtd_info *mtd, const u8 *buf, int len)
++{
++	blocked = true;
++}
++
++void board_nand_init(void)
++{
++	struct nand_chip *chip = &h432b_nand;
++	struct mtd_info *mtd = nand_to_mtd(chip);
++	int ret;
++
++	saved_control = readl(NFREG(4));
++	if (!(saved_control & 1) || (readl(NFREG(0)) & 1)) {
++		printf("H432B: NAND controller is not in the expected 8-bit mode\n");
++		return;
++	}
++	chip->IO_ADDR_R = NFREG(0x10);
++	chip->IO_ADDR_W = NFREG(0x10);
++	chip->cmd_ctrl = h432b_cmd_ctrl;
++	chip->dev_ready = h432b_ready;
++	chip->read_buf = h432b_read_buf;
++	chip->write_buf = h432b_write_buf;
++	chip->options = NAND_NO_SUBPAGE_WRITE | NAND_SKIP_BBTSCAN;
++	chip->ecc.mode = NAND_ECC_SOFT_BCH;
++	chip->ecc.size = 512;
++	chip->ecc.strength = 8;
++	chip->chip_delay = 50;
++	ret = nand_scan_ident(mtd, 1, NULL);
++	if (ret || mtd->size != 0x20000000ULL || mtd->writesize != 2048 ||
++	    mtd->oobsize != 64 || mtd->erasesize != 131072) {
++		printf("H432B: NAND identification/geometry failed (%d)\n", ret);
++		return;
++	}
++	ret = nand_scan_tail(mtd);
++	if (ret) {
++		printf("H432B: NAND BCH initialization failed (%d)\n", ret);
++		return;
++	}
++	/* The software BCH layout must match Linux: 52 bytes at OOB[12..63]. */
++	if (chip->ecc.bytes != 13 || chip->ecc.layout->eccbytes != 52 ||
++	    chip->ecc.layout->eccpos[0] != 12 ||
++	    chip->ecc.layout->eccpos[51] != 63) {
++		printf("H432B: incompatible NAND ECC layout\n");
++		return;
++	}
++	mtd->flags &= ~MTD_WRITEABLE;
++	ret = nand_register(0, mtd);
++	if (ret)
++		printf("H432B: NAND registration failed (%d)\n", ret);
++}
+diff --git a/board/fractalmicro/h432b/storage.c b/board/fractalmicro/h432b/storage.c
+new file mode 100644
+index 00000000..d63c2ad7
+--- /dev/null
++++ b/board/fractalmicro/h432b/storage.c
+@@ -0,0 +1,73 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++#include <command.h>
++#include <env.h>
++#include <fastboot.h>
++#include <nand.h>
++#include <ubi_uboot.h>
++#define H432B_BOOTSTATE_UBOOT
++#include "bootstate.h"
++
++static struct h432b_bootstate state;
++static bool state_valid;
++
++static int read_state(void *context, unsigned int copy, unsigned char *data)
++{
++	const char *name = copy ? "bootstate_b" : "bootstate_a";
++	struct ubi_volume *vol = ubi_find_volume(name);
++
++	if (!vol || vol->vol_type != UBI_DYNAMIC_VOLUME ||
++	    vol->reserved_pebs != 2 || vol->usable_leb_size != 126976 ||
++	    vol->updating || vol->upd_marker || vol->corrupted)
++		return -EINVAL;
++	return ubi_volume_read(name, data, 0, H432B_ENV_BYTES);
++}
++
++static int do_h432b_storage(struct cmd_tbl *cmdtp, int flag, int argc,
++			    char *const argv[])
++{
++	struct h432b_bootstore store = { .read = read_state };
++	u8 scratch[H432B_ENV_BYTES];
++	int ret;
++
++	state_valid = false;
++	nand_init();
++	if (!get_nand_dev_by_index(0))
++		return CMD_RET_FAILURE;
++	ret = ubi_part("linux", NULL);
++	if (ret) {
++		printf("H432B: UBI attach failed (%d)\n", ret);
++		return CMD_RET_FAILURE;
++	}
++	ret = h432b_bootstate_load(&store, scratch, &state);
++	if (ret < 0) {
++		printf("H432B: no valid persistent boot state\n");
++		return CMD_RET_FAILURE;
++	}
++	state_valid = true;
++	printf("H432B: boot state copy %d, order %c %c, attempts %u/%u\n",
++	       ret, 'A' + state.order[0], 'A' + state.order[1],
++	       state.left[0], state.left[1]);
++	env_set("fastboot.h432b-nand", "512MiB BCH8/512 OOB12");
++	env_set("fastboot.h432b-ubi", "attached-read-only");
++	return CMD_RET_SUCCESS;
++}
++
++void fastboot_get_current_slot(char *response)
++{
++	unsigned int i;
++	char slot[2] = { 0 };
++
++	if (state_valid) {
++		for (i = 0; i < 2; i++) {
++			if (state.left[state.order[i]]) {
++				slot[0] = 'a' + state.order[i];
++				fastboot_okay(slot, response);
++				return;
++			}
++		}
++	}
++	fastboot_fail("No valid bootable slot state", response);
++}
++
++U_BOOT_CMD(h432bstorage, 1, 0, do_h432b_storage,
++	   "attach existing H432B UBI and inspect slot state", "");
+diff --git a/configs/h432b_defconfig b/configs/h432b_defconfig
+index b31f69c0..7bbb6308 100644
+--- a/configs/h432b_defconfig
++++ b/configs/h432b_defconfig
+@@ -18,7 +18,7 @@ CONFIG_ENV_IS_NOWHERE=y
+ CONFIG_AUTOBOOT=y
+ CONFIG_BOOTDELAY=0
+ CONFIG_USE_BOOTCOMMAND=y
+-CONFIG_BOOTCOMMAND="fastboot usb 0"
++CONFIG_BOOTCOMMAND="h432bstorage; fastboot usb 0"
+ # CONFIG_DISPLAY_CPUINFO is not set
+ # CONFIG_DISPLAY_BOARDINFO is not set
+ # CONFIG_REQUIRE_SERIAL_CONSOLE is not set
+@@ -45,3 +45,12 @@ CONFIG_FASTBOOT_BUF_SIZE=0x02000000
+ # CONFIG_TOOLS_MKEFICAPSULE is not set
+ CONFIG_CONSOLE_RECORD=y
+ CONFIG_FASTBOOT_CMD_OEM_CONSOLE=y
++CONFIG_CONSOLE_RECORD_OUT_SIZE=0x10000
++CONFIG_MTD=y
++CONFIG_MTD_RAW_NAND=y
++CONFIG_SYS_NAND_SELF_INIT=y
++CONFIG_NAND_ECC_BCH=y
++CONFIG_CMD_UBI=y
++# CONFIG_CMD_UBIFS is not set
++CONFIG_MTDIDS_DEFAULT="nand0=nand0"
++CONFIG_MTDPARTS_DEFAULT="mtdparts=nand0:4m(factory)ro,507m(linux),1m(bbt)ro"
+-- 
+2.47.3
+

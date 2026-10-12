@@ -2,6 +2,8 @@
 #include <assert.h>
 #include <stdio.h>
 #include "bootstate.h"
+#include "fastboot-slots.h"
+#include "fastboot-targets.h"
 #include "nand-write-boundary.h"
 struct media {
     unsigned char data[2][H432B_ENV_BYTES];
@@ -139,6 +141,96 @@ int main(void)
         assert(h432b_bootstate_can_mark_good(&state, 0, n) == (n == 42));
     state.left[0] = 3;
     assert(!h432b_bootstate_can_mark_good(&state, 0, 42));
+    /* A torn pre-flash invalidation must never authorize an image write. */
+    for (n = 0; n < H432B_ENV_BYTES; n++) {
+        init(&m, 71);
+        m.cut = n;
+        assert(h432b_fastboot_invalidate(&store, scratch, 1) == -2);
+        assert(h432b_bootstate_load(&store, scratch, &state) == 0);
+        assert(state.left[0] == 3 && state.left[1] == 3);
+    }
+    for (n = 0; n < 256; n++) {
+        init(&m, n);
+        assert(!h432b_fastboot_invalidate(&store, scratch, 1));
+        assert(h432b_bootstate_load(&store, scratch, &state) == 1);
+        assert(state.left[0] == 3 && state.left[1] == 0);
+        assert(state.order[0] == 0 && state.serial == (unsigned char)(n + 1));
+        assert(!h432b_fastboot_invalidate(&store, scratch, 1));
+        assert(m.writes == 1);
+        assert(h432b_fastboot_invalidate(&store, scratch, 0) == -1);
+    }
+    init(&m, 0); m.fail_readback = 1;
+    assert(h432b_fastboot_invalidate(&store, scratch, 1) == -2);
+    init(&m, 0); m.failed_after_commit = 1;
+    assert(h432b_fastboot_invalidate(&store, scratch, 1) == -2);
+    init(&m, 0);
+    assert(h432b_fastboot_invalidate(&store, scratch, 2) == -1);
+    assert(!m.writes);
+    /* Activation preserves the fallback and does not consume an attempt. */
+    for (n = 0; n < 256; n++) {
+        init(&m, n);
+        assert(!h432b_fastboot_set_active(&store, scratch, "b"));
+        assert(h432b_bootstate_load(&store, scratch, &state) == 1);
+        assert(state.order[0] == 1 && state.order[1] == 0);
+        assert(state.left[0] == 3 && state.left[1] == 3);
+        assert(state.serial == (unsigned char)(n + 1));
+        assert(h432b_bootstate_attempt(&store, scratch) == 1);
+        assert(!h432b_fastboot_set_active(&store, scratch, "a"));
+        assert(h432b_bootstate_load(&store, scratch, &state) == 1);
+        assert(state.left[1] == 2 && state.left[0] == 3);
+        assert(state.order[0] == 0 && state.order[1] == 1);
+    }
+    /* Every torn activation must retain the previously selected state. */
+    for (n = 0; n < H432B_ENV_BYTES; n++) {
+        init(&m, 71);
+        memcpy(saved, m.data[0], sizeof(saved));
+        m.cut = n;
+        assert(h432b_fastboot_set_active(&store, scratch, "b") == -2);
+        assert(!memcmp(saved, m.data[0], sizeof(saved)));
+        assert(h432b_bootstate_load(&store, scratch, &state) == 0);
+        assert(state.order[0] == 0 && state.serial == 71);
+    }
+    init(&m, 4); m.fail_readback = 1;
+    assert(h432b_fastboot_set_active(&store, scratch, "b") == -2);
+    init(&m, 255); m.failed_after_commit = 1;
+    assert(h432b_fastboot_set_active(&store, scratch, "b") == -2);
+    assert(h432b_bootstate_load(&store, scratch, &state) == 1);
+    assert(state.serial == 0 && state.order[0] == 1);
+    init(&m, 0);
+    assert(h432b_fastboot_set_active(&store, scratch, NULL) == -1);
+    assert(h432b_fastboot_set_active(&store, scratch, "") == -1);
+    assert(h432b_fastboot_set_active(&store, scratch, "A") == -1);
+    assert(h432b_fastboot_set_active(&store, scratch, "_a") == -1);
+    assert(h432b_fastboot_set_active(&store, scratch, "aa") == -1);
+    assert(h432b_fastboot_set_active(&store, scratch, "c") == -1);
+    assert(!m.writes);
+    m.valid[0] = 0;
+    assert(h432b_fastboot_set_active(&store, scratch, "a") == -1);
+    assert(!m.writes);
+    {
+        struct h432b_fastboot_target target;
+        const char *const names[] = {"boot", "kernel", "system", "systembase", "systemext"};
+        const char *const volumes[][2] = {{"kernel_a", "kernel_b"},
+            {"kernel_a", "kernel_b"}, {"systembase_a", "systembase_b"},
+            {"systembase_a", "systembase_b"}, {"systemext_a", "systemext_b"}};
+        const char *const invalid[] = {"", "a", "_a", "systembase", "systembase_c",
+            "systembase_AA", "systembase_a/", "SYSTEMBASE_A", "eboot_a",
+            "bootstate_a", "userdata_a", "gpt", "mmc0", "../systembase_a"};
+        char name[32];
+        for (i = 0; i < 5; i++) {
+            for (n = 0; n < 4; n++) {
+                snprintf(name, sizeof(name), "%s_%c", names[i], "aAbB"[n]);
+                assert(!h432b_fastboot_resolve(name, &target));
+                assert(target.slot == n / 2);
+                assert(target.storage == (i == 4 ? H432B_FASTBOOT_MMC : H432B_FASTBOOT_UBI));
+                assert(!strcmp(target.name, volumes[i][n / 2]));
+            }
+        }
+        for (i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
+            assert(h432b_fastboot_resolve(invalid[i], &target) == -1);
+        assert(h432b_fastboot_resolve(NULL, &target) == -1);
+        assert(h432b_fastboot_resolve("boot_a", NULL) == -1);
+    }
     puts("BOOTSTATE_MODEL_PASS: format, wrap, torn updates, fallback, exhaustion");
     return 0;
 }

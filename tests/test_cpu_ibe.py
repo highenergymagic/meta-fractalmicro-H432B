@@ -18,9 +18,24 @@ class CortexA8IbeTests(unittest.TestCase):
     def test_every_loader_inherits_cpu_prerequisite(self):
         self.assertIn(PATCH.name, (RECIPES / "u-boot-h432b.inc").read_text())
         for recipe in RECIPES.glob("u-boot-h432b*.bb"):
+            if recipe.name == "u-boot-h432b-modern_2026.10.bb":
+                modern = RECIPES / "files/0001-h432b-modern-foundation.patch"
+                self.assertIn(modern.name, recipe.read_text())
+                self.assertIn("+CONFIG_ARM_CORTEX_A8_CVE_2017_5715=y", modern.read_text())
+                # Modern upstream provides the workaround in cpu_init_cp15;
+                # skip only clock/DRAM init, not that CPU prerequisite.
+                self.assertIn("+CONFIG_SKIP_LOWLEVEL_INIT_ONLY=y", modern.read_text())
+                self.assertNotIn("+CONFIG_SKIP_LOWLEVEL_INIT=y", modern.read_text())
+                continue
             current = recipe
             seen = set()
             while current.name != "u-boot-h432b.inc":
+                if current.name == "u-boot-h432b-modern_2026.10.bb":
+                    # This root is checked above; derived modern roles must
+                    # reach it through an explicit require chain.
+                    self.assertIn('0001-h432b-modern-foundation.patch',
+                                  current.read_text())
+                    break
                 self.assertNotIn(current, seen)
                 seen.add(current)
                 parents = [line.split()[1] for line in current.read_text().splitlines()

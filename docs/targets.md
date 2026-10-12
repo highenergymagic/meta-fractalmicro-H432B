@@ -5,8 +5,7 @@
 | Target | Purpose |
 | --- | --- |
 | `linux-h432b-runtime` | The default Linux CIP/RT kernel; also used for standalone RAM recovery. |
-| `u-boot-h432b-ab-chain` | Persistent CE carrier with redundant bootstate and A/B slot selection. |
-| `u-boot-h432b-ab` | High-RAM A/B reader and one-shot fastboot stage, embedded by the carrier. |
+| `u-boot-h432b-modern-nand` | U-Boot 2026.10 CE carrier with cached NAND reads, A/B selection, fastboot and a braille boot menu. |
 
 The OS layer supplies `openh432-nand-b`, the minimal
 `openh432-early-b` root handoff, and `openh432-systembase-b`.
@@ -14,6 +13,7 @@ The minimal initramfs mounts the loader-selected systembase. The historical
 `-b` target names do not restrict the new image pair to slot B. Eligible slots and
 redundant bootstate must be provisioned before using the A/B carrier. See the
 [boot contract](boot-contract.md) for update ordering and remaining limitations.
+The [modern loader reference](modern-uboot.md) defines its commands and limits.
 
 ## Installation and recovery
 
@@ -29,10 +29,17 @@ forensic acquisition environment.
 
 The legacy `u-boot-h432b-maintenance` and `-maintenance-chain` recipes retain
 fixed-B selection for migration and recovery; they do not honor A/B state.
+The legacy `u-boot-h432b-ab-chain` and `-ab` targets retain the two-stage
+2012.10 A/B path for migration. They are not the default deployment output.
 
 ## Optional diagnostics
 
 These targets are deliberately separate from normal deployment:
+
+`u-boot-h432b-modern` provides the RAM-entry modern loader, not a flashable
+carrier. Its `-cache-test` and `-cache-audit` variants retain cache qualification
+profiles. `linux-h432b-ethernet-watch` enables tracing and lockup diagnostics;
+the standard runtime uses the hardware watchdog without these tracing options.
 
 | Kernel suffix / matching OS image suffix | Purpose |
 | --- | --- |

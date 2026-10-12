@@ -12,6 +12,14 @@ a 25 MHz frequency ceiling and no 1.8 V signaling. It uses the standard
 Samsung SDHCI driver and pin groups, with GPIO-based card detection.
 No additional power rail is inferred or switched.
 
+The standard runtime kernel includes VFAT (FAT16/FAT32), exFAT and ext4
+as built-in filesystems. UTF-8 filename conversion is available; use
+`iocharset=utf8` when mounting VFAT media with Unicode filenames. Filesystem
+support does not automatically mount inserted media or format an unknown card.
+The build checks the final kernel configuration for all three filesystems.
+Physical filesystem read/write qualification is tracked separately from
+controller enumeration and raw block reads below.
+
 The normal NAND runtime permits external-SD, internal-SD and Linux UBI writes.
 External-card writes and mechanical write-protect sensing remain unqualified;
 do not assume the card's lock tab prevents writes.

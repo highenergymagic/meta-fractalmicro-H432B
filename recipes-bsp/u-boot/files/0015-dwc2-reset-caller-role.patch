@@ -1,0 +1,97 @@
+From 8ada7e71e710bb6eeefb119613f521cbbd3306a6 Mon Sep 17 00:00:00 2001
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Date: Mon, 12 Oct 2026 21:40:27 +1300
+Subject: [PATCH] usb: dwc2: limit host-mode reset waits to host callers
+
+Upstream-Status: Pending
+---
+ drivers/usb/common/dwc2_core.c    | 8 ++++++--
+ drivers/usb/common/dwc2_core.h    | 2 +-
+ drivers/usb/gadget/dwc2_udc_otg.c | 2 +-
+ drivers/usb/host/dwc2.c           | 6 +++---
+ 4 files changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/usb/common/dwc2_core.c b/drivers/usb/common/dwc2_core.c
+index d4abeaf2..5a4b08e3 100644
+--- a/drivers/usb/common/dwc2_core.c
++++ b/drivers/usb/common/dwc2_core.c
+@@ -10,13 +10,17 @@
+ 
+ #include "dwc2_core.h"
+ 
+-int dwc2_core_reset(struct dwc2_core_regs *regs)
++int dwc2_core_reset(struct dwc2_core_regs *regs, bool wait_for_host_mode)
+ {
+ 	u32 snpsid;
+ 	int ret;
+ 	bool host_mode = false;
+ 
+-	if (!(readl(&regs->global_regs.gusbcfg) & GUSBCFG_FORCEDEVMODE) &&
++	/* A gadget caller must not wait for host mode based on stale ID state.
++	 * Reset completion and AHB idle are required for both controller roles.
++	 */
++	if (wait_for_host_mode &&
++	    !(readl(&regs->global_regs.gusbcfg) & GUSBCFG_FORCEDEVMODE) &&
+ 	    (!(readl(&regs->global_regs.gotgctl) & GOTGCTL_CONID_B) ||
+ 	     (readl(&regs->global_regs.gusbcfg) & GUSBCFG_FORCEHOSTMODE)))
+ 		host_mode = true;
+diff --git a/drivers/usb/common/dwc2_core.h b/drivers/usb/common/dwc2_core.h
+index 1897ad7c..20a16949 100644
+--- a/drivers/usb/common/dwc2_core.h
++++ b/drivers/usb/common/dwc2_core.h
+@@ -125,7 +125,7 @@ struct dwc2_core_regs {
+ 	u8  ep_fifo[16][0x1000];		/* 0x1000 */
+ };
+ 
+-int dwc2_core_reset(struct dwc2_core_regs *regs);
++int dwc2_core_reset(struct dwc2_core_regs *regs, bool wait_for_host_mode);
+ int dwc2_flush_tx_fifo(struct dwc2_core_regs *regs, const int num);
+ int dwc2_flush_rx_fifo(struct dwc2_core_regs *regs);
+ 
+diff --git a/drivers/usb/gadget/dwc2_udc_otg.c b/drivers/usb/gadget/dwc2_udc_otg.c
+index 01a8ab22..7142bd39 100644
+--- a/drivers/usb/gadget/dwc2_udc_otg.c
++++ b/drivers/usb/gadget/dwc2_udc_otg.c
+@@ -483,7 +483,7 @@ static int reconfig_usbd(struct dwc2_udc *dev)
+ 	u32 max_hw_ep;
+ 	int pdata_hw_ep;
+ 
+-	ret = dwc2_core_reset(reg);
++	ret = dwc2_core_reset(reg, false);
+ 	if (ret)
+ 		return ret;
+ 
+diff --git a/drivers/usb/host/dwc2.c b/drivers/usb/host/dwc2.c
+index 16f21fa9..825670d3 100644
+--- a/drivers/usb/host/dwc2.c
++++ b/drivers/usb/host/dwc2.c
+@@ -280,7 +280,7 @@ static void dwc_otg_core_init(struct udevice *dev)
+ 	writel(usbcfg, &regs->global_regs.gusbcfg);
+ 
+ 	/* Reset the Controller */
+-	dwc2_core_reset(regs);
++	dwc2_core_reset(regs, true);
+ 
+ 	/*
+ 	 * This programming sequence needs to happen in FS mode before
+@@ -292,7 +292,7 @@ static void dwc_otg_core_init(struct udevice *dev)
+ 	setbits_le32(&regs->global_regs.gusbcfg, GUSBCFG_PHYSEL);
+ 
+ 	/* Reset after a PHY select */
+-	dwc2_core_reset(regs);
++	dwc2_core_reset(regs, true);
+ 
+ 	/*
+ 	 * Program DCFG.DevSpd or HCFG.FSLSPclkSel to 48Mhz in FS.
+@@ -341,7 +341,7 @@ static void dwc_otg_core_init(struct udevice *dev)
+ 	writel(usbcfg, &regs->global_regs.gusbcfg);
+ 
+ 	/* Reset after setting the PHY parameters */
+-	dwc2_core_reset(regs);
++	dwc2_core_reset(regs, true);
+ #endif
+ 
+ 	usbcfg = readl(&regs->global_regs.gusbcfg);
+-- 
+2.47.3
+

@@ -1,4 +1,8 @@
-# Fastboot RAM loader
+# Legacy fastboot RAM loader
+
+For the standard U-Boot 2026.10 NAND loader, slot-aware flashing and the braille
+boot menu, use the [modern loader reference](modern-uboot.md). This page
+documents the separate 2012.10 conversion/recovery transport.
 
 This is a separate high-RAM development loader, not a NAND-flashable image.
 Build `u-boot-h432b-fastboot` through openh432-build's pinned Docker launcher.

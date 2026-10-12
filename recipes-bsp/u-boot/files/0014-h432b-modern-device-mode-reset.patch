@@ -1,0 +1,51 @@
+From 809697cc9f5e477247c3bee29210da4e85babc68 Mon Sep 17 00:00:00 2001
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Date: Mon, 12 Oct 2026 21:34:36 +1300
+Subject: [PATCH] usb: respect forced device mode during DWC2 reset on H432B
+
+Upstream-Status: Pending
+---
+ board/fractalmicro/h432b/usb.c | 3 +++
+ drivers/usb/common/dwc2_core.c | 5 +++--
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/board/fractalmicro/h432b/usb.c b/board/fractalmicro/h432b/usb.c
+index c85b93a9..4c5078e2 100644
+--- a/board/fractalmicro/h432b/usb.c
++++ b/board/fractalmicro/h432b/usb.c
+@@ -16,6 +16,7 @@
+ #define H432B_PHY_CLK ((void __iomem *)0xec100004)
+ #define H432B_PHY_RST ((void __iomem *)0xec100008)
+ #define H432B_OTG_DCTL ((void __iomem *)0xec000804)
++#define H432B_OTG_USBCFG ((void __iomem *)0xec00000c)
+ #define H432B_WTCON ((void __iomem *)0xe2700000)
+ 
+ int board_early_init_f(void)
+@@ -38,6 +39,8 @@ void otg_phy_init(struct dwc2_udc *dev)
+ 	udelay(10);
+ 	writel(0x00, H432B_PHY_RST);
+ 	udelay(10);
++	/* This connector is device-only, regardless of the inherited ID state. */
++	clrsetbits_le32(H432B_OTG_USBCFG, BIT(29), BIT(30));
+ }
+ 
+ void otg_phy_off(struct dwc2_udc *dev)
+diff --git a/drivers/usb/common/dwc2_core.c b/drivers/usb/common/dwc2_core.c
+index 37007134..d4abeaf2 100644
+--- a/drivers/usb/common/dwc2_core.c
++++ b/drivers/usb/common/dwc2_core.c
+@@ -16,8 +16,9 @@ int dwc2_core_reset(struct dwc2_core_regs *regs)
+ 	int ret;
+ 	bool host_mode = false;
+ 
+-	if (!(readl(&regs->global_regs.gotgctl) & GOTGCTL_CONID_B) ||
+-	    (readl(&regs->global_regs.gusbcfg) & GUSBCFG_FORCEHOSTMODE))
++	if (!(readl(&regs->global_regs.gusbcfg) & GUSBCFG_FORCEDEVMODE) &&
++	    (!(readl(&regs->global_regs.gotgctl) & GOTGCTL_CONID_B) ||
++	     (readl(&regs->global_regs.gusbcfg) & GUSBCFG_FORCEHOSTMODE)))
+ 		host_mode = true;
+ 
+ 	/* Core Soft Reset */
+-- 
+2.47.3
+

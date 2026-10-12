@@ -1,0 +1,96 @@
+From 32690365d0133808ca3bed996fe32c31fe1b1d61 Mon Sep 17 00:00:00 2001
+From: BSP development <development@localhost>
+Date: Mon, 12 Oct 2026 19:27:24 +1300
+Subject: [PATCH] board: h432b: verify complete static NAND kernel images
+
+Upstream-Status: Pending
+---
+ board/fractalmicro/h432b/storage.c | 46 ++++++++++++++++++++++++++++++
+ configs/h432b_defconfig            |  1 +
+ 2 files changed, 47 insertions(+)
+
+diff --git a/board/fractalmicro/h432b/storage.c b/board/fractalmicro/h432b/storage.c
+index d63c2ad7..6400a8ad 100644
+--- a/board/fractalmicro/h432b/storage.c
++++ b/board/fractalmicro/h432b/storage.c
+@@ -4,12 +4,53 @@
+ #include <fastboot.h>
+ #include <nand.h>
+ #include <ubi_uboot.h>
++#include <u-boot/sha256.h>
++#include "u2fastboot.h"
+ #define H432B_BOOTSTATE_UBOOT
+ #include "bootstate.h"
+ 
+ static struct h432b_bootstate state;
+ static bool state_valid;
+ 
++static int verify_kernel(unsigned int slot)
++{
++	const char *name = slot ? "kernel_b" : "kernel_a";
++	struct ubi_volume *vol = ubi_find_volume(name);
++	struct u2_fb_image layout;
++	u8 *buffer = (void *)U2_FB_ADDRESS;
++	u8 digest[SHA256_SUM_LEN];
++	char text[65];
++	size_t offset = 0, size, length;
++	int leb = 0, ret;
++	unsigned int i;
++
++	if (!vol || vol->vol_type != UBI_STATIC_VOLUME || vol->updating ||
++	    vol->upd_marker || vol->corrupted || vol->used_bytes < U2_FB_PAGE ||
++	    vol->used_bytes > 132U * 126976U)
++		return -EINVAL;
++	size = vol->used_bytes;
++	while (offset < size) {
++		length = min_t(size_t, size - offset, vol->usable_leb_size);
++		/* Check each static-volume LEB CRC as well as NAND BCH. */
++		ret = ubi_eba_read_leb(ubi_devices[0], vol, leb++, buffer + offset,
++				       0, length, 1);
++		if (ret)
++			return ret;
++		offset += length;
++	}
++	if (u2_fb_layout(buffer, size, &layout))
++		return -EINVAL;
++	sha256_csum_wd(buffer, size, digest, CHUNKSZ_SHA256);
++	for (i = 0; i < sizeof(digest); i++)
++		sprintf(text + 2 * i, "%02x", digest[i]);
++	env_set("fastboot.h432b-kernel-sha256-lo", text + 32);
++	text[32] = '\0';
++	env_set("fastboot.h432b-kernel-sha256-hi", text);
++	printf("H432B: verified %s, %zu bytes (BCH, LEB CRC, image layout)\n",
++	       name, size);
++	return 0;
++}
++
+ static int read_state(void *context, unsigned int copy, unsigned char *data)
+ {
+ 	const char *name = copy ? "bootstate_b" : "bootstate_a";
+@@ -49,6 +90,11 @@ static int do_h432b_storage(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	       state.left[0], state.left[1]);
+ 	env_set("fastboot.h432b-nand", "512MiB BCH8/512 OOB12");
+ 	env_set("fastboot.h432b-ubi", "attached-read-only");
++	ret = verify_kernel(state.order[0]);
++	if (ret) {
++		printf("H432B: kernel verification failed (%d)\n", ret);
++		return CMD_RET_FAILURE;
++	}
+ 	return CMD_RET_SUCCESS;
+ }
+ 
+diff --git a/configs/h432b_defconfig b/configs/h432b_defconfig
+index 7bbb6308..72727875 100644
+--- a/configs/h432b_defconfig
++++ b/configs/h432b_defconfig
+@@ -51,6 +51,7 @@ CONFIG_MTD_RAW_NAND=y
+ CONFIG_SYS_NAND_SELF_INIT=y
+ CONFIG_NAND_ECC_BCH=y
+ CONFIG_CMD_UBI=y
++CONFIG_SHA256=y
+ # CONFIG_CMD_UBIFS is not set
+ CONFIG_MTDIDS_DEFAULT="nand0=nand0"
+ CONFIG_MTDPARTS_DEFAULT="mtdparts=nand0:4m(factory)ro,507m(linux),1m(bbt)ro"
+-- 
+2.47.3
+

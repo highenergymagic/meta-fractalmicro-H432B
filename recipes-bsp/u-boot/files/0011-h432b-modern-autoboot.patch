@@ -1,0 +1,72 @@
+From 7cefe6f82d2d22a71166080e0f5d24890d2d75ed Mon Sep 17 00:00:00 2001
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Date: Mon, 12 Oct 2026 20:52:44 +1300
+Subject: [PATCH] h432b: automatic NAND boot and one-shot maintenance
+
+Upstream-Status: Inappropriate [board-specific boot policy]
+---
+ board/fractalmicro/h432b/storage.c | 31 ++++++++++++++++++++++++++++++
+ 1 file changed, 31 insertions(+)
+
+diff --git a/board/fractalmicro/h432b/storage.c b/board/fractalmicro/h432b/storage.c
+index d8840a0e..da1dbe2a 100644
+--- a/board/fractalmicro/h432b/storage.c
++++ b/board/fractalmicro/h432b/storage.c
+@@ -16,6 +16,9 @@
+ #include "slot-pair.h"
+ #include "identity.h"
+ #include "usb-identity.h"
++#include "bootmode.h"
++#include "u2_braille.h"
++#include <asm/io.h>
+ 
+ static struct h432b_bootstate state;
+ static bool state_valid;
+@@ -290,6 +293,7 @@ static int do_h432b_storage(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	int ret;
+ 
+ 	state_valid = false;
++	(void)u2_braille_brf(U2_BRAILLE_BRAND_BRF);
+ 	identity_valid = !h432b_factory_mac((const void *)0x40000800,
+ 					 H432B_ARGS_BYTES, factory_mac);
+ 	if (identity_valid) {
+@@ -434,9 +438,36 @@ static int do_h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	snprintf(command, sizeof(command), "bootz 42000000 44400000:%x 44000000",
+ 		 layout.ramdisk_size);
+ 	printf("H432B: booting NAND slot %c, attempt %u\n", 'A' + slot, state.serial);
++	(void)u2_braille_brf(U2_BRAILLE_KERNEL_BRF);
+ 	return run_command(command, 0) ? CMD_RET_FAILURE : CMD_RET_SUCCESS;
+ }
+ 
++static unsigned int mode_read(void *context)
++{
++	return readl(context);
++}
++
++static void mode_write(void *context, unsigned int value)
++{
++	writel(value, context);
++	__asm__ volatile("dsb sy" : : : "memory");
++}
++
++static int do_h432b_auto(struct cmd_tbl *cmdtp, int flag, int argc,
++			 char *const argv[])
++{
++	int mode = h432b_take_bootmode(mode_read, mode_write, (void *)0xe010f01c);
++	int ret = do_h432b_storage(cmdtp, flag, argc, argv);
++
++	/* Consume the one-shot request even if storage is unavailable. */
++	if (ret || mode)
++		return CMD_RET_FAILURE;
++	return do_h432b_boot(cmdtp, flag, argc, argv);
++}
++
++U_BOOT_CMD(h432bauto, 1, 0, do_h432b_auto,
++	   "boot NAND unless a one-shot maintenance request is present", "");
++
+ U_BOOT_CMD(h432bboot, 1, 0, do_h432b_boot,
+ 	   "boot the selected NAND kernel with persistent attempt accounting", "");
+ 
+-- 
+2.47.3
+

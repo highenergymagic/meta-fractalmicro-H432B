@@ -1,0 +1,49 @@
+From a2ecf96ae86b0712531044d98d6492df576c35ee Mon Sep 17 00:00:00 2001
+From: BSP development <development@localhost>
+Date: Mon, 12 Oct 2026 19:04:17 +1300
+Subject: [PATCH] board: h432b: isolate RAM entry from launching loader
+
+Upstream-Status: Pending
+---
+ board/fractalmicro/h432b/board.c | 4 ++--
+ configs/h432b_defconfig          | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/board/fractalmicro/h432b/board.c b/board/fractalmicro/h432b/board.c
+index 4b2f0cbf..20ddd919 100644
+--- a/board/fractalmicro/h432b/board.c
++++ b/board/fractalmicro/h432b/board.c
+@@ -27,6 +27,6 @@ int dram_init_banksize(void)
+ 
+ ulong board_get_usable_ram_top(ulong total_size)
+ {
+-	/* Keep relocation below the existing maintenance download window. */
+-	return 0x47000000;
++	/* Leave the launching loader, its heap and USB DMA buffers untouched. */
++	return 0x44000000;
+ }
+diff --git a/configs/h432b_defconfig b/configs/h432b_defconfig
+index 63249418..b31f69c0 100644
+--- a/configs/h432b_defconfig
++++ b/configs/h432b_defconfig
+@@ -2,7 +2,7 @@ CONFIG_ARM=y
+ CONFIG_ARCH_CPU_INIT=y
+ CONFIG_ARCH_S5PC1XX=y
+ CONFIG_TARGET_H432B=y
+-CONFIG_TEXT_BASE=0x46000000
++CONFIG_TEXT_BASE=0x42000000
+ CONFIG_SKIP_LOWLEVEL_INIT_ONLY=y
+ CONFIG_ARM_CORTEX_A8_CVE_2017_5715=y
+ CONFIG_OF_CONTROL=y
+@@ -11,7 +11,7 @@ CONFIG_SYS_MALLOC_LEN=0x400000
+ CONFIG_SYS_MALLOC_F_LEN=0x2000
+ CONFIG_NR_DRAM_BANKS=1
+ CONFIG_HAS_CUSTOM_SYS_INIT_SP_ADDR=y
+-CONFIG_CUSTOM_SYS_INIT_SP_ADDR=0x46e00000
++CONFIG_CUSTOM_SYS_INIT_SP_ADDR=0x41f00000
+ CONFIG_SYS_LOAD_ADDR=0x42000000
+ CONFIG_ENV_SIZE=0x1000
+ CONFIG_ENV_IS_NOWHERE=y
+-- 
+2.47.3
+

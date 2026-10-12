@@ -1,0 +1,63 @@
+From 515a831db141818905438ec4f715b1b5e7fa2d08 Mon Sep 17 00:00:00 2001
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Date: Mon, 12 Oct 2026 19:51:34 +1300
+Subject: [PATCH] mtd: h432b: use modern raw NAND data-write callback
+
+Upstream-Status: Inappropriate [H432B board integration]
+
+Signed-off-by: Fractal Microsystems <bsp@fractalmicro.org>
+---
+ board/fractalmicro/h432b/nand.c | 17 ++++++++++++++---
+ 1 file changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/board/fractalmicro/h432b/nand.c b/board/fractalmicro/h432b/nand.c
+index ad56173d..6fc7e0e6 100644
+--- a/board/fractalmicro/h432b/nand.c
++++ b/board/fractalmicro/h432b/nand.c
+@@ -13,21 +13,28 @@ static struct nand_chip h432b_nand;
+ static u32 saved_control;
+ static bool blocked;
+ static bool writing;
+-static int (*raw_write)(struct mtd_info *, loff_t, size_t, size_t *, const u8 *);
++static int (*raw_write_oob)(struct mtd_info *, loff_t, struct mtd_oob_ops *);
+ static int (*raw_erase)(struct mtd_info *, struct erase_info *);
+ static int (*raw_markbad)(struct mtd_info *, loff_t);
+ 
+ static int pool_write(struct mtd_info *mtd, loff_t offset, size_t length,
+ 		      size_t *done, const u8 *data)
+ {
++	struct mtd_oob_ops ops = {
++		.mode = MTD_OPS_PLACE_OOB,
++		.len = length,
++		.datbuf = (u8 *)data,
++	};
+ 	int ret;
+ 
+ 	*done = 0;
+ 	if (!h432b_nand_write_allowed(offset, length, 2048))
+ 		return -EROFS;
+ 	writing = true;
+-	ret = raw_write(mtd, offset, length, done, data);
++	/* Modern raw NAND exposes ordinary data writes through _write_oob. */
++	ret = raw_write_oob(mtd, offset, &ops);
+ 	writing = false;
++	*done = ops.retlen;
+ 	return ret;
+ }
+ 
+@@ -172,7 +179,11 @@ void board_nand_init(void)
+ 		printf("H432B: incompatible NAND ECC layout\n");
+ 		return;
+ 	}
+-	raw_write = mtd->_write;
++	if (!mtd->_write_oob || !mtd->_erase || !mtd->_block_markbad) {
++		printf("H432B: missing NAND write callbacks\n");
++		return;
++	}
++	raw_write_oob = mtd->_write_oob;
+ 	raw_erase = mtd->_erase;
+ 	raw_markbad = mtd->_block_markbad;
+ 	mtd->_write = pool_write;
+-- 
+2.47.3
+

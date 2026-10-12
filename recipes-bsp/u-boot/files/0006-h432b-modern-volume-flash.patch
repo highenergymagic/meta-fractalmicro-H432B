@@ -1,0 +1,348 @@
+From 01c4c0bbf20020ef75b6862bde7c4176d48134c5 Mon Sep 17 00:00:00 2001
+From: BSP development <development@localhost>
+Date: Mon, 12 Oct 2026 19:31:50 +1300
+Subject: [PATCH] fastboot: h432b: update inactive UBI volumes with verified
+ invalidation
+
+Upstream-Status: Pending
+---
+ board/fractalmicro/h432b/nand.c    |  70 +++++++++++++++++-
+ board/fractalmicro/h432b/storage.c | 110 ++++++++++++++++++++++++++++-
+ configs/h432b_defconfig            |   5 +-
+ drivers/fastboot/Kconfig           |   9 ++-
+ drivers/fastboot/fb_command.c      |   5 ++
+ include/fastboot.h                 |   2 +
+ 6 files changed, 194 insertions(+), 7 deletions(-)
+
+diff --git a/board/fractalmicro/h432b/nand.c b/board/fractalmicro/h432b/nand.c
+index d0160f81..ad56173d 100644
+--- a/board/fractalmicro/h432b/nand.c
++++ b/board/fractalmicro/h432b/nand.c
+@@ -5,12 +5,63 @@
+ #include <asm/io.h>
+ #include <linux/errno.h>
+ #include <linux/mtd/rawnand.h>
++#include "nand-write-boundary.h"
+ 
+ #define NFREG(offset) ((void __iomem *)(0xb0e00000UL + (offset)))
+ 
+ static struct nand_chip h432b_nand;
+ static u32 saved_control;
+ static bool blocked;
++static bool writing;
++static int (*raw_write)(struct mtd_info *, loff_t, size_t, size_t *, const u8 *);
++static int (*raw_erase)(struct mtd_info *, struct erase_info *);
++static int (*raw_markbad)(struct mtd_info *, loff_t);
++
++static int pool_write(struct mtd_info *mtd, loff_t offset, size_t length,
++		      size_t *done, const u8 *data)
++{
++	int ret;
++
++	*done = 0;
++	if (!h432b_nand_write_allowed(offset, length, 2048))
++		return -EROFS;
++	writing = true;
++	ret = raw_write(mtd, offset, length, done, data);
++	writing = false;
++	return ret;
++}
++
++static int pool_erase(struct mtd_info *mtd, struct erase_info *erase)
++{
++	int ret;
++
++	if (!h432b_nand_write_allowed(erase->addr, erase->len, 131072))
++		return -EROFS;
++	writing = true;
++	ret = raw_erase(mtd, erase);
++	writing = false;
++	return ret;
++}
++
++static int pool_markbad(struct mtd_info *mtd, loff_t offset)
++{
++	int ret;
++
++	if (!h432b_nand_write_allowed(offset, 131072, 131072))
++		return -EROFS;
++	writing = true;
++	ret = raw_markbad(mtd, offset);
++	writing = false;
++	return ret;
++}
++
++static int deny_oob(struct mtd_info *mtd, loff_t offset,
++		    struct mtd_oob_ops *ops)
++{
++	ops->retlen = 0;
++	ops->oobretlen = 0;
++	return -EROFS;
++}
+ 
+ static void h432b_cmd_ctrl(struct mtd_info *mtd, int cmd, unsigned int ctrl)
+ {
+@@ -27,7 +78,7 @@ static void h432b_cmd_ctrl(struct mtd_info *mtd, int cmd, unsigned int ctrl)
+ 	if (cmd == NAND_CMD_NONE)
+ 		return;
+ 	if (ctrl & NAND_CLE) {
+-		/* No program/erase/feature writes during reader qualification. */
++		/* Reads are permitted outside a bounded MTD write operation. */
+ 		switch (cmd) {
+ 		case NAND_CMD_READ0:
+ 		case NAND_CMD_RNDOUT:
+@@ -43,6 +94,9 @@ static void h432b_cmd_ctrl(struct mtd_info *mtd, int cmd, unsigned int ctrl)
+ 		default:
+ 			blocked = true;
+ 		}
++		if (writing && (cmd == NAND_CMD_SEQIN || cmd == NAND_CMD_PAGEPROG ||
++				cmd == NAND_CMD_ERASE1 || cmd == NAND_CMD_ERASE2))
++			blocked = false;
+ 		if (!blocked)
+ 			writeb(cmd, NFREG(8));
+ 	} else if ((ctrl & NAND_ALE) && !blocked) {
+@@ -72,7 +126,10 @@ static void h432b_read_buf(struct mtd_info *mtd, u8 *buf, int len)
+ 
+ static void h432b_write_buf(struct mtd_info *mtd, const u8 *buf, int len)
+ {
+-	blocked = true;
++	if (!writing || blocked)
++		return;
++	while (len-- > 0)
++		writeb(*buf++, NFREG(0x10));
+ }
+ 
+ void board_nand_init(void)
+@@ -115,7 +172,14 @@ void board_nand_init(void)
+ 		printf("H432B: incompatible NAND ECC layout\n");
+ 		return;
+ 	}
+-	mtd->flags &= ~MTD_WRITEABLE;
++	raw_write = mtd->_write;
++	raw_erase = mtd->_erase;
++	raw_markbad = mtd->_block_markbad;
++	mtd->_write = pool_write;
++	mtd->_erase = pool_erase;
++	mtd->_block_markbad = pool_markbad;
++	mtd->_write_oob = deny_oob;
++	mtd->_panic_write = NULL;
+ 	ret = nand_register(0, mtd);
+ 	if (ret)
+ 		printf("H432B: NAND registration failed (%d)\n", ret);
+diff --git a/board/fractalmicro/h432b/storage.c b/board/fractalmicro/h432b/storage.c
+index 6400a8ad..a52d3d28 100644
+--- a/board/fractalmicro/h432b/storage.c
++++ b/board/fractalmicro/h432b/storage.c
+@@ -8,6 +8,8 @@
+ #include "u2fastboot.h"
+ #define H432B_BOOTSTATE_UBOOT
+ #include "bootstate.h"
++#include "fastboot-slots.h"
++#include "fastboot-targets.h"
+ 
+ static struct h432b_bootstate state;
+ static bool state_valid;
+@@ -63,6 +65,112 @@ static int read_state(void *context, unsigned int copy, unsigned char *data)
+ 	return ubi_volume_read(name, data, 0, H432B_ENV_BYTES);
+ }
+ 
++static int replace_state(void *context, unsigned int copy,
++			 const unsigned char *data)
++{
++	const char *name = copy ? "bootstate_b" : "bootstate_a";
++	struct ubi_volume *vol = ubi_find_volume(name);
++	int ret;
++
++	if (copy > 1 || !vol || vol->vol_type != UBI_DYNAMIC_VOLUME ||
++	    vol->reserved_pebs != 2 || vol->usable_leb_size != 126976 ||
++	    vol->updating || ubi_devices[0]->ro_mode)
++		return -EINVAL;
++	ret = ubi_volume_write(name, data, 0, H432B_ENV_BYTES);
++	return ret || vol->upd_marker || vol->corrupted ? -EIO : 0;
++}
++
++/* Hash through corrected NAND reads and independently checked static LEBs. */
++static int volume_digest(struct ubi_volume *vol, u8 *digest)
++{
++	sha256_context ctx;
++	u8 *buffer;
++	size_t offset = 0, length;
++	int leb = 0, ret = 0;
++
++	buffer = malloc(vol->usable_leb_size);
++	if (!buffer)
++		return -ENOMEM;
++	sha256_starts(&ctx);
++	while (offset < vol->used_bytes) {
++		length = min_t(size_t, vol->used_bytes - offset,
++			       vol->usable_leb_size);
++		ret = ubi_eba_read_leb(ubi_devices[0], vol, leb++, buffer,
++				       0, length, 1);
++		if (ret)
++			break;
++		sha256_update(&ctx, buffer, length);
++		offset += length;
++	}
++	sha256_finish(&ctx, digest);
++	free(buffer);
++	return ret;
++}
++
++void fastboot_board_flash(const char *name, const void *buffer, u32 size,
++			  char *response)
++{
++	struct h432b_fastboot_target target;
++	struct h432b_bootstore store = {
++		.read = read_state, .replace = replace_state,
++	};
++	struct u2_fb_image layout;
++	struct ubi_volume *vol;
++	u8 scratch[2 * H432B_ENV_BYTES], expected[32], actual[32];
++	int active = -1, ret;
++	unsigned int i;
++
++	if (!size || h432b_fastboot_resolve(name, &target) ||
++	    target.storage != H432B_FASTBOOT_UBI) {
++		fastboot_fail("Unknown or unavailable image target", response);
++		return;
++	}
++	vol = ubi_find_volume(target.name);
++	if (!vol || vol->vol_type != UBI_STATIC_VOLUME || vol->updating ||
++	    size > (u64)vol->reserved_pebs * vol->usable_leb_size) {
++		fastboot_fail("Invalid volume or image size", response);
++		return;
++	}
++	if (!strncmp(target.name, "kernel_", 7)) {
++		if (u2_fb_layout(buffer, size, &layout)) {
++			fastboot_fail("Invalid kernel image layout", response);
++			return;
++		}
++	} else if (size < 4096 || size > 200U * 1024U * 1024U ||
++		   memcmp(buffer, "hsqs", 4)) {
++		fastboot_fail("Expected bounded SquashFS systembase image", response);
++		return;
++	}
++	state_valid = h432b_bootstate_load(&store, scratch, &state) >= 0;
++	if (state_valid) {
++		for (i = 0; i < 2; i++) {
++			if (state.left[state.order[i]]) {
++				active = state.order[i];
++				break;
++			}
++		}
++	}
++	if (active < 0 || active == target.slot) {
++		fastboot_fail("Only the inactive slot may be updated", response);
++		return;
++	}
++	sha256_csum_wd(buffer, size, expected, CHUNKSZ_SHA256);
++	ret = h432b_fastboot_invalidate(&store, scratch, target.slot);
++	state_valid = h432b_bootstate_load(&store, scratch, &state) >= 0;
++	if (ret || !state_valid) {
++		fastboot_fail("Cannot persist slot invalidation; image untouched", response);
++		return;
++	}
++	ret = ubi_volume_write(target.name, buffer, 0, size);
++	if (ret || vol->updating || vol->upd_marker || vol->corrupted ||
++	    vol->used_bytes != size || volume_digest(vol, actual) ||
++	    memcmp(expected, actual, sizeof(expected))) {
++		fastboot_fail("Image update/readback failed; slot stays unbootable", response);
++		return;
++	}
++	fastboot_okay("Image verified; slot not activated", response);
++}
++
+ static int do_h432b_storage(struct cmd_tbl *cmdtp, int flag, int argc,
+ 			    char *const argv[])
+ {
+@@ -89,7 +197,7 @@ static int do_h432b_storage(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	       ret, 'A' + state.order[0], 'A' + state.order[1],
+ 	       state.left[0], state.left[1]);
+ 	env_set("fastboot.h432b-nand", "512MiB BCH8/512 OOB12");
+-	env_set("fastboot.h432b-ubi", "attached-read-only");
++	env_set("fastboot.h432b-ubi", "attached-bounded-writes");
+ 	ret = verify_kernel(state.order[0]);
+ 	if (ret) {
+ 		printf("H432B: kernel verification failed (%d)\n", ret);
+diff --git a/configs/h432b_defconfig b/configs/h432b_defconfig
+index 72727875..9e02c15c 100644
+--- a/configs/h432b_defconfig
++++ b/configs/h432b_defconfig
+@@ -39,8 +39,9 @@ CONFIG_USB_GADGET_VENDOR_NUM=0x1d50
+ CONFIG_USB_GADGET_PRODUCT_NUM=0x6152
+ CONFIG_USB_FUNCTION_FASTBOOT=y
+ CONFIG_FASTBOOT_BUF_ADDR=0x48000000
+-CONFIG_FASTBOOT_BUF_SIZE=0x02000000
+-# CONFIG_FASTBOOT_FLASH is not set
++CONFIG_FASTBOOT_BUF_SIZE=0x07000000
++CONFIG_FASTBOOT_FLASH=y
++CONFIG_FASTBOOT_FLASH_BOARD=y
+ # CONFIG_EFI_LOADER is not set
+ # CONFIG_TOOLS_MKEFICAPSULE is not set
+ CONFIG_CONSOLE_RECORD=y
+diff --git a/drivers/fastboot/Kconfig b/drivers/fastboot/Kconfig
+index 1887f78b..c59a29d6 100644
+--- a/drivers/fastboot/Kconfig
++++ b/drivers/fastboot/Kconfig
+@@ -92,7 +92,7 @@ config FASTBOOT_FLASH
+ 	bool "Enable FASTBOOT FLASH command"
+ 	default y if ARCH_SUNXI && ( MMC || MTD_RAW_NAND )
+ 	default y if ARCH_ROCKCHIP && MMC
+-	depends on MMC || (MTD_RAW_NAND && CMD_MTDPARTS) || DM_SPI_FLASH || BLK
++	depends on MMC || (MTD_RAW_NAND && CMD_MTDPARTS) || DM_SPI_FLASH || BLK || TARGET_H432B
+ 	select IMAGE_SPARSE
+ 	help
+ 	  The fastboot protocol includes a "flash" command for writing
+@@ -112,6 +112,13 @@ choice
+ 	prompt "Flash provider for FASTBOOT"
+ 	depends on FASTBOOT_FLASH
+ 
++config FASTBOOT_FLASH_BOARD
++	bool "FASTBOOT board-specific volume backend"
++	depends on TARGET_H432B
++	help
++	  Use the H432B UBI volume update backend instead of raw partition
++	  writes. Factory regions and active-slot images are not flash targets.
++
+ config FASTBOOT_FLASH_MMC
+ 	bool "FASTBOOT on MMC"
+ 	depends on MMC
+diff --git a/drivers/fastboot/fb_command.c b/drivers/fastboot/fb_command.c
+index 50710bc0..b838ea5c 100644
+--- a/drivers/fastboot/fb_command.c
++++ b/drivers/fastboot/fb_command.c
+@@ -344,6 +344,9 @@ void fastboot_data_complete(char *response)
+  */
+ static void __maybe_unused flash(char *cmd_parameter, char *response)
+ {
++	if (IS_ENABLED(CONFIG_FASTBOOT_FLASH_BOARD))
++		fastboot_board_flash(cmd_parameter, fastboot_buf_addr,
++				     image_size, response);
+ 	if (IS_ENABLED(CONFIG_FASTBOOT_FLASH_BLOCK))
+ 		fastboot_block_flash_write(cmd_parameter, fastboot_buf_addr,
+ 					   image_size, response);
+@@ -372,6 +375,8 @@ static void __maybe_unused flash(char *cmd_parameter, char *response)
+  */
+ static void __maybe_unused erase(char *cmd_parameter, char *response)
+ {
++	if (IS_ENABLED(CONFIG_FASTBOOT_FLASH_BOARD))
++		fastboot_fail("Volume erase is not an update operation", response);
+ 	if (IS_ENABLED(CONFIG_FASTBOOT_FLASH_BLOCK))
+ 		fastboot_block_erase(cmd_parameter, response);
+ 
+diff --git a/include/fastboot.h b/include/fastboot.h
+index 4dc1f9db..10d67395 100644
+--- a/include/fastboot.h
++++ b/include/fastboot.h
+@@ -120,6 +120,8 @@ int fastboot_set_reboot_flag(enum fastboot_reboot_reason reason);
+  * executing.
+  */
+ void fastboot_set_progress_callback(void (*progress)(const char *msg));
++void fastboot_board_flash(const char *name, const void *buffer, u32 size,
++			  char *response);
+ 
+ /*
+  * fastboot_init() - initialise new fastboot protocol session
+-- 
+2.47.3
+

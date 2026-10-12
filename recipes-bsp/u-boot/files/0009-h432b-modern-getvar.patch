@@ -1,0 +1,169 @@
+From 2cedb5ad9a41cfcec27b168eaaf60cf773496414 Mon Sep 17 00:00:00 2001
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Date: Mon, 12 Oct 2026 20:36:11 +1300
+Subject: [PATCH] fastboot: enumerate board variables and reject unknown
+ queries
+
+Upstream-Status: Pending
+---
+ board/fractalmicro/h432b/storage.c | 20 +++++++++
+ drivers/fastboot/fb_getvar.c       | 66 ++++++++++++++++++------------
+ include/fastboot.h                 |  3 ++
+ 3 files changed, 63 insertions(+), 26 deletions(-)
+
+diff --git a/board/fractalmicro/h432b/storage.c b/board/fractalmicro/h432b/storage.c
+index 78d9ee88..df251651 100644
+--- a/board/fractalmicro/h432b/storage.c
++++ b/board/fractalmicro/h432b/storage.c
+@@ -329,5 +329,25 @@ void fastboot_get_current_slot(char *response)
+ 	fastboot_fail("No valid bootable slot state", response);
+ }
+ 
++const char *fastboot_board_getvar_name(unsigned int index)
++{
++	static const char *const names[] = {
++		"slot-count", "h432b-nand", "h432b-ubi",
++		"h432b-kernel-sha256-hi", "h432b-kernel-sha256-lo",
++		"has-slot:boot", "has-slot:kernel", "has-slot:system",
++		"has-slot:systembase",
++		"partition-size:boot_a", "partition-size:boot_b",
++		"partition-size:kernel_a", "partition-size:kernel_b",
++		"partition-size:system_a", "partition-size:system_b",
++		"partition-size:systembase_a", "partition-size:systembase_b",
++		"partition-size:boot_A", "partition-size:boot_B",
++		"partition-size:kernel_A", "partition-size:kernel_B",
++		"partition-size:system_A", "partition-size:system_B",
++		"partition-size:systembase_A", "partition-size:systembase_B",
++	};
++
++	return index < ARRAY_SIZE(names) ? names[index] : NULL;
++}
++
+ U_BOOT_CMD(h432bstorage, 1, 0, do_h432b_storage,
+ 	   "attach existing H432B UBI and inspect slot state", "");
+diff --git a/drivers/fastboot/fb_getvar.c b/drivers/fastboot/fb_getvar.c
+index cfdcec94..6b01f060 100644
+--- a/drivers/fastboot/fb_getvar.c
++++ b/drivers/fastboot/fb_getvar.c
+@@ -271,37 +271,44 @@ static void getvar_is_userspace(char *var_parameter, char *response)
+ }
+ 
+ static int current_all_dispatch;
+-void fastboot_getvar_all(char *response)
+-{
+-	/*
+-	 * Find a dispatch getvar that can be listed and send
+-	 * it as INFO until we reach the end.
+-	 */
+-	while (current_all_dispatch < ARRAY_SIZE(getvar_dispatch)) {
+-		if (!getvar_dispatch[current_all_dispatch].list) {
+-			current_all_dispatch++;
+-			continue;
+-		}
+-
+-		char envstr[FASTBOOT_RESPONSE_LEN] = { 0 };
++static unsigned int current_all_board;
+ 
+-		getvar_dispatch[current_all_dispatch].dispatch(NULL, envstr);
+-
+-		char *envstr_start = envstr;
++__weak const char *fastboot_board_getvar_name(unsigned int index)
++{
++	return NULL;
++}
+ 
+-		if (!strncmp("OKAY", envstr, 4) || !strncmp("FAIL", envstr, 4))
+-			envstr_start += 4;
++void fastboot_getvar_all(char *response)
++{
++	const char *name = NULL;
++	char key[FASTBOOT_RESPONSE_LEN];
++	char value[FASTBOOT_RESPONSE_LEN];
+ 
+-		fastboot_response("INFO", response, "%s: %s",
+-				  getvar_dispatch[current_all_dispatch].variable,
+-				  envstr_start);
++	while (current_all_dispatch < ARRAY_SIZE(getvar_dispatch)) {
++		unsigned int index = current_all_dispatch++;
+ 
+-		current_all_dispatch++;
++		if (getvar_dispatch[index].list) {
++			name = getvar_dispatch[index].variable;
++			break;
++		}
++	}
++	if (!name)
++		name = fastboot_board_getvar_name(current_all_board++);
++	if (name) {
++		if (strlcpy(key, name, sizeof(key)) >= sizeof(key)) {
++			fastboot_fail("Variable name too long", response);
++			return;
++		}
++		fastboot_getvar(key, value);
++		fastboot_response("INFO", response, "%s: %s%s", name,
++				  !strncmp(value, "FAIL", 4) ? "ERROR: " : "",
++				  value + 4);
+ 		return;
+ 	}
+ 
+ 	fastboot_response("OKAY", response, NULL);
+ 	current_all_dispatch = 0;
++	current_all_board = 0;
+ }
+ 
+ /**
+@@ -323,6 +330,7 @@ void fastboot_getvar(char *cmd_parameter, char *response)
+ 		fastboot_fail("missing var", response);
+ 	} else if (!strncmp("all", cmd_parameter, 3) && strlen(cmd_parameter) == 3) {
+ 		current_all_dispatch = 0;
++		current_all_board = 0;
+ 		fastboot_response(FASTBOOT_MULTIRESPONSE_START, response, NULL);
+ 	} else {
+ #define FASTBOOT_ENV_PREFIX	"fastboot."
+@@ -331,8 +339,11 @@ void fastboot_getvar(char *cmd_parameter, char *response)
+ 		char envstr[FASTBOOT_RESPONSE_LEN];
+ 		const char *s;
+ 
+-		snprintf(envstr, sizeof(envstr) - 1,
+-			 FASTBOOT_ENV_PREFIX "%s", cmd_parameter);
++		if (snprintf(envstr, sizeof(envstr), FASTBOOT_ENV_PREFIX "%s",
++			     cmd_parameter) >= sizeof(envstr)) {
++			fastboot_fail("unrecognised variable", response);
++			return;
++		}
+ 		s = env_get(envstr);
+ 		if (s) {
+ 			fastboot_response("OKAY", response, "%s", s);
+@@ -343,12 +354,15 @@ void fastboot_getvar(char *cmd_parameter, char *response)
+ 		for (i = 0; i < ARRAY_SIZE(getvar_dispatch); ++i) {
+ 			if (!strcmp(getvar_dispatch[i].variable,
+ 				    cmd_parameter)) {
++				if (getvar_dispatch[i].list && var_parameter) {
++					fastboot_fail("unrecognised variable", response);
++					return;
++				}
+ 				getvar_dispatch[i].dispatch(var_parameter,
+ 							    response);
+ 				return;
+ 			}
+ 		}
+-		pr_warn("WARNING: unknown variable: %s\n", cmd_parameter);
+-		fastboot_fail("Variable not implemented", response);
++		fastboot_fail("unrecognised variable", response);
+ 	}
+ }
+diff --git a/include/fastboot.h b/include/fastboot.h
+index 63e39ac0..dadc3e96 100644
+--- a/include/fastboot.h
++++ b/include/fastboot.h
+@@ -203,4 +203,7 @@ void fastboot_data_complete(char *response);
+ void fastboot_multiresponse(int cmd, char *response);
+ 
+ void fastboot_acmd_complete(void);
++
++/* Additional fully qualified variable names for getvar all; NULL ends list. */
++const char *fastboot_board_getvar_name(unsigned int index);
+ #endif /* _FASTBOOT_H_ */
+-- 
+2.47.3
+

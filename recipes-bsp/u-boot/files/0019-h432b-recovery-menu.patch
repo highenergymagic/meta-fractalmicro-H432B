@@ -1,0 +1,280 @@
+From 0bfa909cb589a1b3f7c86c112075c1ea6874fbde Mon Sep 17 00:00:00 2001
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Date: Mon, 12 Oct 2026 23:16:23 +1300
+Subject: [PATCH] h432b: add uncontracted braille boot menu and tactile entry
+ cue
+
+Upstream-Status: Inappropriate [H432B board recovery policy]
+---
+ board/fractalmicro/h432b/Makefile        |   1 +
+ board/fractalmicro/h432b/recovery-menu.c | 135 +++++++++++++++++++++++
+ board/fractalmicro/h432b/recovery-menu.h |  81 ++++++++++++++
+ board/fractalmicro/h432b/storage.c       |   9 +-
+ 4 files changed, 225 insertions(+), 1 deletion(-)
+ create mode 100644 board/fractalmicro/h432b/recovery-menu.c
+ create mode 100644 board/fractalmicro/h432b/recovery-menu.h
+
+diff --git a/board/fractalmicro/h432b/Makefile b/board/fractalmicro/h432b/Makefile
+index eb5265aa..2d5f203b 100644
+--- a/board/fractalmicro/h432b/Makefile
++++ b/board/fractalmicro/h432b/Makefile
+@@ -1 +1,2 @@
+ obj-y += board.o timer.o usb.o nand.o storage.o cache.o
++obj-y += recovery-menu.o
+diff --git a/board/fractalmicro/h432b/recovery-menu.c b/board/fractalmicro/h432b/recovery-menu.c
+new file mode 100644
+index 00000000..2e90a3c7
+--- /dev/null
++++ b/board/fractalmicro/h432b/recovery-menu.c
+@@ -0,0 +1,135 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++#include <command.h>
++#include <time.h>
++#include <asm/io.h>
++#include <linux/delay.h>
++#include "recovery-menu.h"
++#include "u2_braille.h"
++
++#define GPIO(off) ((void __iomem *)(0xe0200000UL + (off)))
++#define ROW GPIO(0x240)
++#define COL2 GPIO(0x280)
++#define COL3 GPIO(0x2a0)
++#define MEDIA GPIO(0xc40)
++#define MOTOR GPIO(0x100)
++#define BEEPER GPIO(0xa0)
++
++static void input_init(void)
++{
++	/* Preserve GPJ0[3], the braille rail, and all display shift pins. */
++	setbits_le32(ROW + 4, 7);
++	clrsetbits_le32(ROW, 0xfff, 0x111);
++	clrbits_le32(COL2, 0xffffffff);
++	clrbits_le32(COL3, 0x0fffffff);
++	clrsetbits_le32(COL2 + 8, 0xffff, 0xaaaa);
++	clrsetbits_le32(COL3 + 8, 0x3fff, 0x2aaa);
++	clrbits_le32(MEDIA, 0xfU << 16); /* GPH2[4], fourth media key: Play. */
++	clrsetbits_le32(MEDIA + 8, 3U << 8, 2U << 8);
++}
++
++static int play_pressed(void)
++{
++	return !(readl(MEDIA + 4) & BIT(4));
++}
++
++static unsigned int keys(void)
++{
++	u32 columns;
++	unsigned int key = 0;
++
++	clrbits_le32(ROW + 4, BIT(2));
++	udelay(80);
++	columns = (~readl(COL2 + 4) & 0xff) |
++		((~readl(COL3 + 4) & 0x7f) << 8);
++	setbits_le32(ROW + 4, BIT(2));
++	/* Reject chords rather than choosing one member of a held combination. */
++	if (columns == BIT(3))
++		key = MENU_PREVIOUS;
++	else if (columns == BIT(5))
++		key = MENU_NEXT;
++	else if (columns == BIT(8))
++		key = MENU_SELECT;
++	else if (columns)
++		key = 0xff;
++	return key;
++}
++
++static int cue(void)
++{
++	unsigned int i;
++	int pressed = 0;
++
++	/* GPIO tone avoids changing PWM prescalers shared with the clocksource. */
++	clrbits_le32((void *)0xe2500008, BIT(0));
++	clrbits_le32(BEEPER + 4, BIT(0));
++	clrsetbits_le32(BEEPER, 15, 1);
++	clrbits_le32(BEEPER + 8, 3);
++	clrbits_le32(MOTOR + 4, BIT(4));
++	clrsetbits_le32(MOTOR, 15U << 16, 1U << 16);
++	clrbits_le32(MOTOR + 8, 3U << 8);
++	setbits_le32(MOTOR + 4, BIT(4));
++	for (i = 0; i < 300; i++) {
++		setbits_le32(BEEPER + 4, BIT(0));
++		udelay(500);
++		clrbits_le32(BEEPER + 4, BIT(0));
++		udelay(500);
++		pressed |= play_pressed();
++	}
++	clrbits_le32(MOTOR + 4, BIT(4));
++	clrbits_le32(BEEPER + 4, BIT(0));
++	return pressed;
++}
++
++/* Return nonzero to enter fastboot; zero continues the selected Linux boot. */
++int h432b_recovery_menu(void)
++{
++	struct h432b_menu menu = { .intro = 1 };
++	enum h432b_menu_action action;
++	unsigned int previous = 0xff, stable = 0, sample, armed = 0;
++	ulong started;
++	int enter;
++
++	input_init();
++	enter = cue();
++	started = get_timer(0);
++	while (!enter && get_timer(started) < 2000) {
++		if (play_pressed()) {
++			mdelay(20);
++			enter = play_pressed();
++		}
++		mdelay(5);
++	}
++	if (!enter)
++		return 0;
++	if (u2_braille_brf(h432b_menu_label(&menu))) {
++		printf("H432B: recovery menu display unavailable\n");
++		return 1;
++	}
++	for (;;) {
++		sample = keys();
++		if (sample == previous)
++			stable++;
++		else
++			stable = 0;
++		previous = sample;
++		if (stable == 2) {
++			if (!sample && !play_pressed())
++				armed = 1;
++			else if (sample) {
++				if (armed && sample != 0xff) {
++					action = h432b_menu_step(&menu, sample);
++					if (action == MENU_FASTBOOT)
++						return 1;
++					if (action == MENU_REBOOT) {
++						run_command("reset", 0);
++						menu.unavailable = 1;
++					}
++					if (u2_braille_brf(h432b_menu_label(&menu)))
++						return 1;
++				}
++				armed = 0;
++			}
++		}
++		mdelay(10);
++	}
++}
+diff --git a/board/fractalmicro/h432b/recovery-menu.h b/board/fractalmicro/h432b/recovery-menu.h
+new file mode 100644
+index 00000000..76ea3afb
+--- /dev/null
++++ b/board/fractalmicro/h432b/recovery-menu.h
+@@ -0,0 +1,81 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef H432B_RECOVERY_MENU_H
++#define H432B_RECOVERY_MENU_H
++
++int h432b_recovery_menu(void);
++
++enum h432b_menu_key { MENU_NONE, MENU_PREVIOUS, MENU_NEXT, MENU_SELECT };
++enum h432b_menu_action { MENU_STAY, MENU_REBOOT, MENU_FASTBOOT };
++struct h432b_menu {
++	unsigned int intro;
++	unsigned int item;
++	unsigned int confirmation;
++	unsigned int confirm_yes;
++	unsigned int unavailable;
++};
++
++/* Literal uncontracted Braille ASCII; _/ is the UEB slash symbol. */
++static const char *const h432b_menu_labels[] = {
++	"reboot now", "reboot into boot loader", "reboot into recovery",
++	"wipe data _/ factory reset", "wipe cache",
++};
++
++static inline const char *h432b_menu_label(const struct h432b_menu *menu)
++{
++	if (menu->intro)
++		return "boot loader menu";
++	if (menu->unavailable)
++		return "unavailable - enter to return";
++	if (menu->confirmation) {
++		if (!menu->confirm_yes)
++			return "cancel";
++		return menu->item == 3 ? "confirm factory reset" : "confirm wipe cache";
++	}
++	return h432b_menu_labels[menu->item];
++}
++
++static inline enum h432b_menu_action h432b_menu_step(struct h432b_menu *menu,
++					    enum h432b_menu_key key)
++{
++	if (key == MENU_NONE)
++		return MENU_STAY;
++	if (menu->intro) {
++		menu->intro = 0;
++		menu->item = key == MENU_PREVIOUS ? 4 : 0;
++		return MENU_STAY;
++	}
++	if (menu->unavailable) {
++		if (key == MENU_SELECT)
++			menu->unavailable = 0;
++		return MENU_STAY;
++	}
++	if (menu->confirmation) {
++		if (key == MENU_PREVIOUS || key == MENU_NEXT)
++			menu->confirm_yes = !menu->confirm_yes;
++		else if (key == MENU_SELECT) {
++			menu->confirmation = 0;
++			/* Recovery and filesystem operations are not integrated yet. */
++			menu->unavailable = menu->confirm_yes;
++			menu->confirm_yes = 0;
++		}
++		return MENU_STAY;
++	}
++	if (key == MENU_PREVIOUS)
++		menu->item = (menu->item + 4) % 5;
++	else if (key == MENU_NEXT)
++		menu->item = (menu->item + 1) % 5;
++	else if (key == MENU_SELECT) {
++		if (menu->item == 0)
++			return MENU_REBOOT;
++		if (menu->item == 1)
++			return MENU_FASTBOOT;
++		if (menu->item == 2)
++			menu->unavailable = 1;
++		else {
++			menu->confirmation = 1;
++			menu->confirm_yes = 0;
++		}
++	}
++	return MENU_STAY;
++}
++#endif
+diff --git a/board/fractalmicro/h432b/storage.c b/board/fractalmicro/h432b/storage.c
+index 77e70616..499d28d1 100644
+--- a/board/fractalmicro/h432b/storage.c
++++ b/board/fractalmicro/h432b/storage.c
+@@ -21,6 +21,7 @@
+ #include <asm/io.h>
+ #include <time.h>
+ #include "cache.h"
++#include "recovery-menu.h"
+ 
+ static struct h432b_bootstate state;
+ static bool state_valid;
+@@ -466,7 +467,13 @@ static int h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+ static int do_h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+ 			char *const argv[])
+ {
+-	int ret = h432b_cache_enter();
++	int ret;
++
++	if (h432b_recovery_menu()) {
++		h432b_cache_leave();
++		return CMD_RET_FAILURE;
++	}
++	ret = h432b_cache_enter();
+ 
+ 	if (!ret)
+ 		ret = h432b_boot(cmdtp, flag, argc, argv);
+-- 
+2.47.3

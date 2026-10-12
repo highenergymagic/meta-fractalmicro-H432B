@@ -1,0 +1,153 @@
+From 4280bdf29c1129d13189f696635f489979a2b2ae Mon Sep 17 00:00:00 2001
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Date: Mon, 12 Oct 2026 20:37:48 +1300
+Subject: [PATCH] h432b: boot selected NAND image after fastboot continue
+
+Upstream-Status: Inappropriate [board-specific handoff]
+---
+ board/fractalmicro/h432b/storage.c | 91 ++++++++++++++++++++++++++++++
+ configs/h432b_defconfig            |  4 +-
+ 2 files changed, 94 insertions(+), 1 deletion(-)
+
+diff --git a/board/fractalmicro/h432b/storage.c b/board/fractalmicro/h432b/storage.c
+index df251651..d8840a0e 100644
+--- a/board/fractalmicro/h432b/storage.c
++++ b/board/fractalmicro/h432b/storage.c
+@@ -1,5 +1,6 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ #include <command.h>
++#include <cli.h>
+ #include <env.h>
+ #include <fastboot.h>
+ #include <linux/libfdt.h>
+@@ -13,9 +14,14 @@
+ #include "fastboot-slots.h"
+ #include "fastboot-targets.h"
+ #include "slot-pair.h"
++#include "identity.h"
++#include "usb-identity.h"
+ 
+ static struct h432b_bootstate state;
+ static bool state_valid;
++static u8 factory_mac[6];
++static char board_id[H432B_USB_ID_LENGTH + 1];
++static bool identity_valid;
+ 
+ int fastboot_board_part_info(const char *name, size_t *size, char *response)
+ {
+@@ -284,6 +290,17 @@ static int do_h432b_storage(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	int ret;
+ 
+ 	state_valid = false;
++	identity_valid = !h432b_factory_mac((const void *)0x40000800,
++					 H432B_ARGS_BYTES, factory_mac);
++	if (identity_valid) {
++		snprintf(board_id, sizeof(board_id),
++			 H432B_USB_ID_PREFIX "%02X%02X%02X%02X%02X%02X",
++			 factory_mac[0], factory_mac[1], factory_mac[2],
++			 factory_mac[3], factory_mac[4], factory_mac[5]);
++		env_set("serial#", board_id);
++	}
++	env_set("board", "h432b");
++	env_set("platform", "s5pv210");
+ 	nand_init();
+ 	if (!get_nand_dev_by_index(0))
+ 		return CMD_RET_FAILURE;
+@@ -349,5 +366,79 @@ const char *fastboot_board_getvar_name(unsigned int index)
+ 	return index < ARRAY_SIZE(names) ? names[index] : NULL;
+ }
+ 
++static int do_h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
++			 char *const argv[])
++{
++	struct h432b_bootstore store = {
++		.read = read_state, .replace = replace_state,
++	};
++	u8 scratch[2 * H432B_ENV_BYTES];
++	struct u2_fb_image layout;
++	struct ubi_volume *vol;
++	u8 *buffer = (void *)U2_FB_ADDRESS;
++	void *fdt = (void *)0x44000000;
++	char args[H432B_KERNEL_COMMAND_LINE_SIZE];
++	char handoff[H432B_KERNEL_COMMAND_LINE_SIZE];
++	char command[96];
++	const char *original;
++	int slot, chosen, ethernet, length, ret;
++
++	if (!state_valid)
++		return CMD_RET_FAILURE;
++	fastboot_invalidate_image();
++	slot = h432b_bootstate_attempt(&store, scratch);
++	if (slot < 0 || h432b_bootstate_load(&store, scratch, &state) < 0)
++		return CMD_RET_FAILURE;
++	ret = verify_kernel(slot);
++	if (ret)
++		return CMD_RET_FAILURE;
++	vol = ubi_find_volume(slot ? "kernel_b" : "kernel_a");
++	if (u2_fb_layout(buffer, vol->used_bytes, &layout) ||
++	    layout.kernel_size > 0x01000000 || layout.dtb_size > 0x00100000 ||
++	    fdt_check_full(buffer + layout.dtb, layout.dtb_size))
++		return CMD_RET_FAILURE;
++	/* Keep the kernel below relocated U-Boot and its heap at 0x43xxxxxx. */
++	memcpy((void *)0x42000000, buffer + layout.kernel, layout.kernel_size);
++	memcpy((void *)0x44400000, buffer + layout.ramdisk, layout.ramdisk_size);
++	ret = fdt_open_into(buffer + layout.dtb, fdt, layout.dtb_size + 4096);
++	if (ret)
++		return CMD_RET_FAILURE;
++	chosen = fdt_path_offset(fdt, "/chosen");
++	original = fdt_getprop(fdt, chosen, "bootargs", &length);
++	if (!original || length < 1 || length > sizeof(args) ||
++	    original[length - 1] || memchr(original, 0, length - 1) ||
++	    strstr(original, "rauc.slot=") || strstr(original, "openh432.attempt=") ||
++	    strstr(original, " --") ||
++	    h432b_usb_bootargs(original, length, identity_valid ? board_id : NULL,
++			      args, sizeof(args)))
++		return CMD_RET_FAILURE;
++	ret = snprintf(handoff, sizeof(handoff),
++		       "%s rauc.slot=%c openh432.attempt=%u", args,
++		       'A' + slot, state.serial);
++	if (ret >= sizeof(handoff) ||
++	    fdt_setprop_string(fdt, chosen, "bootargs", handoff))
++		return CMD_RET_FAILURE;
++	if (identity_valid) {
++		ethernet = fdt_node_offset_by_compatible(fdt, -1, "smsc,lan9115");
++		if (ethernet < 0 ||
++		    fdt_setprop(fdt, ethernet, "mac-address", factory_mac, 6) ||
++		    fdt_setprop(fdt, ethernet, "local-mac-address", factory_mac, 6) ||
++		    fdt_setprop_string(fdt, 0, "fractalmicro,board-id", board_id) ||
++		    fdt_setprop_string(fdt, 0, "fractalmicro,board-id-source",
++				       "factory-ethernet-mac"))
++			return CMD_RET_FAILURE;
++	}
++	if (env_set("bootargs", handoff) || env_set("fdt_high", "ffffffff") ||
++	    env_set("initrd_high", "ffffffff"))
++		return CMD_RET_FAILURE;
++	snprintf(command, sizeof(command), "bootz 42000000 44400000:%x 44000000",
++		 layout.ramdisk_size);
++	printf("H432B: booting NAND slot %c, attempt %u\n", 'A' + slot, state.serial);
++	return run_command(command, 0) ? CMD_RET_FAILURE : CMD_RET_SUCCESS;
++}
++
++U_BOOT_CMD(h432bboot, 1, 0, do_h432b_boot,
++	   "boot the selected NAND kernel with persistent attempt accounting", "");
++
+ U_BOOT_CMD(h432bstorage, 1, 0, do_h432b_storage,
+ 	   "attach existing H432B UBI and inspect slot state", "");
+diff --git a/configs/h432b_defconfig b/configs/h432b_defconfig
+index 9e02c15c..26643a82 100644
+--- a/configs/h432b_defconfig
++++ b/configs/h432b_defconfig
+@@ -18,7 +18,9 @@ CONFIG_ENV_IS_NOWHERE=y
+ CONFIG_AUTOBOOT=y
+ CONFIG_BOOTDELAY=0
+ CONFIG_USE_BOOTCOMMAND=y
+-CONFIG_BOOTCOMMAND="h432bstorage; fastboot usb 0"
++CONFIG_BOOTCOMMAND="h432bstorage; fastboot usb 0; h432bboot; fastboot usb 0"
++CONFIG_CMD_BOOTZ=y
++CONFIG_SUPPORT_RAW_INITRD=y
+ # CONFIG_DISPLAY_CPUINFO is not set
+ # CONFIG_DISPLAY_BOARDINFO is not set
+ # CONFIG_REQUIRE_SERIAL_CONSOLE is not set
+-- 
+2.47.3
+

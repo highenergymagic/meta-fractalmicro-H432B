@@ -1,0 +1,132 @@
+From 3a98f751c33b81b11353c96418c7182196990617 Mon Sep 17 00:00:00 2001
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Date: Mon, 12 Oct 2026 21:13:42 +1300
+Subject: [PATCH] h432b: avoid duplicate kernel read and report boot timings
+
+Upstream-Status: Inappropriate [board-specific boot policy and BCH geometry]
+---
+ board/fractalmicro/h432b/Kconfig   | 12 ++++++++++++
+ board/fractalmicro/h432b/storage.c | 29 ++++++++++++++++++++++-------
+ 2 files changed, 34 insertions(+), 7 deletions(-)
+
+diff --git a/board/fractalmicro/h432b/Kconfig b/board/fractalmicro/h432b/Kconfig
+index 0fd1ab41..45d4341f 100644
+--- a/board/fractalmicro/h432b/Kconfig
++++ b/board/fractalmicro/h432b/Kconfig
+@@ -9,4 +9,16 @@ config SYS_VENDOR
+ config SYS_CONFIG_NAME
+ 	default "h432b"
+ 
++config BCH_CONST_PARAMS
++	bool
++	default y if BCH
++
++config BCH_CONST_M
++	int
++	default 13
++
++config BCH_CONST_T
++	int
++	default 8
++
+ endif
+diff --git a/board/fractalmicro/h432b/storage.c b/board/fractalmicro/h432b/storage.c
+index da1dbe2a..97d2de0e 100644
+--- a/board/fractalmicro/h432b/storage.c
++++ b/board/fractalmicro/h432b/storage.c
+@@ -19,12 +19,14 @@
+ #include "bootmode.h"
+ #include "u2_braille.h"
+ #include <asm/io.h>
++#include <time.h>
+ 
+ static struct h432b_bootstate state;
+ static bool state_valid;
+ static u8 factory_mac[6];
+ static char board_id[H432B_USB_ID_LENGTH + 1];
+ static bool identity_valid;
++static ulong attach_ms, read_ms, hash_ms, storage_ms;
+ 
+ int fastboot_board_part_info(const char *name, size_t *size, char *response)
+ {
+@@ -56,6 +58,7 @@ static int verify_kernel(unsigned int slot)
+ 	size_t offset = 0, size, length;
+ 	int leb = 0, ret;
+ 	unsigned int i;
++	ulong started = get_timer(0), hash_started;
+ 
+ 	if (!vol || vol->vol_type != UBI_STATIC_VOLUME || vol->updating ||
+ 	    vol->upd_marker || vol->corrupted || vol->used_bytes < U2_FB_PAGE ||
+@@ -73,7 +76,10 @@ static int verify_kernel(unsigned int slot)
+ 	}
+ 	if (u2_fb_layout(buffer, size, &layout))
+ 		return -EINVAL;
++	read_ms = get_timer(started);
++	hash_started = get_timer(0);
+ 	sha256_csum_wd(buffer, size, digest, CHUNKSZ_SHA256);
++	hash_ms = get_timer(hash_started);
+ 	for (i = 0; i < sizeof(digest); i++)
+ 		sprintf(text + 2 * i, "%02x", digest[i]);
+ 	env_set("fastboot.h432b-kernel-sha256-lo", text + 32);
+@@ -291,6 +297,7 @@ static int do_h432b_storage(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	struct h432b_bootstore store = { .read = read_state };
+ 	u8 scratch[H432B_ENV_BYTES];
+ 	int ret;
++	ulong started = get_timer(0), attach_started;
+ 
+ 	state_valid = false;
+ 	(void)u2_braille_brf(U2_BRAILLE_BRAND_BRF);
+@@ -308,7 +315,9 @@ static int do_h432b_storage(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	nand_init();
+ 	if (!get_nand_dev_by_index(0))
+ 		return CMD_RET_FAILURE;
++	attach_started = get_timer(0);
+ 	ret = ubi_part("linux", NULL);
++	attach_ms = get_timer(attach_started);
+ 	if (ret) {
+ 		printf("H432B: UBI attach failed (%d)\n", ret);
+ 		return CMD_RET_FAILURE;
+@@ -325,11 +334,11 @@ static int do_h432b_storage(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	env_set("fastboot.h432b-nand", "512MiB BCH8/512 OOB12");
+ 	env_set("fastboot.slot-count", "2");
+ 	env_set("fastboot.h432b-ubi", "attached-bounded-writes");
+-	ret = verify_kernel(state.order[0]);
+-	if (ret) {
+-		printf("H432B: kernel verification failed (%d)\n", ret);
+-		return CMD_RET_FAILURE;
+-	}
++	/* Loading belongs to handoff/activation, not UBI setup. The download
++	 * buffer may be replaced by fastboot before either operation. */
++	env_set("fastboot.h432b-kernel-sha256-hi", "not-read");
++	env_set("fastboot.h432b-kernel-sha256-lo", "not-read");
++	storage_ms = get_timer(started);
+ 	return CMD_RET_SUCCESS;
+ }
+ 
+@@ -386,6 +395,7 @@ static int do_h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	char command[96];
+ 	const char *original;
+ 	int slot, chosen, ethernet, length, ret;
++	ulong started = get_timer(0);
+ 
+ 	if (!state_valid)
+ 		return CMD_RET_FAILURE;
+@@ -417,8 +427,13 @@ static int do_h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+ 			      args, sizeof(args)))
+ 		return CMD_RET_FAILURE;
+ 	ret = snprintf(handoff, sizeof(handoff),
+-		       "%s rauc.slot=%c openh432.attempt=%u", args,
+-		       'A' + slot, state.serial);
++		       "%s rauc.slot=%c openh432.attempt=%u"
++		       " openh432.loader_attach_ms=%lu"
++		       " openh432.loader_kernel_ms=%lu"
++		       " openh432.loader_hash_ms=%lu"
++		       " openh432.loader_total_ms=%lu", args,
++		       'A' + slot, state.serial, attach_ms, read_ms, hash_ms,
++		       storage_ms + get_timer(started));
+ 	if (ret >= sizeof(handoff) ||
+ 	    fdt_setprop_string(fdt, chosen, "bootargs", handoff))
+ 		return CMD_RET_FAILURE;
+-- 
+2.47.3
+

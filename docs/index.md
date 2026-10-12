@@ -8,6 +8,7 @@ is not a promise of availability in the normal runtime.
 ## Boot and storage
 
 - [Boot contract](boot-contract.md)
+- [Modern U-Boot and braille boot menu](modern-uboot.md)
 - [Build targets](targets.md)
 - [NAND](nand.md)
 - [Internal SD](internal-sd.md)
@@ -34,6 +35,7 @@ is not a promise of availability in the normal runtime.
 - [Status indicators](indicators.md)
 - [Battery telemetry](battery.md)
 - [Power management](power-control.md)
+- [Hardware watchdog](watchdog.md)
 
 ## Verification and sources
 

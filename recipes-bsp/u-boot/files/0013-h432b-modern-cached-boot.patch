@@ -1,0 +1,223 @@
+From 089f2bb90200574aef8415a721cff972a6515853 Mon Sep 17 00:00:00 2001
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Date: Mon, 12 Oct 2026 21:26:29 +1300
+Subject: [PATCH] h432b: cache CPU-only NAND boot with USB DMA stopped
+
+Upstream-Status: Inappropriate [board-specific EBOOT handoff]
+---
+ arch/arm/mach-s5pc1xx/cache.c      |  2 +-
+ board/fractalmicro/h432b/Makefile  |  3 +-
+ board/fractalmicro/h432b/cache.c   | 86 ++++++++++++++++++++++++++++++
+ board/fractalmicro/h432b/cache.h   |  8 +++
+ board/fractalmicro/h432b/storage.c | 25 +++++++--
+ configs/h432b_defconfig            |  2 +-
+ 6 files changed, 119 insertions(+), 7 deletions(-)
+ create mode 100644 board/fractalmicro/h432b/cache.c
+ create mode 100644 board/fractalmicro/h432b/cache.h
+
+diff --git a/arch/arm/mach-s5pc1xx/cache.c b/arch/arm/mach-s5pc1xx/cache.c
+index f0aec7c0..9a7d438a 100644
+--- a/arch/arm/mach-s5pc1xx/cache.c
++++ b/arch/arm/mach-s5pc1xx/cache.c
+@@ -11,7 +11,7 @@
+ #include <asm/cache.h>
+ 
+ #if !CONFIG_IS_ENABLED(SYS_DCACHE_OFF)
+-void enable_caches(void)
++void __weak enable_caches(void)
+ {
+ 	dcache_enable();
+ }
+diff --git a/board/fractalmicro/h432b/Makefile b/board/fractalmicro/h432b/Makefile
+index f86deedc..0eb07373 100644
+--- a/board/fractalmicro/h432b/Makefile
++++ b/board/fractalmicro/h432b/Makefile
+@@ -1,2 +1 @@
+-# SPDX-License-Identifier: GPL-2.0-or-later
+-obj-y += board.o timer.o usb.o nand.o storage.o
++obj-y += board.o timer.o usb.o nand.o storage.o cache.o
+diff --git a/board/fractalmicro/h432b/cache.c b/board/fractalmicro/h432b/cache.c
+new file mode 100644
+index 00000000..59b6d9a5
+--- /dev/null
++++ b/board/fractalmicro/h432b/cache.c
+@@ -0,0 +1,86 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/* CPU-only NAND boot acceleration. Fastboot DMA always uses uncached RAM. */
++#include <cpu_func.h>
++#include <g_dnl.h>
++#include <usb.h>
++#include <wait_bit.h>
++#include <asm/cache.h>
++#include <asm/global_data.h>
++#include <asm/io.h>
++#include <asm/system.h>
++#include <linux/errno.h>
++#include "cache.h"
++
++DECLARE_GLOBAL_DATA_PTR;
++
++#define MMU_ATTRIBUTES (BIT(28) | BIT(29) | BIT(23))
++#define OTG_AHB_CONFIG ((void __iomem *)0xec000008)
++#define OTG_RESET ((void __iomem *)0xec000010)
++
++static bool owned;
++static unsigned long saved_control, saved_ttbcr;
++
++void enable_caches(void)
++{
++	/* Relocation must not enable caching while inherited USB DMA can run. */
++	icache_enable();
++}
++
++void h432b_cache_leave(void)
++{
++	unsigned long control;
++
++	if (!owned)
++		return;
++	dcache_disable();
++	invalidate_dcache_all();
++	dsb();
++	isb();
++	asm volatile("mcr p15, 0, %0, c2, c0, 2"
++		     : : "r" (saved_ttbcr) : "memory");
++	control = get_cr();
++	set_cr((control & ~MMU_ATTRIBUTES) | (saved_control & MMU_ATTRIBUTES));
++	dsb();
++	isb();
++	owned = false;
++}
++
++int h432b_cache_enter(void)
++{
++	int ret;
++
++	if (owned)
++		return 0;
++	if ((get_cr() & (CR_M | CR_C)) ||
++	    gd->arch.tlb_addr != 0x44000000 - 0x10000 ||
++	    gd->dram[0].start != 0x40000000 ||
++	    gd->dram[0].size != 0x10000000)
++		return -EINVAL;
++	/* Reset inherited EBOOT USB state using the normal gadget lifecycle.
++	 * No host interaction is required. Unregister disconnects the device;
++	 * disable bus mastering before enabling CPU data caching.
++	 */
++	ret = board_usb_init(0, USB_INIT_DEVICE);
++	if (ret)
++		return ret;
++	ret = g_dnl_register("usb_dnl_fastboot");
++	if (!ret)
++		g_dnl_unregister();
++	board_usb_cleanup(0, USB_INIT_DEVICE);
++	if (ret)
++		return ret;
++	clrbits_le32(OTG_AHB_CONFIG, BIT(5) | BIT(0));
++	ret = wait_for_bit_le32(OTG_RESET, BIT(31), true, 100, false);
++	if (ret)
++		return ret;
++	saved_control = get_cr();
++	asm volatile("mrc p15, 0, %0, c2, c0, 2" : "=r" (saved_ttbcr));
++	set_cr((saved_control & ~MMU_ATTRIBUTES) | BIT(23));
++	dsb();
++	isb();
++	dcache_enable();
++	dsb();
++	isb();
++	owned = true;
++	return 0;
++}
+diff --git a/board/fractalmicro/h432b/cache.h b/board/fractalmicro/h432b/cache.h
+new file mode 100644
+index 00000000..c4c2b61d
+--- /dev/null
++++ b/board/fractalmicro/h432b/cache.h
+@@ -0,0 +1,8 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef H432B_CACHE_H
++#define H432B_CACHE_H
++
++int h432b_cache_enter(void);
++void h432b_cache_leave(void);
++
++#endif
+diff --git a/board/fractalmicro/h432b/storage.c b/board/fractalmicro/h432b/storage.c
+index 97d2de0e..390cefd3 100644
+--- a/board/fractalmicro/h432b/storage.c
++++ b/board/fractalmicro/h432b/storage.c
+@@ -20,6 +20,7 @@
+ #include "u2_braille.h"
+ #include <asm/io.h>
+ #include <time.h>
++#include "cache.h"
+ 
+ static struct h432b_bootstate state;
+ static bool state_valid;
+@@ -379,7 +380,7 @@ const char *fastboot_board_getvar_name(unsigned int index)
+ 	return index < ARRAY_SIZE(names) ? names[index] : NULL;
+ }
+ 
+-static int do_h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
++static int h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+ 			 char *const argv[])
+ {
+ 	struct h432b_bootstore store = {
+@@ -454,9 +455,21 @@ static int do_h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+ 		 layout.ramdisk_size);
+ 	printf("H432B: booting NAND slot %c, attempt %u\n", 'A' + slot, state.serial);
+ 	(void)u2_braille_brf(U2_BRAILLE_KERNEL_BRF);
++	h432b_cache_leave();
+ 	return run_command(command, 0) ? CMD_RET_FAILURE : CMD_RET_SUCCESS;
+ }
+ 
++static int do_h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
++			char *const argv[])
++{
++	int ret = h432b_cache_enter();
++
++	if (!ret)
++		ret = h432b_boot(cmdtp, flag, argc, argv);
++	h432b_cache_leave();
++	return ret ? CMD_RET_FAILURE : CMD_RET_SUCCESS;
++}
++
+ static unsigned int mode_read(void *context)
+ {
+ 	return readl(context);
+@@ -472,11 +485,17 @@ static int do_h432b_auto(struct cmd_tbl *cmdtp, int flag, int argc,
+ 			 char *const argv[])
+ {
+ 	int mode = h432b_take_bootmode(mode_read, mode_write, (void *)0xe010f01c);
+-	int ret = do_h432b_storage(cmdtp, flag, argc, argv);
++	int ret;
++
++	if (!mode && h432b_cache_enter())
++		return CMD_RET_FAILURE;
++	ret = do_h432b_storage(cmdtp, flag, argc, argv);
+ 
+ 	/* Consume the one-shot request even if storage is unavailable. */
+-	if (ret || mode)
++	if (ret || mode) {
++		h432b_cache_leave();
+ 		return CMD_RET_FAILURE;
++	}
+ 	return do_h432b_boot(cmdtp, flag, argc, argv);
+ }
+ 
+diff --git a/configs/h432b_defconfig b/configs/h432b_defconfig
+index 26643a82..c5444cc5 100644
+--- a/configs/h432b_defconfig
++++ b/configs/h432b_defconfig
+@@ -29,7 +29,7 @@ CONFIG_CMD_CACHE=y
+ # CONFIG_NET is not set
+ # CONFIG_MMC is not set
+ # CONFIG_SYS_L2CACHE_OFF is not set
+-CONFIG_SYS_DCACHE_OFF=y
++# CONFIG_SYS_DCACHE_OFF is not set
+ CONFIG_BOARD_EARLY_INIT_F=y
+ CONFIG_USB=y
+ CONFIG_USB_GADGET=y
+-- 
+2.47.3
+
