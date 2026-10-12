@@ -40,4 +40,9 @@ class ABPerformance(unittest.TestCase):
         source = (FILES / "nand/u2nand.c").read_text()
         self.assertIn("ubi_volume_read_bounded", source)
         self.assertIn("u2_fb_layout", source)
-        self.assertIn("crc32(0,", source)
+        # The printed whole-image CRC was not an integrity check. Static
+        # UBI data CRCs and the component CRC comparison remain mandatory.
+        self.assertIn("ubi_volume_read(name,buf,vol->used_bytes,1)",
+                      (FILES / "0004-nand-ubi-readonly.patch").read_text())
+        self.assertIn("crc32(0,(void *)u2_ram_address[i],slots[i].size)!=slots[i].expected_crc",
+                      (FILES / "0001-ram-loader-rev52.patch").read_text())

@@ -47,7 +47,7 @@ do_configure:append() {
     KCONFIG_CONFIG=${B}/.config ${S}/scripts/kconfig/merge_config.sh -m -O ${B} \
         ${B}/.config ${UNPACKDIR}/h432b-runtime.config
     oe_runmake -C ${S} O=${B} olddefconfig
-    for option in BPF_SYSCALL BPF_JIT CGROUP_BPF CRYPTO_AES_ARM; do
+    for option in BPF_SYSCALL BPF_JIT CGROUP_BPF CRYPTO_AES_ARM BLK_DEV_DM DM_VERITY CRYPTO_SHA256_ARM; do
         grep -qx "CONFIG_$option=y" ${B}/.config || bbfatal "Missing runtime isolation option: $option"
     done
     if [ "${H432B_WIFI_DRIVER_MODE}" = "m" ]; then

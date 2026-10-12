@@ -8,15 +8,22 @@ no matched stock-CE cold-boot measurement is available.
 
 The standard boot path uses:
 
-- A/B U-Boot with instruction caching, aligned word FIFO reads, corrected BCH
-  subpage reads and one reusable Linux UBI attachment.
+- A/B U-Boot with instruction caching, a CPU-only data-cached NAND boot interval,
+  aligned word FIFO reads, corrected BCH subpage reads and one reusable Linux
+  UBI attachment.
 - Software BCH8, specialized for M=13, T=8: 512-byte steps and 13 parity bytes.
 - A root-handoff initramfs with RAM-resident startup audio.
-- A gzip SquashFS systembase with full static-volume CRC verification.
-- Device-only udev coldplug with four workers and an early maintenance-tty event.
+- A gzip SquashFS systembase with read-time dm-verity verification.
+- Accessibility-first device coldplug, followed by a complete peripheral pass.
 
-Data caching remains disabled in U-Boot. On-flash parity, correction strength
-and image checks are unchanged. Hardware ECC is not a drop-in replacement
+The A/B loader stops USB DMA before enabling data caching for NAND boot.
+Only advertised DRAM is cacheable; MMIO remains uncached. It cleans and disables
+the cache and restores the translation contract before Linux handoff or return
+to USB maintenance. The bootstrap and USB maintenance paths remain uncached.
+On-flash parity, correction strength and kernel-volume CRC/component checks
+are unchanged. Systembase uses dm-verity in place of the upfront UBI CRC scan.
+A redundant whole-image CRC calculation used
+only for a diagnostic print is omitted. Hardware ECC is not a drop-in replacement
 without parity-compatibility qualification.
 
 The distribution layer owns
@@ -50,8 +57,24 @@ A complete boot below 30 seconds has not been demonstrated.
 
 ### Persistent loader
 
-Instrumented ordinary NAND boots of the same 9,054,208-byte kernel bundle
-measured the following intervals. Both carriers used the same timing hooks.
+Normal NAND boots of the same 9,535,488-byte kernel bundle measured:
+
+| Measurement | Uncached RAM | Cached NAND interval |
+| --- | ---: | ---: |
+| UBI attachment | 12.708 s | 2.982 s |
+| Kernel load and checked handoff | 17.432 s | 3.000 s |
+| Total measured loader interval | 30.394 s | 6.067 s |
+
+Recovery-assisted launch of the cached loader measured 6.070 seconds. The normal
+boot reached local login, braille and speech, and passed the slot-health gate.
+Loader NAND readback matched the carrier; factory StepLoader/EBOOT main and
+spare bytes remained unchanged. These measurements exclude factory boot,
+bootstrap initialization, cache setup and final Linux entry. They are not
+whole-device startup times or a battery-cold power-cycle qualification.
+
+The following earlier BCH-specialization comparison used uncached RAM and a
+9,054,208-byte kernel bundle. Both carriers used the same detailed timing hooks;
+its sub-operation costs do not describe the current cached loader.
 
 | Measurement | Generic BCH | Fixed M=13, T=8 |
 | --- | ---: | ---: |
@@ -65,7 +88,7 @@ measured the following intervals. Both carriers used the same timing hooks.
 Specialization reduced the measured interval by 4.606 seconds (13.3%).
 Recovery-assisted launch measured 30.134 seconds. These intervals exclude
 factory boot, bootstrap initialization and final Linux entry.
-Software BCH calculation remains the dominant measured loader cost.
+Software BCH calculation dominated that uncached profile.
 
 The A/B build compares the fetched upstream generic and specialized BCH
 implementations across 8,448 deterministic corruption cases, including parity
@@ -74,8 +97,8 @@ coverage, not physical power-loss or NAND-aging qualification.
 
 ### Linux startup
 
-The standard systembase trades image size for lower decompression cost.
-Two consecutive normal NAND boots with matched contents measured:
+The following earlier comparison used full static-volume CRC verification and
+synchronous startup audio. Two consecutive boots with matched contents measured:
 
 | Measurement | XZ systembase | Gzip systembase |
 | --- | ---: | ---: |
@@ -94,11 +117,13 @@ to 36.4–36.5 seconds and shell activation to 40.3–40.4 seconds, from approxi
 50–52 and 53–54 seconds respectively. BRLTTY remained around 43 seconds; this
 did not demonstrate an overall multi-user speedup.
 
-Root handoff waits for the startup cue, which completes around 14 seconds
-after Linux entry. Removing the full-root scan alone therefore cannot reclaim
-its entire duration: at the measured 19.4-second block-creation milestone,
-audio would become the limiting wait after roughly five seconds of improvement.
-On-demand verified-root support is not implemented.
+The current composition replaces that upfront scan with dm-verity and lets the
+RAM-resident startup cue continue through root handoff. Audio consumers retain
+a completion fence; systemd startup does not wait for playback. The measured
+completed-cue fast path reached speech-service startup at 35.09 seconds and
+BRLTTY readiness at 39.42 seconds after Linux entry. These are service events,
+not a guaranteed time to first audible speech. See the validation record for
+the exact paired images and operator playback checks.
 
 ### NAND transfer
 

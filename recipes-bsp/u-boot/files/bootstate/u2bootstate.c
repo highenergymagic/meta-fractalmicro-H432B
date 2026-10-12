@@ -19,6 +19,11 @@ int u2_bootstate_handoff(void *fdt)
     const char *args;
     char commandline[2048];
     int node, len, count;
+#ifdef CONFIG_H432B_REUSE_UBI
+    /* Finish CPU-only cached work before Linux or any returning USB path. */
+    extern void h432b_nand_cache_leave(void);
+    h432b_nand_cache_leave();
+#endif
     if (boot_slot < 0) return 0;
     node = fdt_path_offset(fdt, "/chosen");
     if (node < 0) return -1;

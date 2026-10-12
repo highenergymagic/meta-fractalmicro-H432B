@@ -64,6 +64,11 @@ physical USB root shell; it is not a secured production release.
 ubiblock is a block-device view of a static UBI volume, not a separate NAND
 partition. SquashFS base images belong on static volumes; mutable state
 belongs in UBIFS/dynamic volumes or the separately planned SD layout.
+The standard OS places dm-verity between ubiblock and SquashFS. Its static
+systembase volumes use the skip-CRC-at-open flag; the kernel/initramfs carries
+the expected root hash instead. ECC and full post-write verification remain
+enabled. The 1651-LEB capacity includes both filesystem and hash tree. See the
+[integrity and migration reference](https://github.com/highenergymagic/meta-fractalmicro-openh432/blob/main/docs/verity.md).
 
 ## Validation scope
 

@@ -236,7 +236,15 @@ static int do_u2nandboot(cmd_tbl_t *cmdtp,int flag,int argc,char *const argv[])
  else return CMD_RET_USAGE;
  /* Initialize our own gadget so the proven Linux handoff can quiesce it,
   * including a second-stage launch inheriting NAND51 USB DMA state. */
+#ifdef CONFIG_H432B_REUSE_UBI
+ {
+  extern int h432b_nand_cache_active(void);
+  if (!h432b_nand_cache_active() && !u2probe_is_active() && u2probe_start())
+   return CMD_RET_FAILURE;
+ }
+#else
  if(!u2probe_is_active() && u2probe_start()) return CMD_RET_FAILURE;
+#endif
  /* ENV_IS_NOWHERE: defaults are compiled, but not loaded by mtdparts_init. */
 #ifdef CONFIG_U2_NAND_PROFILE
  if(mode!=3) {
@@ -268,8 +276,7 @@ static int do_u2nandboot(cmd_tbl_t *cmdtp,int flag,int argc,char *const argv[])
  printf("PROFILE icache=%d dcache=%d; host elapsed time required\n",
         icache_status(),dcache_status());
 #endif
- printf("NAND kernel %s: %u bytes, CRC32 %08x\n",volume,(unsigned)actual,
-        crc32(0,(void *)U2_FB_ADDRESS,actual));
+ printf("NAND kernel %s: %u verified bytes\n",volume,(unsigned)actual);
 #ifdef CONFIG_U2_NAND_PROFILE
  if(mode) return 0;
 #endif
