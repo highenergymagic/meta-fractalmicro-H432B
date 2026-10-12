@@ -101,5 +101,5 @@ used the corrected hardware timer. Detailed scope is recorded in the
 device's actual raw+OOB backup; a vendor EBOOT download is not a substitute.
 
 See the [installation guide](https://github.com/highenergymagic/openh432-tools/blob/main/docs/installation.md)
-for provisioning prerequisites and the [update command reference](https://github.com/highenergymagic/openh432-tools/blob/main/docs/commands.md#guarded-slot-b-updates)
-for bounded existing-volume updates.
+for provisioning prerequisites and the [update command reference](https://github.com/highenergymagic/openh432-tools/blob/main/docs/commands.md#inactive-slot-verity-installation)
+for paired inactive-slot replacement and integrity-format migration.
