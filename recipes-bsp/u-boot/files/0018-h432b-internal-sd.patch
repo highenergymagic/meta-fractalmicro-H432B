@@ -1,0 +1,227 @@
+From 077d8596775ce3aa65216cdc9dc3fd7d63c7c6ea Mon Sep 17 00:00:00 2001
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Date: Mon, 12 Oct 2026 22:58:14 +1300
+Subject: [PATCH] h432b: add internal SD SDHCI adapter and read qualification
+
+Upstream-Status: Inappropriate [H432B board port under hardware qualification]
+---
+ arch/arm/dts/s5pv210-h432b.dts    |  14 +++
+ board/fractalmicro/h432b/Makefile |   1 +
+ board/fractalmicro/h432b/mmc.c    | 152 ++++++++++++++++++++++++++++++
+ configs/h432b_defconfig           |  10 +-
+ 4 files changed, 176 insertions(+), 1 deletion(-)
+ create mode 100644 board/fractalmicro/h432b/mmc.c
+
+diff --git a/arch/arm/dts/s5pv210-h432b.dts b/arch/arm/dts/s5pv210-h432b.dts
+index 3dff2149..e60f12ea 100644
+--- a/arch/arm/dts/s5pv210-h432b.dts
++++ b/arch/arm/dts/s5pv210-h432b.dts
+@@ -7,6 +7,20 @@
+ 	#address-cells = <1>;
+ 	#size-cells = <1>;
+ 
++	aliases {
++		mmc0 = &internal_sd;
++	};
++
++	internal_sd: mmc@eb100000 {
++		compatible = "hims,h432b-internal-sd";
++		reg = <0xeb100000 0x1000>;
++		bus-width = <4>;
++		max-frequency = <25000000>;
++		non-removable;
++		no-1-8-v;
++		no-sdio;
++	};
++
+ 	memory@40000000 {
+ 		device_type = "memory";
+ 		reg = <0x40000000 0x10000000>;
+diff --git a/board/fractalmicro/h432b/Makefile b/board/fractalmicro/h432b/Makefile
+index 0eb07373..eb5265aa 100644
+--- a/board/fractalmicro/h432b/Makefile
++++ b/board/fractalmicro/h432b/Makefile
+@@ -1 +1,2 @@
+ obj-y += board.o timer.o usb.o nand.o storage.o cache.o
++obj-$(CONFIG_MMC) += mmc.o
+diff --git a/board/fractalmicro/h432b/mmc.c b/board/fractalmicro/h432b/mmc.c
+new file mode 100644
+index 00000000..e5518ac9
+--- /dev/null
++++ b/board/fractalmicro/h432b/mmc.c
+@@ -0,0 +1,152 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/* H432B internal SD wiring; protocol and block I/O use upstream SDHCI. */
++#include <dm.h>
++#include <command.h>
++#include <malloc.h>
++#include <mmc.h>
++#include <sdhci.h>
++#include <u-boot/sha256.h>
++#include <asm/cache.h>
++#include <asm/io.h>
++#include <asm/arch/clk.h>
++
++#define H432B_HSMMC1 0xeb100000
++#define CLK_BASE 0xe0100000
++#define GPG1_BASE 0xe02001c0
++#define CONTROL2 0x80
++#define CONTROL3 0x84
++#define CONTROL4 0x8c
++
++struct h432b_mmc_plat {
++	struct mmc_config cfg;
++	struct mmc mmc;
++};
++
++static void h432b_mmc_control(struct sdhci_host *host)
++{
++	u32 control = sdhci_readl(host, CONTROL2);
++
++	/* Samsung bus-clock input 2, asynchronous status and receive feedback. */
++	control &= ~((3U << 4) | (3U << 9));
++	control |= (2U << 4) | BIT(31) | BIT(30) | BIT(14) | BIT(8);
++	sdhci_writel(host, control, CONTROL2);
++	control = BIT(7) | BIT(15);
++	if (host->mmc->clock < 25000000)
++		control |= BIT(23) | BIT(31);
++	sdhci_writel(host, control, CONTROL3);
++	sdhci_writel(host, 3U << 16, CONTROL4);
++}
++
++static const struct sdhci_ops h432b_mmc_ops = {
++	.set_control_reg = h432b_mmc_control,
++};
++
++static int h432b_mmc_probe(struct udevice *dev)
++{
++	struct h432b_mmc_plat *plat = dev_get_plat(dev);
++	struct mmc_uclass_priv *upriv = dev_get_uclass_priv(dev);
++	struct sdhci_host *host = dev_get_priv(dev);
++	void __iomem *clock = (void *)CLK_BASE;
++	void __iomem *gpio = (void *)GPG1_BASE;
++	unsigned long parent;
++	int ret;
++
++	/* Never interpret another SD slot or the Wi-Fi controller as internal SD. */
++	if (dev_read_addr(dev) != H432B_HSMMC1)
++		return -EINVAL;
++
++	/* EBOOT establishes MPLL. Honour its bypass selector, not a fixed rate. */
++	parent = readl(clock + 0x200) & BIT(4) ? get_pll_clk(MPLL) : 24000000;
++	if (!parent || parent > 1000000000)
++		return -EINVAL;
++
++	setbits_le32(clock + 0x468, BIT(17));
++	host->ioaddr = (void *)H432B_HSMMC1;
++	sdhci_writew(host, 0, SDHCI_CLOCK_CONTROL);
++	/* Isolate changes to HSMMC1: MPLL / 16 then the standard SDHCI divider. */
++	clrbits_le32(clock + 0x280, BIT(9));
++	clrsetbits_le32(clock + 0x210, 0xfU << 4, 6U << 4);
++	clrsetbits_le32(clock + 0x310, 0xfU << 4, 15U << 4);
++	setbits_le32(clock + 0x280, BIT(9));
++	/* CLK, CMD and DAT[3:0]; leave the unused card-detect pin untouched. */
++	clrsetbits_le32(gpio, 0x0ffff0ff, 0x02222022);
++	clrsetbits_le32(gpio + 8, 0x3fcf, 0x2a80);
++	clrsetbits_le32(gpio + 12, 0x3fcf, 0x3fcf);
++
++	host->name = dev->name;
++	host->max_clk = parent / 16;
++	host->bus_width = 4;
++	host->ops = &h432b_mmc_ops;
++	host->quirks = SDHCI_QUIRK_NO_HISPD_BIT | SDHCI_QUIRK_BROKEN_R1B |
++		SDHCI_QUIRK_WAIT_SEND_CMD | SDHCI_QUIRK_NO_1_8_V;
++	host->mmc = &plat->mmc;
++	plat->mmc.dev = dev;
++	plat->mmc.priv = host;
++	upriv->mmc = &plat->mmc;
++	ret = mmc_of_parse(dev, &plat->cfg);
++	if (ret)
++		return ret;
++	ret = sdhci_setup_cfg(&plat->cfg, host, 25000000, 400000);
++	if (ret)
++		return ret;
++	/* Only the board's 3.3 V rail is wired; never advertise voltage switching. */
++	plat->cfg.voltages = MMC_VDD_32_33 | MMC_VDD_33_34;
++	return sdhci_probe(dev);
++}
++
++static int h432b_mmc_bind(struct udevice *dev)
++{
++	struct h432b_mmc_plat *plat = dev_get_plat(dev);
++
++	return sdhci_bind(dev, &plat->mmc, &plat->cfg);
++}
++
++static const struct udevice_id h432b_mmc_ids[] = {
++	{ .compatible = "hims,h432b-internal-sd" },
++	{ }
++};
++
++U_BOOT_DRIVER(h432b_internal_sd) = {
++	.name = "h432b_internal_sd",
++	.id = UCLASS_MMC,
++	.of_match = h432b_mmc_ids,
++	.bind = h432b_mmc_bind,
++	.probe = h432b_mmc_probe,
++	.ops = &sdhci_ops,
++	.priv_auto = sizeof(struct sdhci_host),
++	.plat_auto = sizeof(struct h432b_mmc_plat),
++};
++
++static int do_h432b_mmc(struct cmd_tbl *cmdtp, int flag, int argc,
++			char *const argv[])
++{
++	struct mmc *mmc = find_mmc_device(0);
++	struct blk_desc *desc;
++	u8 digest[SHA256_SUM_LEN];
++	void *buffer;
++	int i, ret = CMD_RET_FAILURE;
++
++	if (!mmc || mmc_init(mmc))
++		return CMD_RET_FAILURE;
++	desc = mmc_get_blk_desc(mmc);
++	if (desc->blksz != 512 || desc->lba < 2048)
++		return CMD_RET_FAILURE;
++	buffer = memalign(ARCH_DMA_MINALIGN, 1024 * 1024);
++	if (!buffer)
++		return CMD_RET_FAILURE;
++	if (blk_dread(desc, 0, 2048, buffer) != 2048)
++		goto out;
++	sha256_csum_wd(buffer, 1024 * 1024, digest, CHUNKSZ_SHA256);
++	printf("H432B internal SD: %llu sectors, %u Hz, %u-bit; first MiB SHA256 ",
++	       (unsigned long long)desc->lba, mmc->clock, mmc->bus_width);
++	for (i = 0; i < SHA256_SUM_LEN; i++)
++		printf("%02x", digest[i]);
++	printf("\n");
++	ret = CMD_RET_SUCCESS;
++out:
++	free(buffer);
++	return ret;
++}
++
++U_BOOT_CMD(h432bmmc, 1, 0, do_h432b_mmc,
++	   "identify internal SD and hash its first MiB without writing", "");
+diff --git a/configs/h432b_defconfig b/configs/h432b_defconfig
+index c5444cc5..1200a041 100644
+--- a/configs/h432b_defconfig
++++ b/configs/h432b_defconfig
+@@ -27,7 +27,15 @@ CONFIG_SUPPORT_RAW_INITRD=y
+ CONFIG_SYS_PROMPT="H432B => "
+ CONFIG_CMD_CACHE=y
+ # CONFIG_NET is not set
+-# CONFIG_MMC is not set
++CONFIG_MMC=y
++CONFIG_DM_MMC=y
++CONFIG_MMC_SDHCI=y
++# CONFIG_MMC_SDHCI_SDMA is not set
++# CONFIG_MMC_SDHCI_ADMA is not set
++CONFIG_CMD_MMC=y
++CONFIG_CMD_PART=y
++CONFIG_EFI_PARTITION=y
++CONFIG_DOS_PARTITION=y
+ # CONFIG_SYS_L2CACHE_OFF is not set
+ # CONFIG_SYS_DCACHE_OFF is not set
+ CONFIG_BOARD_EARLY_INIT_F=y
+-- 
+2.47.3

@@ -27,6 +27,18 @@ int check(const unsigned char *image, size_t size, const unsigned char *text,
     if (h432b_verity_parse(text, len, &v)) return -1;
     return h432b_verity_verify(image, size, &v, hash);
 }
+int stream(const unsigned char *text, size_t len,
+           int (*read)(void *, unsigned int, unsigned char *),
+           void (*hash)(const unsigned char *, const unsigned char *, unsigned char *)) {
+    struct h432b_verity v;
+    unsigned char workspace[8192];
+    if (h432b_verity_parse_limit(text, len, &v, 0x80000000U)) return -1;
+    return h432b_verity_stream(&v, NULL, read, hash, workspace);
+}
+int parse(const unsigned char *text, size_t len, unsigned int limit) {
+    struct h432b_verity v;
+    return h432b_verity_parse_limit(text, len, &v, limit);
+}
 ''')
         library = folder / 'pair.so'
         subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror',
@@ -36,6 +48,9 @@ int check(const unsigned char *image, size_t size, const unsigned char *text,
         cls.callback_type = c.CFUNCTYPE(None, c.c_void_p, c.c_void_p, c.c_void_p)
         cls.lib.check.argtypes = [c.c_char_p, c.c_size_t, c.c_char_p, c.c_size_t,
                                  cls.callback_type]
+        cls.read_type = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_uint, c.c_void_p)
+        cls.lib.stream.argtypes = [c.c_char_p, c.c_size_t, cls.read_type, cls.callback_type]
+        cls.lib.parse.argtypes = [c.c_char_p, c.c_size_t, c.c_uint]
 
     @classmethod
     def tearDownClass(cls):
@@ -83,6 +98,36 @@ int check(const unsigned char *image, size_t size, const unsigned char *text,
                     desc.replace(b'1 2 2', b'1 9999999999 2'),
                     desc.replace(b'1 2 2', b'1 2 3')):
             self.assertNotEqual(self.check(image, bad), 0)
+
+    def test_streamed_extension_matches_independent_tree(self):
+        def sha(salt, block, out):
+            c.memmove(out, hashlib.sha256(c.string_at(salt, 32) +
+                                         c.string_at(block, 4096)).digest(), 32)
+        for blocks in (2, 128, 129, 16400):
+            image, desc = self.vector(blocks)
+            def run(payload, fail=None):
+                def read(context, block, out):
+                    if block == fail or (block + 1) * 4096 > len(payload):
+                        return -1
+                    c.memmove(out, payload[block * 4096:(block + 1) * 4096], 4096)
+                    return 0
+                return self.lib.stream(desc, len(desc), self.read_type(read), self.callback_type(sha))
+            self.assertEqual(run(image), 0)
+            self.assertNotEqual(run(image, blocks), 0)
+            self.assertNotEqual(run(image[:-4096]), 0)
+            for offset in (0, blocks * 4096, len(image) - 1):
+                broken = bytearray(image)
+                broken[offset] ^= 1
+                self.assertNotEqual(run(bytes(broken)), 0)
+
+    def test_extension_limit_does_not_expand_nand_contract(self):
+        _, desc = self.vector(2)
+        big = desc.replace(b'1 2 2', b'1 520000 520000').replace(b'12288\n', b'2147483648\n')
+        self.assertEqual(self.lib.parse(big, len(big), 0x80000000), 0)
+        self.assertNotEqual(self.lib.parse(big, len(big), 200 << 20), 0)
+        for value in (b'2147483649', b'4294967296', b'18446744073709551616'):
+            bad = big.replace(b'2147483648', value)
+            self.assertNotEqual(self.lib.parse(bad, len(bad), 0x80000000), 0)
 
 
 if __name__ == '__main__':

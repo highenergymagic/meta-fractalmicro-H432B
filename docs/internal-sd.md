@@ -62,5 +62,16 @@ were retained. That diagnostic test did not alter the NAND image. Internal
 SD writes are also enabled in the normal NAND runtime.
 
 Whole-card capacity verification, sustained workloads, higher clocks and
-power-loss behavior remain unqualified. Existing partitions are retained;
-normal boot does not provision the planned system-extension/data layout.
+power-loss behavior remain unqualified. Normal boot retains existing
+partitions and never interprets a layout mismatch as permission to erase.
+
+## Persistent-storage integration
+
+The normal kernel includes EROFS, F2FS and Btrfs support. The hardware layer
+provides the controller identity in `/usr/lib/openh432/storage-controller`;
+the distribution owns partition geometry, mounts and configuration policy.
+Its opt-in persistent mode uses explicit GPT provisioning, two verified
+system extensions, cache and shared userdata. See the
+[persistent-storage reference](https://github.com/highenergymagic/meta-fractalmicro-openh432/blob/main/docs/persistent-storage.md)
+for installation prerequisites and qualification limits. The earlier FAT32
+write test is not suitable for a provisioned persistent-storage installation.

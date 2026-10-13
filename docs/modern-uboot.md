@@ -50,22 +50,58 @@ manufacturer serial number. Factory recovery uses a different interface.
 | `getvar NAME` | Reports the value, or fails with `unrecognised variable` |
 | `flash kernel_A FILE` / `flash kernel_B FILE` | Validates and writes an inactive kernel volume, then checks readback |
 | `flash systembase_A FILE` / `flash systembase_B FILE` | Writes an inactive systembase volume and checks readback |
-| `set_active a` / `set_active b` | Validates the complete kernel/systembase pair before committing selection |
+| `flash systemext_A FILE` / `flash systemext_B FILE` | Writes an EROFS/verity image to the inactive internal-SD extension and checks readback; accepts raw or Android sparse transfers |
+| `set_active a` / `set_active b` | Verifies the kernel, systembase and any kernel-declared extension before committing selection |
 
 Suffixes accept upper- or lowercase A/B. `boot` aliases `kernel`; `system`
 aliases `systembase`. Unsuffixed write targets are rejected; always supply an
 explicit slot suffix. A write invalidates
-the target slot before modifying its volume. Install both matching artifacts
+the target slot before modifying its storage. Install all matching artifacts
 before activating the slot. Readback success alone does not mark it healthy.
 
 Pair activation verifies the kernel's descriptor against the systembase data
 and integrity tree. This full check occurs during activation, not on every
 Linux boot. Boot-time dm-verity verifies blocks as they are read.
 
-The raw download buffer is 112 MiB. Although the systembase storage limit is
-200 MiB, images larger than the download buffer cannot be flashed by this
-transport. Sparse/streaming downloads are not implemented. There is no MMC
-backend for `systemext_A/B`, no erase command, no recovery-volume installer,
+Persistent-mode kernels additionally carry `fractalmicro,systemext-verity-v1`
+in `/chosen`, copied from the same extension descriptor used by the rootfs.
+Activation verifies the complete slot-matched extension using bounded memory.
+Kernels without this property retain the NAND-only compatibility contract;
+older persistent images must be rebuilt to gain the three-image check.
+
+The MMC backend identifies the internal controller at `0xeb100000`, requires
+the version 1 GPT layout, and permits writes only to its two extension
+partitions. It does not provision the card, write cache/userdata, or accept
+an external SD card as a substitute. Writes do not activate a slot. A failed
+or interrupted update remains ineligible until an explicit successful
+activation. This ordering is a recoverable update protocol, not an atomic
+transaction across NAND and SD or a power-loss qualification.
+
+The download buffer is 112 MiB **per download**, not per image. Standard Android
+fastboot splits larger raw filesystem images into sparse fragments automatically.
+Use the normal `flash` commands with the build's complete verity-wrapped images;
+no custom host transport or filesystem conversion is required. Systembase
+remains limited to 200 MiB and systemext to 2 GiB, including integrity trees.
+Kernel envelopes remain raw and bounded by their NAND volume capacity.
+
+The decoder accepts sparse v1.0 with 4 KiB blocks and RAW, FILL and DONT_CARE
+chunks. It validates the complete downloaded fragment before changing storage.
+MMC DONT_CARE ranges are skipped, preserving data from earlier fragments;
+written ranges receive physical readback comparison. Static UBI systembase
+updates require ordered, contiguous RAW/FILL extents, with only the skipped
+prefix/suffix used by Android's splitting of a raw image. Deliberate holes,
+out-of-order continuations and CRC-bearing encodings are rejected. A raw image's
+zero-filled areas are supported through FILL chunks.
+
+An intermediate NAND response means the fragment is staged, not that the
+volume update is complete. UBI retains its update marker until all bytes
+arrive; complete-volume readback checks the accumulated digest. An interrupted
+transfer leaves the slot ineligible. After inspecting a failure, restart the
+whole image from its first fragment; there is no persistent offset-resume
+protocol. Activation streams the full systembase integrity check through a
+bounded NAND cache, so it does not require image-sized RAM.
+
+There is no erase command, no recovery-volume installer,
 and no flashing-lock/unlock policy. Unsupported operations fail rather than
 reporting a successful update. Factory boot regions and the NAND tail remain
 outside the permitted write boundary.
@@ -103,5 +139,10 @@ write boundaries, carrier roles and menu state transitions.
 
 Intermittent whole-system freezes remain unresolved. The Linux hardware
 watchdog provides runtime recovery, not a diagnosis or an endurance guarantee.
-MMC provisioning, persistent userdata and factory-reset backends are not part
-of this loader's supported deployment interface.
+MMC extension writes, physical readback and combined activation have passed
+device tests. Active-slot writes were rejected; a corrupt inactive extension
+prevented activation without changing selection. The corrected three-image
+set booted from NAND and passed runtime health checks. MMC provisioning and
+factory-reset backends are not part of this loader's deployment interface.
+Multi-download transfer qualification is recorded separately from the earlier
+raw-image results in the hardware validation record.

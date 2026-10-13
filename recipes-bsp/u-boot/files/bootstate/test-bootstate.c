@@ -212,7 +212,7 @@ int main(void)
         const char *const names[] = {"boot", "kernel", "system", "systembase", "systemext"};
         const char *const volumes[][2] = {{"kernel_a", "kernel_b"},
             {"kernel_a", "kernel_b"}, {"systembase_a", "systembase_b"},
-            {"systembase_a", "systembase_b"}, {"systemext_a", "systemext_b"}};
+            {"systembase_a", "systembase_b"}, {"systemext_A", "systemext_B"}};
         const char *const invalid[] = {"", "a", "_a", "systembase", "systembase_c",
             "systembase_AA", "systembase_a/", "SYSTEMBASE_A", "eboot_a",
             "bootstate_a", "userdata_a", "gpt", "mmc0", "../systembase_a"};

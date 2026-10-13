@@ -1,3 +1,4 @@
 * text=auto eol=lf
-## Unified-diff context prefixes can legitimately precede source tabs.
-*.patch -text whitespace=-space-before-tab
+## Unified diffs retain context prefixes and the format-patch signature space.
+## Use checkpatch on patches to check added source lines, not diff framing.
+*.patch -text whitespace=-space-before-tab,-blank-at-eol

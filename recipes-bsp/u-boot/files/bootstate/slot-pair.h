@@ -27,7 +27,7 @@ static inline int h432b_pair_decimal(const unsigned char **p, const unsigned cha
 	unsigned int n = 0, digits = 0;
 
 	while (*p < end && **p >= '0' && **p <= '9') {
-		if (++digits > 9)
+		if (++digits > 10 || n > (0xffffffffU - (**p - '0')) / 10)
 			return -1;
 		n = n * 10 + *(*p)++ - '0';
 	}
@@ -37,8 +37,9 @@ static inline int h432b_pair_decimal(const unsigned char **p, const unsigned cha
 	return 0;
 }
 
-static inline int h432b_verity_parse(const unsigned char *p, size_t size,
-				     struct h432b_verity *out)
+static inline int h432b_verity_parse_limit(const unsigned char *p, size_t size,
+					 struct h432b_verity *out,
+					 unsigned int limit)
 {
 	const unsigned char *end = p + size;
 	unsigned int version, hash_start, i, j;
@@ -47,7 +48,7 @@ static inline int h432b_verity_parse(const unsigned char *p, size_t size,
 
 	if (h432b_pair_decimal(&p, end, &version, ' ') || version != 1 ||
 	    h432b_pair_decimal(&p, end, &out->blocks, ' ') ||
-	    out->blocks < 2 || out->blocks > 51200 ||
+	    out->blocks < 2 || out->blocks > limit / 4096 ||
 	    h432b_pair_decimal(&p, end, &hash_start, ' ') || hash_start != out->blocks)
 		return -1;
 	for (j = 0; j < 2; j++) {
@@ -65,9 +66,61 @@ static inline int h432b_verity_parse(const unsigned char *p, size_t size,
 			return -1;
 	}
 	if (h432b_pair_decimal(&p, end, &out->bytes, '\n') || p != end ||
-	    out->bytes > 200U * 1024U * 1024U)
+	    !out->bytes || out->bytes > limit)
 		return -1;
 	return 0;
+}
+
+static inline int h432b_verity_parse(const unsigned char *p, size_t size,
+				     struct h432b_verity *out)
+{
+	return h432b_verity_parse_limit(p, size, out, 200U * 1024U * 1024U);
+}
+
+/* Verify an extension without storing the whole image in the download window.
+ * Workspace is two 4 KiB blocks. read() must return zero only after a complete
+ * block read; all block indexes are relative to the validated partition.
+ */
+static inline int h432b_verity_stream(const struct h432b_verity *v,
+		void *context, int (*read)(void *, unsigned int, unsigned char *),
+		void (*hash)(const unsigned char *, const unsigned char *, unsigned char *),
+		unsigned char *workspace)
+{
+	unsigned int levels[8], offsets[8], count = v->blocks, n = 0;
+	unsigned int total = v->blocks, i, j, input = 0;
+	unsigned char digest[32], *expected = workspace + 4096;
+
+	if (v->blocks < 2 || v->blocks > 524288 ||
+	    v->bytes > 0x80000000U)
+		return -1;
+	do {
+		count = (count + 127) / 128;
+		levels[n++] = count;
+	} while (count > 1 && n < 8);
+	for (i = n; i > 0; i--) {
+		offsets[i - 1] = total;
+		total += levels[i - 1];
+	}
+	if (total > 524288 || total * 4096U != v->bytes)
+		return -1;
+	count = v->blocks;
+	for (i = 0; i < n; i++) {
+		for (j = 0; j < count; j++) {
+			if (!(j % 128) && read(context, offsets[i] + j / 128, expected))
+				return -1;
+			if (read(context, input + j, workspace))
+				return -1;
+			hash(v->salt, workspace, digest);
+			if (memcmp(digest, expected + (j % 128) * 32, 32))
+				return -1;
+		}
+		input = offsets[i];
+		count = levels[i];
+	}
+	if (read(context, input, workspace))
+		return -1;
+	hash(v->salt, workspace, digest);
+	return memcmp(digest, v->root, 32) ? -1 : 0;
 }
 
 /* dm-verity v1: SHA256(salt || block), 128 digests/block, root level first.

@@ -1,0 +1,424 @@
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Subject: [PATCH] h432b: support multi-download fastboot image updates
+
+Decode bounded Android sparse fragments before storage writes.
+Use checked offset writes on MMC and ordered static UBI updates,
+retaining slot invalidation until complete image-set verification.
+Stream systembase integrity checks through a bounded LEB cache.
+
+Upstream-Status: Inappropriate [board integration]
+
+diff --git a/board/fractalmicro/h432b/storage.c b/board/fractalmicro/h432b/storage.c
+--- a/board/fractalmicro/h432b/storage.c
++++ b/board/fractalmicro/h432b/storage.c
+@@ -23,6 +23,7 @@
+ #include "cache.h"
+ #include "recovery-menu.h"
+ #include "mmc-update.h"
++#include "sparse-image.h"
+ 
+ static struct h432b_bootstate state;
+ static bool state_valid;
+@@ -145,6 +146,52 @@
+ 	schedule();
+ }
+ 
++struct verity_volume {
++	struct ubi_volume *vol;
++	u8 *cache;
++	int leb[2];
++	unsigned int next;
++};
++
++static int verity_volume_read(void *context, unsigned int block, u8 *buffer)
++{
++	struct verity_volume *reader = context;
++	struct ubi_volume *vol = reader->vol;
++	u32 offset = block * 4096U, length, part;
++	unsigned int i;
++	int leb, ret;
++
++	if ((u64)offset + 4096 > vol->used_bytes)
++		return -EINVAL;
++	for (length = 4096; length; length -= part) {
++		leb = offset / vol->usable_leb_size;
++		for (i = 0; i < 2; i++) {
++			if (reader->leb[i] == leb)
++				break;
++		}
++		if (i == 2) {
++			i = reader->next++ % 2;
++			reader->leb[i] = -1;
++			ret = ubi_eba_read_leb(ubi_devices[0], vol, leb,
++					       reader->cache + i * vol->usable_leb_size,
++					       0, min_t(u64, vol->usable_leb_size,
++						vol->used_bytes - (u64)leb *
++						vol->usable_leb_size), 1);
++			if (ret)
++				return ret;
++			reader->leb[i] = leb;
++		}
++		part = min_t(u32, length, vol->usable_leb_size -
++			     offset % vol->usable_leb_size);
++		memcpy(buffer, reader->cache + i * vol->usable_leb_size +
++		       offset % vol->usable_leb_size, part);
++		offset += part;
++		buffer += part;
++	}
++	schedule();
++	return 0;
++}
++
+ static int verify_pair(unsigned int slot)
+ {
+ 	struct h432b_verity descriptor, extension;
+@@ -153,8 +200,9 @@
+ 	u8 *buffer = (void *)U2_FB_ADDRESS;
+ 	const u8 *text;
+ 	const void *fdt;
+-	size_t length, offset = 0;
+-	int ret, leb = 0, chosen, text_length;
++	struct verity_volume reader;
++	u8 *workspace;
++	int ret, chosen, text_length;
+ 	bool has_extension = false;
+ 
+ 	ret = verify_kernel(slot);
+@@ -186,18 +234,17 @@
+ 	}
+ 	vol = ubi_find_volume(slot ? "systembase_b" : "systembase_a");
+ 	if (!vol || vol->vol_type != UBI_STATIC_VOLUME || vol->updating ||
+-	    vol->upd_marker || vol->corrupted || vol->used_bytes != descriptor.bytes ||
+-	    vol->used_bytes > CONFIG_FASTBOOT_BUF_SIZE)
+-		return -EINVAL;
+-	while (offset < vol->used_bytes) {
+-		length = min_t(size_t, vol->used_bytes - offset, vol->usable_leb_size);
+-		ret = ubi_eba_read_leb(ubi_devices[0], vol, leb++, buffer + offset,
+-				       0, length, 1);
+-		if (ret)
+-			return ret;
+-		offset += length;
+-	}
+-	ret = h432b_verity_verify(buffer, vol->used_bytes, &descriptor, verity_hash);
++	    vol->upd_marker || vol->corrupted || vol->used_bytes != descriptor.bytes)
++		return -EINVAL;
++	workspace = malloc(8192 + 2 * vol->usable_leb_size);
++	if (!workspace)
++		return -ENOMEM;
++	reader = (struct verity_volume) {
++		.vol = vol, .cache = workspace + 8192, .leb = { -1, -1 },
++	};
++	ret = h432b_verity_stream(&descriptor, &reader, verity_volume_read,
++				  verity_hash, workspace);
++	free(workspace);
+ 	if (ret || !has_extension)
+ 		return ret;
+ 	return h432b_extension_verify(slot, &extension);
+@@ -258,6 +305,100 @@
+ 	return ret;
+ }
+ 
++static struct {
++	struct ubi_volume *vol;
++	u32 bytes;
++	u32 cursor;
++	sha256_context hash;
++} sparse_update;
++
++static void sparse_update_abort(void)
++{
++	struct ubi_volume *vol = sparse_update.vol;
++
++	/* Keep the persistent UBI update marker and boot-slot invalidation.
++	 * Only release transient state, so a new first fragment can restart.
++	 */
++	if (vol && vol->updating) {
++		vfree(vol->upd_buf);
++		vol->upd_buf = NULL;
++		vol->updating = 0;
++	}
++	memset(&sparse_update, 0, sizeof(sparse_update));
++}
++
++static int sparse_volume_emit(void *context, u32 offset, u32 bytes,
++			      unsigned int type, const u8 *data)
++{
++	u8 fill[4096];
++	u32 length, i;
++	int ret;
++
++	if (offset != sparse_update.cursor)
++		return -EINVAL;
++	if (type == H432B_SPARSE_FILL) {
++		for (i = 0; i < sizeof(fill); i += 4)
++			memcpy(fill + i, data, 4);
++	}
++	while (bytes) {
++		const u8 *input = type == H432B_SPARSE_FILL ? fill : data;
++
++		length = min_t(u32, bytes, sizeof(fill));
++		ret = ubi_more_update_data(ubi_devices[0], sparse_update.vol,
++					   input, length);
++		if (ret < 0)
++			return ret;
++		sha256_update(&sparse_update.hash, input, length);
++		sparse_update.cursor += length;
++		bytes -= length;
++		if (type == H432B_SPARSE_RAW)
++			data += length;
++		schedule();
++	}
++	return 0;
++}
++
++static int sparse_mmc_emit(void *context, u32 offset, u32 bytes,
++			   unsigned int type, const u8 *data)
++{
++	return h432b_extension_write_range(context, offset, bytes, type, data);
++}
++
++static int sparse_volume_write(struct ubi_volume *vol, const void *buffer,
++			       u32 size, struct h432b_sparse *view)
++{
++	u8 expected[32], actual[32];
++	int ret;
++
++	if (!view->first) {
++		sparse_update_abort();
++		sparse_update.vol = vol;
++		sparse_update.bytes = view->bytes;
++		sha256_starts(&sparse_update.hash);
++		ret = ubi_start_update(ubi_devices[0], vol, view->bytes);
++		if (ret)
++			goto fail;
++	}
++	ret = h432b_sparse_walk(buffer, size, 200U << 20, view,
++				sparse_volume_emit, NULL);
++	if (ret)
++		goto fail;
++	if (sparse_update.cursor != sparse_update.bytes)
++		return 1;
++	sha256_finish(&sparse_update.hash, expected);
++	if (vol->updating || vol->upd_marker || vol->corrupted ||
++	    vol->used_bytes != sparse_update.bytes || volume_digest(vol, actual) ||
++	    memcmp(expected, actual, sizeof(expected))) {
++		ret = -EIO;
++		goto fail;
++	}
++	sparse_update_abort();
++	return 0;
++fail:
++	sparse_update_abort();
++	return ret;
++}
++
+ void fastboot_board_flash(const char *name, const void *buffer, u32 size,
+ 			  char *response)
+ {
+@@ -267,32 +408,55 @@
+ 		.read = read_state, .replace = replace_state,
+ 	};
+ 	struct u2_fb_image layout;
++	struct h432b_sparse sparse;
+ 	struct ubi_volume *vol = NULL;
+ 	u8 scratch[2 * H432B_ENV_BYTES], expected[32], actual[32];
+ 	int active = -1, ret;
+ 	unsigned int i;
++	bool is_sparse = h432b_is_sparse(buffer, size);
+ 
+ 	if (!size || !ubi_devices[0] || h432b_fastboot_resolve(name, &target)) {
+ 		fastboot_fail("Unknown or unavailable image target", response);
+ 		return;
+ 	}
++	if (is_sparse &&
++	    h432b_sparse_walk(buffer, size,
++			      target.storage == H432B_FASTBOOT_MMC ?
++			      0x80000000U : 200U << 20, &sparse, NULL, NULL)) {
++		fastboot_fail("Invalid or unsupported sparse image", response);
++		return;
++	}
+ 	if (target.storage == H432B_FASTBOOT_MMC) {
+-		if (h432b_extension_image(buffer, size) ||
++		if ((!is_sparse && h432b_extension_image(buffer, size)) ||
++		    (is_sparse && !sparse.first && (!sparse.prefix ||
++			 memcmp(sparse.prefix + 1024, "\xe2\xe1\xf5\xe0", 4))) ||
+ 		    h432b_extension_open(target.slot, &extension)) {
+-			fastboot_fail("Expected raw EROFS image and internal SD v1 layout",
++			fastboot_fail("Expected EROFS image and internal SD v1 layout",
+ 				      response);
+ 			return;
+ 		}
+ 	} else {
+ 		vol = ubi_find_volume(target.name);
+-		if (!vol || vol->vol_type != UBI_STATIC_VOLUME || vol->updating ||
+-		    size > (u64)vol->reserved_pebs * vol->usable_leb_size) {
++		if (!vol || vol->vol_type != UBI_STATIC_VOLUME ||
++		    (vol->updating && vol != sparse_update.vol) ||
++		    (is_sparse ? sparse.bytes : size) >
++			(u64)vol->reserved_pebs * vol->usable_leb_size) {
+ 			fastboot_fail("Invalid volume or image size", response);
+ 			return;
+ 		}
+ 		if (!strncmp(target.name, "kernel_", 7)) {
+-			if (u2_fb_layout(buffer, size, &layout)) {
++			if (is_sparse || u2_fb_layout(buffer, size, &layout)) {
+ 				fastboot_fail("Invalid kernel image layout", response);
++				return;
++			}
++		} else if (is_sparse) {
++			if (h432b_sparse_next(&sparse, sparse.first ?
++					     sparse_update.cursor : 0, sparse_update.bytes) ||
++			    (sparse.first && sparse_update.vol != vol) ||
++			    (!sparse.first && (!sparse.prefix ||
++					       memcmp(sparse.prefix, "hsqs", 4)))) {
++				fastboot_fail("Expected ordered SquashFS fragments; restart image",
++					      response);
+ 				return;
+ 			}
+ 		} else if (size < 4096 || size > 200U * 1024U * 1024U ||
+@@ -314,11 +478,23 @@
+ 		fastboot_fail("Only the inactive slot may be updated", response);
+ 		return;
+ 	}
+-	sha256_csum_wd(buffer, size, expected, CHUNKSZ_SHA256);
+ 	ret = h432b_fastboot_invalidate(&store, scratch, target.slot);
+ 	state_valid = h432b_bootstate_load(&store, scratch, &state) >= 0;
+ 	if (ret || !state_valid) {
+ 		fastboot_fail("Cannot persist slot invalidation; image untouched", response);
++		return;
++	}
++	if (is_sparse) {
++		ret = target.storage == H432B_FASTBOOT_MMC ?
++			h432b_sparse_walk(buffer, size, 0x80000000U, &sparse,
++					  sparse_mmc_emit, &extension) :
++			sparse_volume_write(vol, buffer, size, &sparse);
++		if (ret < 0)
++			fastboot_fail("Sparse update/readback failed; restart image", response);
++		else if (ret > 0)
++			fastboot_okay("Fragment staged; volume incomplete", response);
++		else
++			fastboot_okay("Written data verified; slot not activated", response);
+ 		return;
+ 	}
+ 	if (target.storage == H432B_FASTBOOT_MMC) {
+@@ -330,6 +506,9 @@
+ 		fastboot_okay("Extension verified; slot not activated", response);
+ 		return;
+ 	}
++	if (vol == sparse_update.vol)
++		sparse_update_abort();
++	sha256_csum_wd(buffer, size, expected, CHUNKSZ_SHA256);
+ 	ret = ubi_volume_write(target.name, buffer, 0, size);
+ 	if (ret || vol->updating || vol->upd_marker || vol->corrupted ||
+ 	    vol->used_bytes != size || volume_digest(vol, actual) ||
+diff --git a/board/fractalmicro/h432b/mmc-update.c b/board/fractalmicro/h432b/mmc-update.c
+--- a/board/fractalmicro/h432b/mmc-update.c
++++ b/board/fractalmicro/h432b/mmc-update.c
+@@ -8,6 +8,7 @@
+ #include <u-boot/schedule.h>
+ #include "mmc-update.h"
+ #include "slot-pair.h"
++#include "sparse-image.h"
+ 
+ #define EXTENSION_SECTORS 4194304ULL
+ #define IO_BYTES (64U * 1024U)
+@@ -71,9 +72,7 @@
+ {
+ 	const u8 *bytes = buffer;
+ 
+-	/* Raw EROFS + verity only. Sparse downloads need a separate bounded
+-	 * parser before enabling upstream sparse expansion on this backend.
+-	 */
++	/* Raw EROFS + verity. Sparse fragments use the separate bounded parser. */
+ 	if (size < 8192 || size % 4096 || size > 0x80000000U ||
+ 	    memcmp(bytes + 1024, "\xe2\xe1\xf5\xe0", 4))
+ 		return -EINVAL;
+@@ -83,42 +82,51 @@
+ int h432b_extension_write(struct h432b_extension *extension,
+ 			   const void *buffer, u32 size)
+ {
++	if (h432b_extension_image(buffer, size))
++		return -EINVAL;
++	return h432b_extension_write_range(extension, 0, size, H432B_SPARSE_RAW,
++					   buffer);
++}
++
++int h432b_extension_write_range(struct h432b_extension *extension, u32 offset,
++				u32 size, unsigned int type, const u8 *data)
++{
+ 	struct blk_desc *disk = extension->disk;
+ 	lbaint_t start = extension->partition.start, count;
+-	u8 expected[SHA256_SUM_LEN], actual[SHA256_SUM_LEN];
+-	sha256_context ctx;
+-	u8 *scratch;
+-	u32 offset, length;
++	u8 *scratch, *readback;
++	u32 done, length, i;
+ 	int ret = -EIO;
+ 
+-	if (h432b_extension_image(buffer, size) ||
+-	    size / 512 > extension->partition.size)
++	if (!size || offset % 4096 || size % 4096 ||
++	    (u64)offset + size > (u64)extension->partition.size * 512 ||
++	    (type != H432B_SPARSE_RAW && type != H432B_SPARSE_FILL))
+ 		return -EINVAL;
+-	scratch = memalign(ARCH_DMA_MINALIGN, IO_BYTES);
++	scratch = memalign(ARCH_DMA_MINALIGN, 2 * IO_BYTES);
+ 	if (!scratch)
+ 		return -ENOMEM;
+-	sha256_csum_wd(buffer, size, expected, CHUNKSZ_SHA256);
+-	for (offset = 0; offset < size; offset += length) {
+-		length = min_t(u32, size - offset, IO_BYTES);
++	readback = scratch + IO_BYTES;
++	for (done = 0; done < size; done += length) {
++		length = min_t(u32, size - done, IO_BYTES);
++		if (type == H432B_SPARSE_RAW) {
++			memcpy(scratch, data + done, length);
++		} else {
++			for (i = 0; i < length; i += 4)
++				memcpy(scratch + i, data, 4);
++		}
+ 		count = length / 512;
+-		if (blk_dwrite(disk, start + offset / 512, count,
+-			       (const u8 *)buffer + offset) != count)
++		if (blk_dwrite(disk, start + (offset + done) / 512, count,
++			       scratch) != count)
++			goto out;
++		/* Sparse payloads need not be DMA/cache aligned. Copy into an
++		 * aligned buffer and compare uncached physical readback bytes.
++		 */
++		blkcache_invalidate(disk->uclass_id, disk->devnum);
++		if (blk_dread(disk, start + (offset + done) / 512, count,
++			      readback) != count || memcmp(scratch, readback, length))
+ 			goto out;
+ 		schedule();
+ 	}
+-	/* Do not use cached block reads as evidence of physical readback. */
+-	blkcache_invalidate(disk->uclass_id, disk->devnum);
+-	sha256_starts(&ctx);
+-	for (offset = 0; offset < size; offset += length) {
+-		length = min_t(u32, size - offset, IO_BYTES);
+-		count = length / 512;
+-		if (blk_dread(disk, start + offset / 512, count, scratch) != count)
+-			goto out;
+-		sha256_update(&ctx, scratch, length);
+-		schedule();
+-	}
+-	sha256_finish(&ctx, actual);
+-	ret = memcmp(expected, actual, sizeof(expected)) ? -EIO : 0;
++	ret = 0;
+ out:
+ 	free(scratch);
+ 	return ret;
+diff --git a/board/fractalmicro/h432b/mmc-update.h b/board/fractalmicro/h432b/mmc-update.h
+--- a/board/fractalmicro/h432b/mmc-update.h
++++ b/board/fractalmicro/h432b/mmc-update.h
+@@ -16,6 +16,8 @@
+ int h432b_extension_image(const void *buffer, u32 size);
+ int h432b_extension_write(struct h432b_extension *extension,
+ 			   const void *buffer, u32 size);
++int h432b_extension_write_range(struct h432b_extension *extension, u32 offset,
++				u32 size, unsigned int type, const u8 *data);
+ int h432b_extension_verify(unsigned int slot, const struct h432b_verity *verity);
+ 
+ #endif

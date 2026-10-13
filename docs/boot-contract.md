@@ -79,8 +79,11 @@ Normal NAND boot loads the runtime kernel and a root-handoff initramfs with
 the startup cue, not the full userspace.
 The A/B stage selects a kernel volume and supplies `rauc.slot=A` or
 `rauc.slot=B` to Linux. The initramfs mounts the corresponding SquashFS
-systembase through ubiblock and switches root to systemd, with a volatile
-writable overlay. The current systembase is slot-independent. Historical
+systembase through ubiblock and switches root to systemd. The default storage
+mode uses a volatile writable overlay; the opt-in
+[persistent composition](https://github.com/highenergymagic/meta-fractalmicro-openh432/blob/main/docs/persistent-storage.md)
+adds the matching MMC extension and deployment-local configuration. The
+systembase artifact is slot-independent. Historical
 `-b` image target names remain for build compatibility; an unmanaged boot
 without a selected slot retains the explicit B handoff.
 
@@ -117,8 +120,14 @@ attempts under the environment-library lock, only if the recorded attempt is
 still current. Network connectivity is not a success requirement.
 
 An update must first make its inactive destination ineligible, write and verify
-both the kernel and systembase, then activate the pair in one environment
-transaction. Never update the mounted systembase. A legacy fixed-B carrier
+the kernel, systembase and any required system extension, then select the slot
+in one environment transaction. Modern persistent kernels declare the extension
+integrity descriptor in their DTB; activation verifies that descriptor against
+the slot-matched internal-SD image. Configuration preparation occurs in the
+trial boot before Linux acknowledges success. See the
+[modern fastboot interface](modern-uboot.md#fastboot-interface) for supported
+targets and transfer limits. Never update the mounted systembase or extension.
+A legacy fixed-B carrier
 ignores this policy and must not be mistaken for the A/B carrier.
 
 The separate [hardware watchdog](watchdog.md) provides runtime reset recovery;
@@ -153,8 +162,8 @@ repairs; consume and boot persist an attempt. None is a forensic capture tool.
 The [NAND documentation](nand.md) describes ECC and bounded UBI layout.
 The factory prefix uses a different ECC format and must not be rewritten by
 the Linux data driver. Installed EBOOT may differ from vendor download images:
-preserve each device's actual raw+OOB backup privately. Internal SD has not
-been repartitioned in qualification.
+preserve each device's actual raw+OOB backup privately. Internal-SD provisioning
+is a separate explicit operation, not a side effect of a fastboot image write.
 
 USB diagnostic interfaces provide privileged physical access, not a production
 authentication boundary. Do not expose them through a network. There is no

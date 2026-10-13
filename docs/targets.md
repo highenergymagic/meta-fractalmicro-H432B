@@ -9,6 +9,9 @@
 
 The OS layer supplies `openh432-nand-b`, the minimal
 `openh432-early-b` root handoff, and `openh432-systembase-b`.
+It also builds `openh432-systemext`, the matched EROFS/verity extension for
+explicitly provisioned persistent-storage installations. Select this handoff
+with `--storage-mode persistent`; the default remains volatile.
 The minimal initramfs mounts the loader-selected systembase. The historical
 `-b` target names do not restrict the new image pair to slot B. Eligible slots and
 redundant bootstate must be provisioned before using the A/B carrier. See the
@@ -38,7 +41,9 @@ These targets are deliberately separate from normal deployment:
 
 `u-boot-h432b-modern` provides the RAM-entry modern loader, not a flashable
 carrier. Its `-cache-test` and `-cache-audit` variants retain cache qualification
-profiles. `linux-h432b-ethernet-watch` enables tracing and lockup diagnostics;
+profiles. `u-boot-h432b-modern-mmc-test` runs an internal-SD identification and
+read-hash diagnostic before entering maintenance; it is not a provisioning
+image. `linux-h432b-ethernet-watch` enables tracing and lockup diagnostics;
 the standard runtime uses the hardware watchdog without these tracing options.
 
 | Kernel suffix / matching OS image suffix | Purpose |

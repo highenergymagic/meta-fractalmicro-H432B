@@ -18,8 +18,9 @@ diff --git a/board/fractalmicro/h432b/Makefile b/board/fractalmicro/h432b/Makefi
 index eb5265aa..2d5f203b 100644
 --- a/board/fractalmicro/h432b/Makefile
 +++ b/board/fractalmicro/h432b/Makefile
-@@ -1 +1,2 @@
+@@ -1,2 +1,3 @@
  obj-y += board.o timer.o usb.o nand.o storage.o cache.o
+ obj-$(CONFIG_MMC) += mmc.o
 +obj-y += recovery-menu.o
 diff --git a/board/fractalmicro/h432b/recovery-menu.c b/board/fractalmicro/h432b/recovery-menu.c
 new file mode 100644

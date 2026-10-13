@@ -31,7 +31,7 @@ h432b_fastboot_resolve(const char *name, struct h432b_fastboot_target *out)
 		{ "kernel", H432B_FASTBOOT_UBI, { "kernel_a", "kernel_b" } },
 		{ "system", H432B_FASTBOOT_UBI, { "systembase_a", "systembase_b" } },
 		{ "systembase", H432B_FASTBOOT_UBI, { "systembase_a", "systembase_b" } },
-		{ "systemext", H432B_FASTBOOT_MMC, { "systemext_a", "systemext_b" } },
+		{ "systemext", H432B_FASTBOOT_MMC, { "systemext_A", "systemext_B" } },
 	};
 	unsigned int i, slot;
 	size_t len;

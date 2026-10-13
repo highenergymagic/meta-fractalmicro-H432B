@@ -50,7 +50,7 @@ do_configure:append() {
     for option in BPF_SYSCALL BPF_JIT CGROUP_BPF CRYPTO_AES_ARM BLK_DEV_DM DM_VERITY CRYPTO_SHA256_ARM WATCHDOG WATCHDOG_CORE WATCHDOG_SYSFS S3C2410_WATCHDOG; do
         grep -qx "CONFIG_$option=y" ${B}/.config || bbfatal "Missing runtime isolation option: $option"
     done
-    for option in FAT_FS VFAT_FS EXFAT_FS NLS_CODEPAGE_437 NLS_ISO8859_1 NLS_UTF8 EXT4_FS EXT4_FS_POSIX_ACL EXT4_FS_SECURITY; do
+    for option in FAT_FS VFAT_FS EXFAT_FS NLS_CODEPAGE_437 NLS_ISO8859_1 NLS_UTF8 EXT4_FS EXT4_FS_POSIX_ACL EXT4_FS_SECURITY BTRFS_FS F2FS_FS EROFS_FS EROFS_FS_ZIP; do
         grep -qx "CONFIG_$option=y" ${B}/.config || bbfatal "Missing runtime filesystem option: $option"
     done
     if [ "${H432B_WIFI_DRIVER_MODE}" = "m" ]; then

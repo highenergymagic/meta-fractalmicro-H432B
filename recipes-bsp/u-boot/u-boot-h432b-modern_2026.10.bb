@@ -21,13 +21,16 @@ SRC_URI = "git://github.com/u-boot/u-boot.git;protocol=https;nobranch=1 \
            file://0015-dwc2-reset-caller-role.patch \
            file://0016-h432b-cache-qualification-switch.patch \
            file://0017-h432b-cache-handoff-audit.patch \
+           file://0018-h432b-internal-sd.patch \
            file://0019-h432b-recovery-menu.patch \
+           file://0020-h432b-systemext-fastboot.patch \
+           file://0021-h432b-sparse-fastboot.patch \
            file://modern/check-bch-equivalence.py file://nand/test-bch-equivalence.c \
            file://bootmode.h file://modern/u2_braille.h \
            file://identity.h file://usb-identity.h \
            file://bootstate.h file://u2fastboot.h \
            file://fastboot-slots.h file://fastboot-targets.h \
-           file://nand-write-boundary.h file://slot-pair.h"
+           file://nand-write-boundary.h file://slot-pair.h file://sparse-image.h"
 SRCREV = "5508406582f6f7120dce0c4b3059819a41788db2"
 BB_GIT_SHALLOW = "1"
 BB_GIT_SHALLOW_DEPTH = "1"
@@ -53,13 +56,13 @@ do_configure() {
     install -m 0644 ${UNPACKDIR}/bootmode.h ${UNPACKDIR}/modern/u2_braille.h ${S}/board/fractalmicro/h432b/
     install -m 0644 ${UNPACKDIR}/u2fastboot.h ${S}/board/fractalmicro/h432b/
     install -m 0644 ${UNPACKDIR}/fastboot-slots.h ${UNPACKDIR}/fastboot-targets.h \
-        ${UNPACKDIR}/slot-pair.h \
+        ${UNPACKDIR}/slot-pair.h ${UNPACKDIR}/sparse-image.h \
         ${UNPACKDIR}/nand-write-boundary.h ${S}/board/fractalmicro/h432b/
     oe_runmake -C ${S} h432b_defconfig
     ${S}/scripts/config --file ${B}/.config --set-val TEXT_BASE 0x${H432B_MODERN_ENTRY} \
         --set-str BOOTCOMMAND "${H432B_MODERN_COMMAND}"
     oe_runmake -C ${S} olddefconfig
-    for feature in MTD_RAW_NAND SYS_NAND_SELF_INIT NAND_ECC_BCH BCH CMD_UBI FASTBOOT_FLASH FASTBOOT_FLASH_BOARD; do
+    for feature in MTD_RAW_NAND SYS_NAND_SELF_INIT NAND_ECC_BCH BCH CMD_UBI FASTBOOT_FLASH FASTBOOT_FLASH_BOARD MMC_WRITE EFI_PARTITION; do
         grep -qx "CONFIG_$feature=y" ${B}/.config ||
             bbfatal "Missing required modern NAND feature: $feature"
     done

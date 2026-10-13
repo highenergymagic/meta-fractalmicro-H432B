@@ -27,7 +27,7 @@ class ModernUboot(unittest.TestCase):
         self.assertIn('h432bauto; fastboot usb 0', recipe)
         self.assertIn('--enable H432B_NAND_BOOT_DCACHE', recipe)
         foundation = (RECIPES / 'u-boot-h432b-modern_2026.10.bb').read_text()
-        self.assertNotIn('0018-h432b-internal-sd.patch', foundation)
+        self.assertIn('0018-h432b-internal-sd.patch', foundation)
         patch = (RECIPES / 'files/0011-h432b-modern-autoboot.patch').read_text()
         self.assertIn('h432b_take_bootmode(mode_read, mode_write', patch)
         self.assertIn('if (ret || mode)', patch)
