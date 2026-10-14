@@ -1,6 +1,36 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Select the board's RF/firmware profile, not a machine check in the driver. */
+/ {
+	wifi_supply: regulator-wifi {
+		compatible = "regulator-fixed";
+		regulator-name = "wifi-vdd";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpe0 3 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+		off-on-delay-us = <200000>;
+	};
+
+	wifi_pwrseq: wifi-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		reset-gpios = <&gph1 0 GPIO_ACTIVE_HIGH>;
+		post-power-on-delay-ms = <200>;
+	};
+};
+
+/* MMC asserts reset before removing VDD, and restores VDD before reset. */
+&gpe0 {
+	/delete-node/ wifi-enable-hog;
+};
+
+&gph1 {
+	/delete-node/ wifi-reset-hog;
+};
+
 &sdhci3 {
+	vmmc-supply = <&wifi_supply>;
+	mmc-pwrseq = <&wifi_pwrseq>;
 	#address-cells = <1>;
 	#size-cells = <0>;
 

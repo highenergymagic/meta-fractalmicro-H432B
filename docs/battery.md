@@ -104,6 +104,9 @@ or saturated values. Measurement failures return no data, not zero current.
 Conversions are unit-tested with signed and boundary cases. These are gauge
 readings using pack-stored calibration, not independently calibrated lab
 measurements. The status policy still uses the recovered GPIO inputs.
+Those inputs can report Charging while the gauge shows sustained net battery
+discharge under USB-only power. Consumers must not use this status alone as
+proof of positive battery current; correcting that disagreement remains open.
 
 Telemetry is sampled every five seconds and cached, so ordinary sysfs/uevent
 reads do not trigger extra bus transactions. Changes generate standard

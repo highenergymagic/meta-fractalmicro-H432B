@@ -33,6 +33,7 @@ static int wifi_h2c_send(struct sdio_func *func, struct h432b_command_result *r,
 	if (!packet)
 		return -ENOMEM;
 	transfer = wifi_h2c_packet(packet, code, r->next_command, parameters, length);
+	dev_dbg(&func->dev, "H2C header: %40ph\n", packet);
 	pages = DIV_ROUND_UP(40 + ALIGN(length, 8), 128);
 	for (tries = 0; tries < 100; tries++) {
 		public = wifi_sdio_readb(func, 1, &error);

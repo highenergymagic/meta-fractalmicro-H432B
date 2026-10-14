@@ -28,6 +28,7 @@ struct h432b_wifi_sample {
 	struct mutex lock; /* Serializes configuration, FIFO I/O, keys and link state. */
 	bool attempted;
 	bool startup_attempted;
+	bool radio_off; /* owner lock; true only after successful HAL shutdown. */
 	int startup_error;
 	bool resume_net;
 	struct h432b_power_result power;
@@ -44,6 +45,7 @@ struct h432b_wifi_sample {
 
 static void wifi_net_irq_notify(struct h432b_wifi_net *net);
 static int wifi_runtime_restart(struct h432b_wifi_net *net);
+static int wifi_runtime_shutdown(struct sdio_func *func);
 
 static void h432b_wifi_irq(struct sdio_func *func)
 {
@@ -110,6 +112,21 @@ static int h432b_wifi_probe(struct sdio_func *func,
 	return device_add_group(&func->dev, &h432b_wifi_group);
 #else
 	error = wifi_runtime_initialize(func);
+	if (!error) {
+		/* Registration can race a userspace open. Serialize the initial
+		 * down-state shutdown with ndo_open before inspecting IFF_UP.
+		 */
+		rtnl_lock();
+		mutex_lock(&sample->lock);
+		if (!netif_running(sample->net->dev))
+			error = wifi_runtime_shutdown(func);
+		mutex_unlock(&sample->lock);
+		rtnl_unlock();
+		if (error) {
+			wifi_led_unregister(sample);
+			wifi_net_unregister(sample);
+		}
+	}
 	if (error && sample->startup_attempted) {
 		int cleanup = wifi_runtime_shutdown(func);
 

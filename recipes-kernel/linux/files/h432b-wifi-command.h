@@ -314,6 +314,9 @@ static int wifi_command_drain(struct sdio_func *func,
 			return -EILSEQ;
 		r->event_seq = (r->event_seq + 1) & 0x7f;
 		r->events++;
+		if (code == 19)
+			dev_dbg(&func->dev, "firmware event: %.*s\n",
+				min_t(unsigned int, length, 128), data + offset + 32);
 		if (r->report_event) {
 			error = r->report_event(r->report_context, code,
 						data + offset + 32, length);

@@ -56,9 +56,9 @@ Reset. INFORM7 is a one-shot request, not persistent update state; retention
 across power removal, suspend and other factory firmware is not guaranteed.
 Persistent A/B attempt tracking uses separate redundant UBI records.
 
-Ordinary software reboot with empty USB host ports, including after deep
-suspend/resume, has passed with the board-specific onboard-hub runtime-PM
-policy. Do not force that hub to autosuspend; see [USB host](usb-host.md).
+USB host PM depends on the board's EHCI-only topology. The onboard hub uses
+normal runtime autosuspend; the unused OHCI companion is disabled. Refer to
+[USB host](usb-host.md) for qualification and peripheral limitations.
 
 The optional `h432b-reboot-probe` package contains a read-only register
 inventory and an explicit retention tester. The tester requires an empty

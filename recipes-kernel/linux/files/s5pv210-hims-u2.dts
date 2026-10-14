@@ -89,6 +89,10 @@
 
 /* Onboard RTL8712S function; runtime includes its explicit firmware profile. */
 &sdhci3 {
+	/* Audio retunes EPLL. Keep the SDIO source independent of PCM rates. */
+	assigned-clocks = <&clocks MOUT_MMC3>, <&clocks DOUT_MMC3>;
+	assigned-clock-parents = <&clocks MOUT_MPLL>, <0>;
+	assigned-clock-rates = <0>, <50000000>;
 	/* This is the controller's input selector, NOT its channel number.
 	 * CE writes CONTROL2 baseclk=2; the upstream .3 label stalls its clock. */
 	clock-names = "hsmmc", "mmc_busclk.0", "mmc_busclk.2";
@@ -141,7 +145,11 @@
 /* Separate host controller/PHY: keep HSOTG's USB console in device mode.
  * Board hub/VBUS GPIOs are inherited, not guessed or changed here. */
 &ehci { status = "okay"; };
-&ohci { status = "okay"; };
+/* External sockets are downstream of the EHCI-connected USB 2.0 hub.
+ * Its transaction translator handles full-/low-speed devices; there is
+ * no directly connected socket requiring the OHCI companion.
+ */
+&ohci { status = "disabled"; };
 
 /*
  * Live BYTE_TEST=0x87654321 and ID_REV=0x92200000 identify LAN9220.

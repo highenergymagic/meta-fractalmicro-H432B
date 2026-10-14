@@ -46,7 +46,7 @@ S5PV210 NAND controller binding.
 | `0026-h432b-audio-dma-request-clock` | Open-stream clock reference, negative-only constraint errors, balanced release | PDMA0 dependency is board-measured and must not be assumed for all SoCs. |
 | `0027-h432b-audio-capture` | Duplex rate/width symmetry and DAPM microphone bias | Qualified PCM format is 44.1 kHz, stereo, S16_LE. Other formats are not silently advertised. |
 | `0028-h432b-audio-jacks` | Managed GPIO/IRQ lifecycle, notifier cleanup, serialized amplifier state and no jack wake | Headphone and microphone routing still require accessory qualification. |
-| `0030-h432b-hub-runtime-pm` | Board-and-device match, USB-core autosuspend policy; system sleep remains enabled | Necessary workaround for the empty-hub host-access stall; not a generic NEC quirk. |
+| USB host topology | Board DTS enables EHCI and disables the unused OHCI companion; external sockets are behind the high-speed hub | Uses hub transaction translation and standard autosuspend; no generic NEC quirk or forced-active hub policy. See USB host qualification limits. |
 | `0031-h432b-wakeable-poweroff` | Shutdown separate from suspend; release debounce, masked VIC/PMU sources, stackless reset target | Retained-memory soft-off is not electrical isolation. Resume bridge remains board-specific. |
 | `0032-pwm-samsung-honor-disabled-state` | Explicit disable reaches hardware despite initially stale cached state; channel-local resume mask | Generic fix candidate; no global timer reset or clock-policy override. |
 | `0033-irqchip-pinctrl-pm-debug` | Successful VIC and EINT-wake tracing is opt-in; error reporting unchanged | Logging-only generic fix candidate. |

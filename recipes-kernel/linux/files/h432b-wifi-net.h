@@ -81,6 +81,11 @@ static bool wifi_net_recoverable(int error)
 /* Owner lock held. IRQ masking remains with the caller holding the host. */
 static void wifi_net_fault(struct h432b_wifi_net *net, int error)
 {
+	dev_warn_ratelimited(&net->func->dev,
+		"command stream fault: %d (command=%u, events=%u, irq=%#x, consumed=%u)\n",
+		error, net->owner->command.next_command,
+		net->owner->command.events, net->owner->command.irq_status,
+		net->owner->command.consumed);
 	WRITE_ONCE(net->faulted, true);
 	net->last_error = error;
 	wifi_net_link_down(net, WLAN_REASON_UNSPECIFIED, true);
@@ -219,9 +224,15 @@ release:
 		int mask_error = 0;
 
 		sdio_writew(net->func, 0, WIFI_HIMR, &mask_error);
-		r->error = error;
-		dev_err(&net->func->dev, "receive/event service failed: %d\n", error);
-		wifi_net_fault(net, error);
+		/* ndo_stop cancels an in-flight drain before waiting for us. */
+		if (error != -ECANCELED || !READ_ONCE(net->stopping)) {
+			r->error = error;
+			dev_err(&net->func->dev, "receive/event service failed: %d\n", error);
+			wifi_net_fault(net, error);
+		} else if (mask_error) {
+			r->error = mask_error;
+			wifi_net_fault(net, mask_error);
+		}
 	}
 	sdio_release_host(net->func);
 unlock:
@@ -441,7 +452,7 @@ static int wifi_net_start(struct net_device *dev)
 	u8 ioex;
 
 	mutex_lock(&net->owner->lock);
-	if (READ_ONCE(net->faulted) || net->needs_restart) {
+	if (READ_ONCE(net->faulted) || net->needs_restart || net->owner->radio_off) {
 		error = wifi_runtime_restart(net);
 		if (error)
 			goto unlock;
@@ -581,6 +592,29 @@ static int wifi_net_stop(struct net_device *dev)
 	return 0;
 }
 
+/* Administrative down removes radio power after all packet/IRQ work stops.
+ * System sleep and fault recovery use wifi_net_stop directly: they retain
+ * their existing firmware-lifetime and error-recovery contracts.
+ */
+static int wifi_net_close(struct net_device *dev)
+{
+	struct h432b_wifi_net *net = *(struct h432b_wifi_net **)netdev_priv(dev);
+	int error;
+
+	wifi_net_stop(dev);
+	mutex_lock(&net->owner->lock);
+	error = wifi_runtime_shutdown(net->func);
+	if (error) {
+		WRITE_ONCE(net->faulted, true);
+		net->last_error = error;
+		dev_warn(&net->func->dev, "interface-down radio shutdown failed: %d\n",
+			 error);
+	}
+	mutex_unlock(&net->owner->lock);
+	/* ndo_stop cannot veto administrative down. Preserve errors for reopen. */
+	return 0;
+}
+
 /* Separate from the ordered packet queue: stopping drains that entire queue.
  * RTNL serializes administrative down/up and system sleep against recovery.
  */
@@ -653,7 +687,7 @@ static netdev_tx_t wifi_net_xmit(struct sk_buff *skb, struct net_device *dev)
 
 static const struct net_device_ops wifi_net_ops = {
 	.ndo_open = wifi_net_open,
-	.ndo_stop = wifi_net_stop,
+	.ndo_stop = wifi_net_close,
 	.ndo_start_xmit = wifi_net_xmit,
 	.ndo_validate_addr = eth_validate_addr,
 };

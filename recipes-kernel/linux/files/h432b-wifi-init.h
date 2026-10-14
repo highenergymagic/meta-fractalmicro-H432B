@@ -68,6 +68,7 @@ static int wifi_runtime_boot(struct sdio_func *func,
 		goto report;
 
 	owner->startup_attempted = true;
+	owner->radio_off = false;
 	memset(&owner->power, 0, sizeof(owner->power));
 	memset(&owner->firmware, 0, sizeof(owner->firmware));
 	memset(&owner->ack, 0, sizeof(owner->ack));
@@ -99,6 +100,11 @@ report:
 	owner->startup_error = error;
 	if (error)
 		dev_err(dev, "%s failed: %d\n", stage, error);
+	if (error)
+		dev_dbg(dev, "power step=%u warm=%u signature=%04x/%04x/%04x\n",
+			owner->power.step, owner->power.warm,
+			owner->power.before[0], owner->power.before[1],
+			owner->power.before[2]);
 	if (fw)
 		release_firmware(fw);
 	return error;
@@ -109,7 +115,20 @@ static int wifi_runtime_restart(struct h432b_wifi_net *net)
 	u8 mac[ETH_ALEN];
 	int error;
 
-	error = wifi_runtime_boot(net->func, net->owner, true);
+	/*
+	 * MAC shutdown does not reset the SDIO transport. Cycle card power
+	 * before loading fresh firmware into its command queues.
+	 * The caller has stopped all work and released the function IRQ.
+	 */
+	if (net->owner->command.irq_owned || net->func->irq_handler)
+		return -EBUSY;
+	sdio_claim_host(net->func);
+	error = mmc_hw_reset(net->func->card);
+	sdio_release_host(net->func);
+	if (error)
+		return error < 0 ? error : -EAGAIN;
+	/* The card has been power-cycled; do not run a second MAC shutdown. */
+	error = wifi_runtime_boot(net->func, net->owner, false);
 	if (!error)
 		error = wifi_net_read_mac(net->func, net->owner, mac);
 	if (!error && !ether_addr_equal(mac, net->dev->dev_addr))
@@ -122,10 +141,13 @@ static int wifi_runtime_restart(struct h432b_wifi_net *net)
 /* Called after packet work and IRQ ownership have ended. */
 static int wifi_runtime_shutdown(struct sdio_func *func)
 {
+	struct h432b_wifi_sample *owner = sdio_get_drvdata(func);
 	bool enabled = false;
 	u8 ioex;
 	int error, cleanup;
 
+	if (owner->radio_off)
+		return 0;
 	sdio_claim_host(func);
 	ioex = sdio_f0_readb(func, SDIO_CCCR_IOEx, &error);
 	if (error)
@@ -144,6 +166,8 @@ static int wifi_runtime_shutdown(struct sdio_func *func)
 	}
 out:
 	sdio_release_host(func);
+	if (!error)
+		owner->radio_off = true;
 	return error;
 }
 

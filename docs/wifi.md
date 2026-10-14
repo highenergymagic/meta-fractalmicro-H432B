@@ -7,6 +7,18 @@ It uses the SDIO function's device-tree profile to select the H432B module's
 firmware and RF configuration. It is independent of the MMC host-controller
 driver and is not interchangeable with the USB-only `r8712u` driver.
 
+The board assigns the SDIO source to MPLL, with a 50 MHz divider target and
+a 25 MHz host-bus limit. It must not inherit EPLL: the audio driver retunes
+that PLL for PCM playback, invalidating the MMC host's cached source rate.
+The resulting bus rate depends on the available integer divisors.
+
+The Wi-Fi device-tree profile gives the MMC core ownership of the module's
+enable and reset lines through a fixed regulator and `mmc-pwrseq-simple`.
+Card power-on enables the supply before releasing reset; power-off asserts
+reset before disabling the supply. These controls are separate from Bluetooth.
+The supply has a 200 ms minimum off-to-on interval; a brief generic MMC reset
+is insufficient for the qualified radio restart configuration.
+
 | Function | Implementation |
 | --- | --- |
 | Station authentication | WPA2-Personal with CCMP; standard `wpa_supplicant` |
@@ -14,7 +26,7 @@ driver and is not interchangeable with the USB-only `r8712u` driver.
 | Legacy rates | Firmware-selected 802.11b/g rates; basic-rate handling for control traffic |
 | HT | 20 MHz, one TX/two RX spatial streams, QoS, Block Ack receive reordering and A-MSDU reception |
 | Recovery | Bounded firmware reload after transport faults; explicit interface down/up retry |
-| Power management | System suspend with station disconnection and reassociation on resume |
+| Power management | Administrative interface-down shuts down the radio; interface-up reloads firmware. System suspend retains firmware with station disconnection and reassociation on resume |
 | Statistics | Standard link information and `ethtool -S` software counters |
 
 Implementation is not a hardware qualification claim. Tested artifacts,
@@ -22,8 +34,8 @@ measurements and remaining qualification work are recorded separately in the
 [Wi-Fi validation record](wifi-qualification.md).
 
 Scans while associated, roaming, AP mode, WEP, TKIP, WPA3/SAE, enterprise
-authentication, PMF, 40 MHz channels, a second transmit stream and radio power
-saving are not supported. RSSI calibration and transmit completion-rate
+authentication, PMF, 40 MHz channels, a second transmit stream and connected
+station power saving are not supported. RSSI calibration and transmit completion-rate
 telemetry are not established; the driver does not invent those values.
 The chip's nominal PHY rate is not an application-throughput guarantee.
 
@@ -40,6 +52,39 @@ The systembase provides `iw`, `wpa_supplicant`, `wpa_cli` and the signed
 regulatory database. `FMRegulatory.service` applies the configured operating
 country before the station service starts. No network credentials are shipped,
 and the supplicant instance is not automatically enabled.
+
+## Radio power control
+
+Administrative interface-down stops packet work, releases its interrupt and
+runs the SDIO radio shutdown sequence without unregistering `wlan0`. A later
+interface-up cycles card power, reloads firmware and verifies the interface address before
+restarting traffic. A down interface is also powered off after initial probe;
+a network manager or supplicant can bring it up again. Disconnection alone
+does not power off an administratively up interface.
+
+Stop the station service before disabling the interface, so it cannot request
+another connection. For the standard supplicant instance:
+
+```sh
+systemctl stop wpa_supplicant@wlan0.service
+ip link set wlan0 down
+```
+
+To reconnect with an existing station configuration:
+
+```sh
+ip link set wlan0 up
+systemctl start wpa_supplicant@wlan0.service
+```
+
+System suspend retains its separate firmware-preservation path. Connected
+power saving through cfg80211 is not implemented; this interface controls a
+disabled radio, not an associated station's beacon-listening sleep policy.
+
+Installed-image restart and traffic results are recorded in the
+[radio power-cycling validation](wifi-qualification.md#administrative-radio-power-cycling).
+They do not qualify connected power saving, battery endurance or arbitrary
+access-point interoperability.
 
 ## Configure a station
 

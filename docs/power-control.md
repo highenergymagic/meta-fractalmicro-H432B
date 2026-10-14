@@ -126,6 +126,41 @@ regulators, PLLs, dividers and DRAM refresh. Readback of programmed slots is
 not measurement of the active voltage.
 See the [MAX8698C data sheet](https://atta.szlcsc.com/upload/public/pdf/source/20210518/C2682647_D87189DADB797D327BCE49EA88D19166.pdf).
 
+### Stock sleep policy and regulator integration
+
+The recovered stock kernel writes ONOFF1/ONOFF2 as `0x32/0x11` before
+sleep and restores `0x3e/0xf1` after wake. Under the MAX8698C register map,
+the changed bits disable LDO3, LDO4, LDO6, LDO7 and LDO8. BUCK3, LDO2,
+LDO5, LDO9 and battery-monitor enable bits are retained. BUCK1/BUCK2 have
+their software enable bits clear in both states; their effective enable
+also depends on PWREN. A zero software enable bit is not proof of a dead rail.
+
+Linux does not currently reproduce these PMIC writes. Their decoding identifies
+candidate sleep-power work, not measured savings or a qualified consumer map.
+Establish each output's board consumers and restore ordering before enabling
+regulator suspend control. Do not substitute the MAX8998 register map.
+
+CPUFreq and CPUIdle frameworks are disabled in the qualified runtime config.
+The ARM idle fallback nevertheless executes WFI; this is not a busy-loop idle.
+Deeper idle-state support and voltage-aware frequency scaling are separate
+integration tasks. The pinned S5PV210 CPUFreq implementation requires real
+`vddarm`/`vddint` regulators and updates DRAM refresh with clock transitions;
+enabling a governor alone does not supply that hardware contract.
+
+### Measuring consumption
+
+Measure idle consumption on battery with both AC and USB power disconnected.
+Keep peripheral state and workload fixed between comparisons. The gauge's
+current while externally powered is net battery charge/discharge current,
+not total board demand. Preserve signed current, voltage, uptime and connection
+state; discard transition samples and account for the gauge's averaging delay.
+
+The runtime gauge stops polling during suspend. A missing sample or the first
+post-wake current reading cannot establish sleep current. Sleep and soft-off
+consumption need a validated charge-accumulator delta over a timed interval,
+or an external measurement. Battery percentage alone is too coarse for short
+sleep tests. Do not infer battery life from the PMIC register values.
+
 ## Resume memory layout
 
 The runtime and `linux-h432b-resume-test` exclude the bottom 2 MiB from usable RAM:

@@ -7,6 +7,34 @@ tested on one H432B with operator-supplied radio firmware. Each result applies
 only to its listed artifacts. It does not qualify other devices, arbitrary
 firmware, all access points or later source revisions.
 
+## Administrative radio power cycling
+
+The following standard persistent-storage images include driver-owned radio
+shutdown, MMC-managed enable/reset GPIOs, a 200 ms minimum supply-off interval,
+and an SDIO clock source independent of the audio PLL.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Kernel bundle | `f751a0b0266a28d86b75a2de9c99bc0abb5513057ee0e40f112df738133d578f` |
+| OpenEVV systembase | `c879ccf9dada0573ae8be8207cf6c231019e16f3084e8eadf7db618127ed988e` |
+
+Both images passed NAND readback and booted from slot B with the packaged
+driver. The preserved slot A and system extensions were not overwritten.
+
+| Test | Result |
+| --- | --- |
+| Administrative down/up | Thirty cycles across two NAND boots; WPA2-PSK/CCMP reassociation after each cycle, no firmware recovery attempts |
+| Network configuration | Standard networkd DHCP; persistent machine ID readable by its service user |
+| Traffic after cycling | Three sets of five interface-bound gateway pings, no packet loss |
+| Local services | BRLTTY and OpenEVV services active after cycling and software reboot |
+| Power-button suspend/wake | One deep-sleep cycle; unchanged boot ID, working braille/speech, WPA2 reassociation and five interface-bound pings without loss |
+| Driver health | No firmware recovery attempts or CCMP MIC errors; one transmit-failure counter increment across the deliberate suspend |
+
+The supply-off interval is a tested configuration, not an electrical timing
+measurement. This profile still needs repeated suspend/wake testing, battery-only
+energy measurement and long-duration reliability testing. Prior throughput
+measurements below do not qualify throughput for these artifacts.
+
 ## Rate-adapting NAND station profile
 
 | Artifact | SHA-256 |

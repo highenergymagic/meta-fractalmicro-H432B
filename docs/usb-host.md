@@ -4,7 +4,10 @@
 
 The normal NAND kernel includes the onboard hub power/reset controls and
 host-PHY lifecycle integration. Resume and external-SD diagnostics consume
-the same h432b-usb-host.inc implementation. Earlier diagnostic tests enumerated
+the same h432b-usb-host.inc implementation. EHCI owns the onboard USB 2.0
+hub; the board disables the unused OHCI companion. The hub's transaction
+translator carries full- and low-speed traffic over its high-speed upstream
+link. Earlier diagnostic tests enumerated
 a PL2303 adapter at all three physical sockets. Descriptor transfers and
 driver binding are verified; serial TX/RX is not.
 
@@ -39,19 +42,20 @@ not Linux USB bus numbers.
 
 ## Power management
 
-The onboard NEC hub is kept runtime-active on H432B. Suspending its empty
-upstream link can stall host-register access during shutdown. This policy is
-limited to the board's device-tree-described hub; external devices retain
-their normal runtime-PM policies, and both EHCI and OHCI remain enabled.
+The hub and EHCI root hub use standard USB runtime autosuspend. Port power
+remains available for insertion detection; the hub requests remote wakeup
+when a device is connected. No periodic rail cycling or userspace polling
+service is required. External devices retain their normal driver PM policy.
 
-System suspend is separate from runtime autosuspend. The existing hub
-power/reset and host-controller system-sleep callbacks remain in use.
-Do not force the onboard hub's `power/control` back to `auto`.
+The OHCI companion is disabled in the board device tree, not in the generic
+driver. All three external sockets are downstream of the high-speed hub and
+do not require a directly attached full-/low-speed host controller. Keeping
+OHCI bound while the empty upstream link is suspended can stall OHCI register
+access on this board; the precise silicon failure mechanism is unresolved.
 
-Empty-port software reboot and power-button deep suspend/resume have been
-verified with this policy in the standard NAND kernel. The hub returns
-runtime-active after resume; host-controller runtime PM remains automatic.
-The underlying silicon clock/PHY failure mechanism is not established.
+Runtime insertion wake is distinct from waking the whole system. System
+suspend continues using the hub power/reset and EHCI system-sleep callbacks;
+the board's power-button-only system wake policy is unchanged.
 
 ## Diagnostics
 
@@ -75,3 +79,14 @@ Hub and adapter re-enumeration have also passed after a runtime deep-sleep
 cycle. Device power budgets, serial payload continuity and broad peripheral
 compatibility remain unqualified. See [power management](power-control.md)
 and the artifact-specific validation record for the tested scope.
+
+EHCI-only qualification has demonstrated idle hub/root-hub suspend and resume,
+and a rear-left full-speed PL2303 insertion waking the suspended hub and
+binding its driver. The installed NAND kernel also passed an empty-port software
+reboot and power-button deep-sleep/resume, returning to automatic hub/root-hub
+suspend with working braille and speech. On that installed kernel, rear-left
+PL2303 insertion also woke both suspended hubs and bound the serial driver.
+Low-speed HID devices and repeated-cycle endurance remain unqualified.
+A 60-second battery-only comparison measured approximately 0.36 W lower
+whole-device idle draw with hub/root autosuspend than with both held active.
+This short screening result is not a battery-endurance qualification.

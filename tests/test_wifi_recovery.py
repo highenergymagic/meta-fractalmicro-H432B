@@ -63,7 +63,7 @@ struct host { unsigned int caps; };
 struct card { struct host *host; };
 struct sdio_func { struct card *card; unsigned int cur_blksize, num; };
 struct h432b_command_result { bool irq_owned, irq_native, cancelled; int cleanup; };
-struct owner { int lock; struct h432b_command_result command; };
+struct owner { int lock; bool radio_off; struct h432b_command_result command; };
 struct h432b_wifi_net {
  struct owner *owner; struct sdio_func *func;
  bool faulted, needs_restart, enabled_func, stopping;
@@ -143,6 +143,12 @@ int main(void) {
  restart_error = 0;
  assert(wifi_net_start(&dev) == 0 && restart_calls == 2);
  assert(!net.faulted && !net.needs_restart && !net.stopping && queued == 1);
+ /* A deliberate powered-off state also reloads, without a transport fault. */
+ memset(&owner, 0, sizeof(owner)); memset(&net, 0, sizeof(net));
+ net.owner = &owner; net.func = &func; owner.radio_off = true;
+ calls = irq = enabled = queued = restart_calls = 0;
+ assert(!wifi_net_start(&dev));
+ assert(restart_calls == 1 && !net.faulted && !net.stopping && queued == 1);
  return 0;
 }
 """)
@@ -242,6 +248,7 @@ int main(void)
 #define to_delayed_work(p) ((struct delayed_work *)(p))
 #define dev_info(...) ((void)0)
 #define dev_err(...) ((void)0)
+#define dev_warn_ratelimited(...) ((void)0)
 struct work_struct { int unused; };
 struct delayed_work { struct work_struct work; };
 struct net_device { bool running, attached; };

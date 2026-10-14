@@ -21,7 +21,11 @@ The board-control Bluetooth enable is GPE0[2], active high, followed by a
 that handshake is not a Linux power-management interface. The normal runtime
 holds this enable high during operation and deep sleep.
 Retaining the enable prevents loss of volatile controller parameters and identity;
-Bluetooth is not a wake source. Power cycling remains unqualified.
+Bluetooth is not a wake source. A manual enable-line power cycle followed by
+BCSP attachment and an HCI local-version query has passed. The same test logged
+BCSP ordering warnings and an HCI reset timeout, so it does not establish a
+clean controller restart. Automatic identity
+and radio-parameter restoration after power loss remain unqualified.
 
 The factory transport also applies five CSR parameter values before a warm
 reset: 0x0217=0xffff, 0x01f6=0x0017, 0x01fe=26000, 0x0254=0x770e and
@@ -43,6 +47,12 @@ five seconds, uses 8E1 through BlueZ's BCSP setup, and has no automatic restart
 loop. GPS, Wi-Fi and other power rails are not modified by this service.
 
 ## Qualification and limits
+
+A short battery-only comparison with the transport stopped did not resolve
+a meaningful idle-power reduction from lowering the enable line. The two
+powered windows differed more than the apparent reduction in the unpowered
+window. This does not establish consumption during discovery or a connection,
+nor prove that the enable pin electrically isolates every Bluetooth supply.
 
 Controller-version queries, BR/EDR discovery, legacy pairing, SDP discovery
 and L2CAP echo traffic have passed on the NAND runtime. After manual factory
