@@ -50,8 +50,12 @@ Building images never accesses or flashes hardware.
 
 The systembase provides `iw`, `wpa_supplicant`, `wpa_cli` and the signed
 regulatory database. `FMRegulatory.service` applies the configured operating
-country before the station service starts. No network credentials are shipped,
-and the supplicant instance is not automatically enabled.
+country before networking starts. No network credentials are shipped.
+The standard OpenH432 image uses NetworkManager; its configuration and
+persistent profile interface are documented in the OS layer's
+[networking guide](https://github.com/highenergymagic/meta-fractalmicro-openh432/blob/main/docs/networking.md).
+Standalone supplicant commands below apply to diagnostic compositions, not
+NetworkManager-managed interfaces.
 
 ## Radio power control
 
@@ -62,8 +66,10 @@ restarting traffic. A down interface is also powered off after initial probe;
 a network manager or supplicant can bring it up again. Disconnection alone
 does not power off an administratively up interface.
 
-Stop the station service before disabling the interface, so it cannot request
-another connection. For the standard supplicant instance:
+On the standard image, use `nmcli radio wifi off` and `nmcli radio wifi on`.
+Do not compete with NetworkManager using direct interface or supplicant control.
+For diagnostic images, stop the standalone station service before disabling the
+interface, so it cannot request another connection:
 
 ```sh
 systemctl stop wpa_supplicant@wlan0.service
@@ -93,7 +99,11 @@ option or the installed regulatory configuration. Do not infer it from an SSID.
 Keep the regulatory database and signature together; signature verification
 remains enabled. AP country-IE hints cannot override the selected country.
 
-Create a root-owned, mode-0600 file at
+On the standard image use `nmcli --ask device wifi connect NETWORK_NAME`.
+The driver advertises only PSK authentication; it does not support PSK-SHA256,
+FT or SAE. Applications must respect its advertised capabilities.
+
+For a diagnostic image without NetworkManager, create a root-owned, mode-0600 file at
 `/etc/wpa_supplicant/wpa_supplicant-wlan0.conf`. Set
 `ctrl_interface=/run/wpa_supplicant` and `passive_scan=1`, then configure the network with the
 operator's SSID and PSK, `key_mgmt=WPA-PSK`, `proto=RSN`, `pairwise=CCMP`,
@@ -115,11 +125,11 @@ omits probe-request IEs for passive scans, which transmit no probes. Active
 supplicant discovery with extra IEs and hidden-network interoperability remain
 unqualified; accepting a driver-level directed request does not qualify them.
 
-Systemd-networkd requests DHCP and accepts IPv6 router advertisements after
-association. Its Wi-Fi route metric is higher than Ethernet's, so wired access
-is preferred when both are connected. The development image's writable overlay
-is volatile: station profiles created there do not survive reboot. Persistent
-credential provisioning requires a userdata policy.
+Diagnostic compositions use systemd-networkd for addressing after association.
+The standard image uses NetworkManager and prefers wired access when both
+interfaces are connected. Profiles persist in shared `/var` on persistent-storage
+installations; the default volatile configuration loses them on reboot. See the
+OS networking guide for profile storage and authorization.
 
 ## Firmware and device profile
 

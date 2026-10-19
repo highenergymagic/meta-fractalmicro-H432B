@@ -53,6 +53,13 @@ do_configure:append() {
     for option in FAT_FS VFAT_FS EXFAT_FS NLS_CODEPAGE_437 NLS_ISO8859_1 NLS_UTF8 EXT4_FS EXT4_FS_POSIX_ACL EXT4_FS_SECURITY BTRFS_FS F2FS_FS EROFS_FS EROFS_FS_ZIP; do
         grep -qx "CONFIG_$option=y" ${B}/.config || bbfatal "Missing runtime filesystem option: $option"
     done
+    for option in AUDIT SECURITY_NETWORK SECURITY_SELINUX TMPFS_XATTR SQUASHFS_XATTR EROFS_FS_XATTR F2FS_FS_XATTR F2FS_FS_SECURITY; do
+        grep -qx "CONFIG_$option=y" ${B}/.config || bbfatal "Missing SELinux runtime option: $option"
+    done
+    for option in CONFIGFS_FS USB_CONFIGFS USB_CONFIGFS_F_FS USB_F_FS USB_G_SERIAL; do
+        grep -qx "CONFIG_$option=y" ${B}/.config || bbfatal "Missing runtime USB option: $option"
+    done
+    grep -q '^CONFIG_LSM=".*selinux' ${B}/.config || bbfatal "SELinux is absent from the active LSM list"
     if [ "${H432B_WIFI_DRIVER_MODE}" = "m" ]; then
         grep -qx "CONFIG_MODULES=y" ${B}/.config || bbfatal "Runtime module loading is disabled"
         grep -qx "CONFIG_MODULE_UNLOAD=y" ${B}/.config || bbfatal "Runtime module removal is disabled"

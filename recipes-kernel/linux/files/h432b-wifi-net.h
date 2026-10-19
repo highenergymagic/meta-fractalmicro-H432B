@@ -745,6 +745,7 @@ static void wifi_net_stream_init(struct h432b_wifi_net *net)
 
 static int wifi_net_register(struct sdio_func *func, struct h432b_wifi_sample *owner)
 {
+	static const u32 akm_suites[] = { WLAN_AKM_SUITE_PSK };
 	static const unsigned int rates[] = { 10, 20, 55, 110, 60, 90, 120, 180,
 					      240, 360, 480, 540 };
 	struct h432b_command_result *r = &owner->command;
@@ -817,6 +818,9 @@ static int wifi_net_register(struct sdio_func *func, struct h432b_wifi_sample *o
 	wiphy->max_scan_ie_len = 0;
 	wiphy->cipher_suites = wifi_net_ciphers;
 	wiphy->n_cipher_suites = ARRAY_SIZE(wifi_net_ciphers);
+	/* Do not let userspace infer support for SHA256, FT or SAE AKMs. */
+	wiphy->akm_suites = akm_suites;
+	wiphy->n_akm_suites = ARRAY_SIZE(akm_suites);
 	memcpy(wiphy->perm_addr, mac, ETH_ALEN);
 	set_wiphy_dev(wiphy, &func->dev);
 	dev = alloc_netdev(sizeof(net), "wlan%d", NET_NAME_ENUM, ether_setup);

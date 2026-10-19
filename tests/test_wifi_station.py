@@ -15,6 +15,12 @@ NET = (FILES / "h432b-wifi-net.h").read_text()
 
 
 class WifiStation(unittest.TestCase):
+    def test_advertised_akm_matches_connect_contract(self):
+        self.assertIn("static const u32 akm_suites[] = { WLAN_AKM_SUITE_PSK };", NET)
+        self.assertIn("wiphy->akm_suites = akm_suites;", NET)
+        self.assertIn("wiphy->n_akm_suites = ARRAY_SIZE(akm_suites);", NET)
+        self.assertIn("params->crypto.n_akm_suites != 1", ASSOC)
+
     def test_security_scope(self):
         for token in ("NL80211_WPA_VERSION_2", "WLAN_CIPHER_SUITE_CCMP",
                       "WLAN_AKM_SUITE_PSK", "NL80211_MFP_NO", "wifi_ht_assoc_ies_valid"):

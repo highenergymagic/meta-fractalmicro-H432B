@@ -31,7 +31,9 @@ class WifiDocumentation(unittest.TestCase):
         self.assertIn("not a measured\ntransmit PHY rate", RECORD)
         self.assertIn("do not qualify the current driver", RECORD)
         self.assertNotIn("## Pending firmware-event inspection", RECORD)
-        self.assertNotIn("SHA256", GUIDE)
+        # Artifact digests belong in validation records; PSK-SHA256 is a
+        # protocol name and belongs in the capability documentation.
+        self.assertNotRegex(GUIDE, r"\b[0-9a-fA-F]{64}\b")
 
     def test_limitations_remain_explicit(self):
         for phrase in ("PMF", "not supported", "Scans while associated",

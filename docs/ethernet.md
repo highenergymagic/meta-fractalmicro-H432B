@@ -3,7 +3,7 @@
 ## Availability
 
 Wired Ethernet is included in the normal runtime. The systembase configures
-DHCP through systemd-networkd. Network access and key-authenticated maintenance
+DHCP through NetworkManager. Network access and key-authenticated maintenance
 SSH have been exercised on hardware. Deep-sleep recovery has passed DHCP,
 SSH and checksum-verified bidirectional transfers on one device cycle;
 long-duration and repeated-cycle qualification remain outstanding.
@@ -40,7 +40,7 @@ SROM bank timing is **inherited from the factory boot path**, not initialized
 by this Ethernet node. The board PM bridge saves and restores those timings.
 For non-wake Ethernet, suspend closes the interface and drains its IRQ/NAPI
 work; resume pulses the known controller reset and reopens the interface.
-The normal systemd-networkd configuration reacquires DHCP. Wake-on-LAN is not
+The normal network manager reacquires DHCP. Wake-on-LAN is not
 enabled; only the power switch wakes this board.
 
 ## Diagnostics
@@ -98,8 +98,9 @@ Linux exposes the effective Ethernet address at
 `FM-H432B-MAC-` identifier derived from the validated factory Ethernet MAC.
 `fractalmicro,board-id-source` identifies that derivation explicitly.
 
-This board ID is **not a verified manufacturer serial number**. No
-`serial-number` property is fabricated. The stock processor-model-derived
+This board ID is **not a verified manufacturer serial number**. Modern U-Boot's
+generic fixup also exposes its USB board identity through `serial-number`;
+that property does not establish a manufacturer serial. The stock processor-model-derived
 boot name and a removable battery's identity are not suitable system serials.
 Linux-capable U-Boot stages use the same MAC-derived board ID for their
 maintenance USB serial and the Linux ACM console serial. Missing or invalid
