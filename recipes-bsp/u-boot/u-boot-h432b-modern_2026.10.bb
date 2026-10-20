@@ -25,6 +25,8 @@ SRC_URI = "git://github.com/u-boot/u-boot.git;protocol=https;nobranch=1 \
            file://0019-h432b-recovery-menu.patch \
            file://0020-h432b-systemext-fastboot.patch \
            file://0021-h432b-sparse-fastboot.patch \
+           file://0022-h432b-standalone-recovery.patch \
+           file://0023-h432b-load-progress.patch \
            file://modern/check-bch-equivalence.py file://nand/test-bch-equivalence.c \
            file://bootmode.h file://modern/u2_braille.h \
            file://identity.h file://usb-identity.h \

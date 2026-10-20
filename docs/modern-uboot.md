@@ -101,8 +101,9 @@ whole image from its first fragment; there is no persistent offset-resume
 protocol. Activation streams the full systembase integrity check through a
 bounded NAND cache, so it does not require image-sized RAM.
 
-There is no erase command, no recovery-volume installer,
-and no flashing-lock/unlock policy. Unsupported operations fail rather than
+There is no raw erase command or flashing-lock/unlock policy. The standalone
+recovery volume accepts a bounded, marked boot image with verified readback.
+Unsupported operations fail rather than
 reporting a successful update. Factory boot regions and the NAND tail remain
 outside the permitted write boundary.
 
@@ -122,11 +123,15 @@ Navigation wraps; a held key must be released before another action.
 | --- | --- |
 | Reboot now | Restarts normal boot |
 | Reboot into boot loader | Enters fastboot maintenance |
-| Reboot into recovery | Unavailable until a recovery image/backend is integrated |
-| Wipe data / Factory Reset | Confirmation UI only; unavailable without persistent-data provisioning |
-| Wipe Cache | Confirmation UI only; unavailable without cache provisioning |
+| Reboot into recovery | Boots the standalone recovery image |
+| Wipe data / Factory Reset | Opens recovery with factory reset selected |
+| Wipe Cache | Opens recovery with cache reset selected |
 
-Unavailable actions do not erase storage. Confirmation defaults to Cancel.
+Erase operations require fresh confirmation in recovery, defaulting to Cancel.
+U-Boot never formats internal SD. A missing or invalid recovery image is
+rejected and leaves fastboot available. Recovery boots do not consume A/B
+attempts. The [recovery guide](https://github.com/highenergymagic/meta-fractalmicro-openh432/blob/main/docs/recovery.md)
+describes deployment, reset boundaries and the development USB shell.
 
 ## Qualification and limits
 
@@ -143,6 +148,6 @@ MMC extension writes, physical readback and combined activation have passed
 device tests. Active-slot writes were rejected; a corrupt inactive extension
 prevented activation without changing selection. The corrected three-image
 set booted from NAND and passed runtime health checks. MMC provisioning and
-factory-reset backends are not part of this loader's deployment interface.
+factory reset execute in standalone Linux recovery, not inside the loader.
 Multi-download transfer qualification is recorded separately from the earlier
 raw-image results in the hardware validation record.

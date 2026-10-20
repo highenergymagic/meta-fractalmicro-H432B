@@ -1,0 +1,326 @@
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Subject: [PATCH] h432b: boot and update standalone accessible recovery
+
+Keep recovery outside normal slot accounting. Menu selections hand an explicit
+request to the independent RAM root; the loader never formats internal SD.
+
+Upstream-Status: Inappropriate [H432B recovery policy]
+
+diff --git a/board/fractalmicro/h432b/recovery-menu.c b/board/fractalmicro/h432b/recovery-menu.c
+index 2e90a3c..484e046 100644
+--- a/board/fractalmicro/h432b/recovery-menu.c
++++ b/board/fractalmicro/h432b/recovery-menu.c
+@@ -80,7 +80,7 @@ static int cue(void)
+ 	return pressed;
+ }
+ 
+-/* Return nonzero to enter fastboot; zero continues the selected Linux boot. */
++/* Return an action; zero continues the selected Linux boot. No erase here. */
+ int h432b_recovery_menu(void)
+ {
+ 	struct h432b_menu menu = { .intro = 1 };
+@@ -103,7 +103,7 @@ int h432b_recovery_menu(void)
+ 		return 0;
+ 	if (u2_braille_brf(h432b_menu_label(&menu))) {
+ 		printf("H432B: recovery menu display unavailable\n");
+-		return 1;
++		return MENU_FASTBOOT;
+ 	}
+ 	for (;;) {
+ 		sample = keys();
+@@ -118,14 +118,14 @@ int h432b_recovery_menu(void)
+ 			else if (sample) {
+ 				if (armed && sample != 0xff) {
+ 					action = h432b_menu_step(&menu, sample);
+-					if (action == MENU_FASTBOOT)
+-						return 1;
++					if (action >= MENU_FASTBOOT)
++						return action;
+ 					if (action == MENU_REBOOT) {
+ 						run_command("reset", 0);
+ 						menu.unavailable = 1;
+ 					}
+ 					if (u2_braille_brf(h432b_menu_label(&menu)))
+-						return 1;
++						return MENU_FASTBOOT;
+ 				}
+ 				armed = 0;
+ 			}
+diff --git a/board/fractalmicro/h432b/recovery-menu.h b/board/fractalmicro/h432b/recovery-menu.h
+index 76ea3af..7dfd45a 100644
+--- a/board/fractalmicro/h432b/recovery-menu.h
++++ b/board/fractalmicro/h432b/recovery-menu.h
+@@ -5,7 +5,10 @@
+ int h432b_recovery_menu(void);
+ 
+ enum h432b_menu_key { MENU_NONE, MENU_PREVIOUS, MENU_NEXT, MENU_SELECT };
+-enum h432b_menu_action { MENU_STAY, MENU_REBOOT, MENU_FASTBOOT };
++enum h432b_menu_action {
++	MENU_STAY, MENU_REBOOT, MENU_FASTBOOT,
++	MENU_RECOVERY, MENU_FACTORY_RESET, MENU_WIPE_CACHE,
++};
+ struct h432b_menu {
+ 	unsigned int intro;
+ 	unsigned int item;
+@@ -54,8 +57,10 @@ static inline enum h432b_menu_action h432b_menu_step(struct h432b_menu *menu,
+ 			menu->confirm_yes = !menu->confirm_yes;
+ 		else if (key == MENU_SELECT) {
+ 			menu->confirmation = 0;
+-			/* Recovery and filesystem operations are not integrated yet. */
+-			menu->unavailable = menu->confirm_yes;
++			if (menu->confirm_yes) {
++				menu->confirm_yes = 0;
++				return menu->item == 3 ? MENU_FACTORY_RESET : MENU_WIPE_CACHE;
++			}
+ 			menu->confirm_yes = 0;
+ 		}
+ 		return MENU_STAY;
+@@ -70,7 +75,7 @@ static inline enum h432b_menu_action h432b_menu_step(struct h432b_menu *menu,
+ 		if (menu->item == 1)
+ 			return MENU_FASTBOOT;
+ 		if (menu->item == 2)
+-			menu->unavailable = 1;
++			return MENU_RECOVERY;
+ 		else {
+ 			menu->confirmation = 1;
+ 			menu->confirm_yes = 0;
+diff --git a/board/fractalmicro/h432b/storage.c b/board/fractalmicro/h432b/storage.c
+index 580052e..f4eb335 100644
+--- a/board/fractalmicro/h432b/storage.c
++++ b/board/fractalmicro/h432b/storage.c
+@@ -39,6 +39,15 @@ int fastboot_board_part_info(const char *name, size_t *size, char *response)
+ 	struct ubi_volume *vol;
+ 	int ret;
+ 
++	if (!strcmp(name, "recovery")) {
++		vol = ubi_devices[0] ? ubi_find_volume("recovery") : NULL;
++		if (!vol || vol->vol_type != UBI_STATIC_VOLUME ||
++		    vol->reserved_pebs != 264 || vol->usable_leb_size != 126976)
++			goto missing;
++		if (size)
++			*size = (size_t)vol->reserved_pebs * vol->usable_leb_size;
++		return vol->vol_id;
++	}
+ 	if (h432b_fastboot_resolve(name, &target))
+ 		goto missing;
+ 	if (target.storage == H432B_FASTBOOT_MMC) {
+@@ -64,9 +73,8 @@ missing:
+ 	return -ENODEV;
+ }
+ 
+-static int verify_kernel(unsigned int slot)
++static int verify_boot_volume(const char *name, unsigned int limit)
+ {
+-	const char *name = slot ? "kernel_b" : "kernel_a";
+ 	struct ubi_volume *vol = ubi_find_volume(name);
+ 	struct u2_fb_image layout;
+ 	u8 *buffer = (void *)U2_FB_ADDRESS;
+@@ -79,7 +87,7 @@ static int verify_kernel(unsigned int slot)
+ 
+ 	if (!vol || vol->vol_type != UBI_STATIC_VOLUME || vol->updating ||
+ 	    vol->upd_marker || vol->corrupted || vol->used_bytes < U2_FB_PAGE ||
+-	    vol->used_bytes > 132U * 126976U)
++	    vol->used_bytes > limit)
+ 		return -EINVAL;
+ 	size = vol->used_bytes;
+ 	while (offset < size) {
+@@ -107,6 +115,11 @@ static int verify_kernel(unsigned int slot)
+ 	return 0;
+ }
+ 
++static int verify_kernel(unsigned int slot)
++{
++	return verify_boot_volume(slot ? "kernel_b" : "kernel_a", 132U * 126976U);
++}
++
+ static int read_state(void *context, unsigned int copy, unsigned char *data)
+ {
+ 	const char *name = copy ? "bootstate_b" : "bootstate_a";
+@@ -305,6 +318,49 @@ static int volume_digest(struct ubi_volume *vol, u8 *digest)
+ 	return ret;
+ }
+ 
++static int recovery_image(const void *buffer, u32 size)
++{
++	struct u2_fb_image layout;
++	const void *fdt;
++	const char *marker;
++	int chosen, length;
++
++	if (u2_fb_layout(buffer, size, &layout) || layout.kernel_size > 0x01000000)
++		return -EINVAL;
++	fdt = (const u8 *)buffer + layout.dtb;
++	if (fdt_check_full(fdt, layout.dtb_size))
++		return -EINVAL;
++	chosen = fdt_path_offset(fdt, "/chosen");
++	marker = fdt_getprop(fdt, chosen, "fractalmicro,recovery-v1", &length);
++	return !marker || length != sizeof("standalone") ||
++		memcmp(marker, "standalone", sizeof("standalone")) ? -EINVAL : 0;
++}
++
++static void flash_recovery(const void *buffer, u32 size, char *response)
++{
++	struct ubi_volume *vol = ubi_devices[0] ? ubi_find_volume("recovery") : NULL;
++	u8 expected[32], actual[32];
++
++	if (!vol || vol->vol_type != UBI_STATIC_VOLUME || vol->updating ||
++	    vol->reserved_pebs != 264 || vol->usable_leb_size != 126976 ||
++	    size > 264U * 126976U || recovery_image(buffer, size)) {
++		fastboot_fail("Expected standalone recovery image and volume", response);
++		return;
++	}
++	/* Recovery is not A/B. A failed write leaves its UBI update marker set;
++	 * normal slots, factory loader, and userdata are never touched here.
++	 */
++	sha256_csum_wd(buffer, size, expected, CHUNKSZ_SHA256);
++	if (ubi_volume_write("recovery", buffer, 0, size) ||
++	    vol->updating || vol->upd_marker || vol->corrupted ||
++	    vol->used_bytes != size || volume_digest(vol, actual) ||
++	    memcmp(expected, actual, sizeof(expected))) {
++		fastboot_fail("Recovery update or readback failed", response);
++		return;
++	}
++	fastboot_okay("Recovery verified; slots unchanged", response);
++}
++
+ static struct {
+ 	struct ubi_volume *vol;
+ 	u32 bytes;
+@@ -415,6 +471,10 @@ void fastboot_board_flash(const char *name, const void *buffer, u32 size,
+ 	unsigned int i;
+ 	bool is_sparse = h432b_is_sparse(buffer, size);
+ 
++	if (!strcmp(name, "recovery")) {
++		flash_recovery(buffer, size, response);
++		return;
++	}
+ 	if (!size || !ubi_devices[0] || h432b_fastboot_resolve(name, &target)) {
+ 		fastboot_fail("Unknown or unavailable image target", response);
+ 		return;
+@@ -591,6 +651,7 @@ const char *fastboot_board_getvar_name(unsigned int index)
+ {
+ 	static const char *const names[] = {
+ 		"slot-count", "h432b-nand", "h432b-ubi",
++		"partition-size:recovery",
+ 		"h432b-kernel-sha256-hi", "h432b-kernel-sha256-lo",
+ 		"has-slot:boot", "has-slot:kernel", "has-slot:system",
+ 		"has-slot:systembase", "has-slot:systemext",
+@@ -610,7 +671,7 @@ const char *fastboot_board_getvar_name(unsigned int index)
+ }
+ 
+ static int h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+-			 char *const argv[])
++			 char *const argv[], const char *recovery)
+ {
+ 	struct h432b_bootstore store = {
+ 		.read = read_state, .replace = replace_state,
+@@ -627,16 +688,22 @@ static int h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	int slot, chosen, ethernet, length, ret;
+ 	ulong started = get_timer(0);
+ 
+-	if (!state_valid)
++	if (!ubi_devices[0] || (!recovery && !state_valid))
+ 		return CMD_RET_FAILURE;
+ 	fastboot_invalidate_image();
+-	slot = h432b_bootstate_attempt(&store, scratch);
+-	if (slot < 0 || h432b_bootstate_load(&store, scratch, &state) < 0)
+-		return CMD_RET_FAILURE;
+-	ret = verify_kernel(slot);
++	if (recovery) {
++		/* Recovery neither consumes nor acknowledges an A/B boot attempt. */
++		slot = -1;
++		ret = verify_boot_volume("recovery", 32U << 20);
++	} else {
++		slot = h432b_bootstate_attempt(&store, scratch);
++		if (slot < 0 || h432b_bootstate_load(&store, scratch, &state) < 0)
++			return CMD_RET_FAILURE;
++		ret = verify_kernel(slot);
++	}
+ 	if (ret)
+ 		return CMD_RET_FAILURE;
+-	vol = ubi_find_volume(slot ? "kernel_b" : "kernel_a");
++	vol = ubi_find_volume(recovery ? "recovery" : slot ? "kernel_b" : "kernel_a");
+ 	if (u2_fb_layout(buffer, vol->used_bytes, &layout) ||
+ 	    layout.kernel_size > 0x01000000 || layout.dtb_size > 0x00100000 ||
+ 	    fdt_check_full(buffer + layout.dtb, layout.dtb_size))
+@@ -648,15 +715,27 @@ static int h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	if (ret)
+ 		return CMD_RET_FAILURE;
+ 	chosen = fdt_path_offset(fdt, "/chosen");
++	if (recovery) {
++		const char *marker = fdt_getprop(fdt, chosen,
++					       "fractalmicro,recovery-v1", &length);
++		if (!marker || length != sizeof("standalone") ||
++		    memcmp(marker, "standalone", sizeof("standalone")))
++			return CMD_RET_FAILURE;
++	}
+ 	original = fdt_getprop(fdt, chosen, "bootargs", &length);
+ 	if (!original || length < 1 || length > sizeof(args) ||
+ 	    original[length - 1] || memchr(original, 0, length - 1) ||
+ 	    strstr(original, "rauc.slot=") || strstr(original, "openh432.attempt=") ||
++	    strstr(original, "openh432.recovery=") ||
+ 	    strstr(original, " --") ||
+ 	    h432b_usb_bootargs(original, length, identity_valid ? board_id : NULL,
+ 			      args, sizeof(args)))
+ 		return CMD_RET_FAILURE;
+-	ret = snprintf(handoff, sizeof(handoff),
++	if (recovery)
++		ret = snprintf(handoff, sizeof(handoff), "%s openh432.recovery=%s",
++			       args, recovery);
++	else
++		ret = snprintf(handoff, sizeof(handoff),
+ 		       "%s rauc.slot=%c openh432.attempt=%u"
+ 		       " openh432.loader_attach_ms=%lu"
+ 		       " openh432.loader_kernel_ms=%lu"
+@@ -684,8 +763,13 @@ static int h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+ 		return CMD_RET_FAILURE;
+ 	snprintf(command, sizeof(command), "bootz 42000000 44400000:%x 44000000",
+ 		 layout.ramdisk_size);
+-	printf("H432B: booting NAND slot %c, attempt %u\n", 'A' + slot, state.serial);
+-	(void)u2_braille_brf(U2_BRAILLE_KERNEL_BRF);
++	if (recovery) {
++		printf("H432B: booting standalone recovery\n");
++		(void)u2_braille_brf("starting recovery");
++	} else {
++		printf("H432B: booting NAND slot %c, attempt %u\n", 'A' + slot, state.serial);
++		(void)u2_braille_brf(U2_BRAILLE_KERNEL_BRF);
++	}
+ 	if (h432b_cache_check_handoff(layout.kernel_size, layout.ramdisk_size,
+ 				     fdt_totalsize(fdt)))
+ 		return CMD_RET_FAILURE;
+@@ -695,16 +779,23 @@ static int h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+ static int do_h432b_boot(struct cmd_tbl *cmdtp, int flag, int argc,
+ 			char *const argv[])
+ {
+-	int ret;
++	int ret, action = h432b_recovery_menu();
++	const char *recovery = NULL;
+ 
+-	if (h432b_recovery_menu()) {
++	if (action == MENU_FASTBOOT) {
+ 		h432b_cache_leave();
+ 		return CMD_RET_FAILURE;
+ 	}
++	if (action == MENU_RECOVERY)
++		recovery = "menu";
++	else if (action == MENU_FACTORY_RESET)
++		recovery = "factory-reset";
++	else if (action == MENU_WIPE_CACHE)
++		recovery = "wipe-cache";
+ 	ret = h432b_cache_enter();
+ 
+ 	if (!ret)
+-		ret = h432b_boot(cmdtp, flag, argc, argv);
++		ret = h432b_boot(cmdtp, flag, argc, argv, recovery);
+ 	h432b_cache_leave();
+ 	return ret ? CMD_RET_FAILURE : CMD_RET_SUCCESS;
+ }
+@@ -731,7 +822,7 @@ static int do_h432b_auto(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	ret = do_h432b_storage(cmdtp, flag, argc, argv);
+ 
+ 	/* Consume the one-shot request even if storage is unavailable. */
+-	if (ret || mode) {
++	if ((ret && !ubi_devices[0]) || mode) {
+ 		h432b_cache_leave();
+ 		return CMD_RET_FAILURE;
+ 	}

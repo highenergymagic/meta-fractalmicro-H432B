@@ -20,6 +20,13 @@ The [modern loader reference](modern-uboot.md) defines its commands and limits.
 
 ## Installation and recovery
 
+`openh432-recovery-image` in the OS layer produces the independent NAND
+recovery image. It uses the runtime kernel and a dedicated RAM filesystem
+with a Grade-1 braille menu, explicit factory/cache reset actions and a USB
+maintenance shell. It does not require either system slot to boot. See the
+[recovery guide](https://github.com/highenergymagic/meta-fractalmicro-openh432/blob/main/docs/recovery.md)
+for installation, confirmation controls and storage boundaries.
+
 `u-boot-h432b` is the low-address USB-shell bootstrap needed by the initial
 stock-CE conversion workflow. `u-boot-h432b-fastboot` is its high-RAM fastboot
 loader. Both remain because a device without a Linux NAND pool cannot use the

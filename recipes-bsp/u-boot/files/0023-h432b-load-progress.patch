@@ -1,0 +1,45 @@
+Subject: [PATCH] h432b: show bounded braille image-load progress
+
+Upstream-Status: Inappropriate [board integration]
+
+--- a/board/fractalmicro/h432b/storage.c
++++ b/board/fractalmicro/h432b/storage.c
+@@ -81,6 +81,9 @@
+ 	u8 digest[SHA256_SUM_LEN];
+ 	char text[65];
+ 	size_t offset = 0, size, length;
++	const char *label = !strcmp(name, "recovery") ?
++		"loading recovery" : "loading kernel";
++	unsigned int percent, previous = 0;
+ 	int leb = 0, ret;
+ 	unsigned int i;
+ 	ulong started = get_timer(0), hash_started;
+@@ -90,6 +93,7 @@
+ 	    vol->used_bytes > limit)
+ 		return -EINVAL;
+ 	size = vol->used_bytes;
++	(void)u2_braille_progress(label, 0);
+ 	while (offset < size) {
+ 		length = min_t(size_t, size - offset, vol->usable_leb_size);
+ 		/* Check each static-volume LEB CRC as well as NAND BCH. */
+@@ -98,6 +102,12 @@
+ 		if (ret)
+ 			return ret;
+ 		offset += length;
++		percent = offset * 95 / size;
++		/* At most 20 display writes per image, independent of LEB count. */
++		if (percent >= previous + 5) {
++			(void)u2_braille_progress(label, percent);
++			previous = percent;
++		}
+ 	}
+ 	if (u2_fb_layout(buffer, size, &layout))
+ 		return -EINVAL;
+@@ -105,6 +115,7 @@
+ 	hash_started = get_timer(0);
+ 	sha256_csum_wd(buffer, size, digest, CHUNKSZ_SHA256);
+ 	hash_ms = get_timer(hash_started);
++	(void)u2_braille_progress(label, 99);
+ 	for (i = 0; i < sizeof(digest); i++)
+ 		sprintf(text + 2 * i, "%02x", digest[i]);
+ 	env_set("fastboot.h432b-kernel-sha256-lo", text + 32);

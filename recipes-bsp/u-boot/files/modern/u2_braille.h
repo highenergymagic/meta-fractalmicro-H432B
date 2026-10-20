@@ -138,4 +138,33 @@ static int u2_braille_brf(const char *brf)
         return result;
     return u2_braille_sixdot_frame(dots);
 }
+
+/* Fixed numeric context: number sign in cell 30, percentage in cells 31-32. */
+static int u2_braille_progress_decode(const char *label, unsigned int percent,
+                                    unsigned char dots[32])
+{
+    static const unsigned char digits[] = {26, 1, 3, 9, 25, 17, 11, 27, 19, 10};
+    unsigned int length = 0;
+    int result;
+
+    while (label[length])
+        length++;
+    if (length > 28 || percent > 99)
+        return 7;
+    result = u2_braille_brf_decode(label, dots);
+    if (result)
+        return result;
+    dots[29] = 0x3c;
+    dots[30] = digits[percent / 10];
+    dots[31] = digits[percent % 10];
+    return 0;
+}
+
+static int u2_braille_progress(const char *label, unsigned int percent)
+{
+    unsigned char dots[32];
+    int result = u2_braille_progress_decode(label, percent, dots);
+
+    return result ? result : u2_braille_sixdot_frame(dots);
+}
 #endif
