@@ -40,6 +40,8 @@ SROM bank timing is **inherited from the factory boot path**, not initialized
 by this Ethernet node. The board PM bridge saves and restores those timings.
 For non-wake Ethernet, suspend closes the interface and drains its IRQ/NAPI
 work; resume pulses the known controller reset and reopens the interface.
+If reopening fails after the controller is ready, the interface remains
+attached but down so userspace can retry; the driver reports the error.
 The normal network manager reacquires DHCP. Wake-on-LAN is not
 enabled; only the power switch wakes this board.
 
@@ -74,6 +76,8 @@ The LAN9220 identity and register byte ordering have been verified. Ethernet
 has provided network access and maintenance SSH on the NAND system, including
 a session maintained while USB was disconnected. Performance, broad PHY/link
 interoperability and extended suspend-cycle reliability are not qualified.
+The failed-open retry path is covered by native fault-injection tests;
+the revised resume path still requires on-device qualification.
 
 Upstream references:
 [Linux binding](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/Documentation/devicetree/bindings/net/smsc,lan9115.yaml?h=linux-6.12.y),

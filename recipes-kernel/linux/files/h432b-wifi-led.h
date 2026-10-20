@@ -7,7 +7,32 @@ struct h432b_wifi_led {
 	struct sdio_func *func;
 	struct h432b_wifi_sample *owner;
 	unsigned int pin;
+	enum led_brightness requested;
+	bool configured;
 };
+
+/* Caller holds the owner mutex and SDIO host. */
+static int wifi_led_write(struct h432b_wifi_led *led,
+			  enum led_brightness brightness)
+{
+	unsigned int shift = led->pin * 4;
+	u8 before, value, after;
+	int error = 0;
+
+	before = wifi_read(led->func, 1, WIFI_LED_CFG, &error);
+	if (error)
+		return error;
+	/* Software drive is active-low. Preserve the other LED's whole nibble. */
+	value = (before & ~(0xf << shift)) |
+		(brightness == LED_OFF ? 0x8 << shift : 0);
+	wifi_write(led->func, 1, WIFI_LED_CFG, value, &error);
+	if (error)
+		return error;
+	after = wifi_read(led->func, 1, WIFI_LED_CFG, &error);
+	if (!error && after != value)
+		error = -EIO;
+	return error;
+}
 
 static int wifi_led_set(struct led_classdev *cdev,
 			enum led_brightness brightness)
@@ -15,40 +40,45 @@ static int wifi_led_set(struct led_classdev *cdev,
 	struct h432b_wifi_led *led =
 		container_of(cdev, struct h432b_wifi_led, cdev);
 	struct h432b_wifi_sample *owner = led->owner;
-	unsigned int shift = led->pin * 4;
-	u8 before, value, after;
 	int error = 0;
 
 	mutex_lock(&owner->lock);
+	led->requested = brightness;
+	led->configured = true;
+	/* Cache requests while SDIO is unavailable, including LED-core PM calls. */
 	if (!owner->net || !netif_running(owner->net->dev) ||
 	    READ_ONCE(owner->net->stopping) ||
-	    READ_ONCE(owner->net->faulted)) {
-		/* Unregister requests OFF even after ndo_stop disabled SDIO.
-		 * Removal powers down the radio; do not access a disabled function.
-		 * Ordinary userspace requests still report unavailable hardware.
-		 */
-		error = brightness == LED_OFF &&
-			(cdev->flags & LED_UNREGISTERING) ? 0 : -ENETDOWN;
+	    READ_ONCE(owner->net->faulted) || owner->radio_off)
 		goto unlock;
-	}
 	sdio_claim_host(led->func);
-	before = wifi_read(led->func, 1, WIFI_LED_CFG, &error);
-	if (error)
-		goto release;
-	/* Software drive is active-low. Preserve the other LED's whole nibble. */
-	value = (before & ~(0xf << shift)) |
-		(brightness == LED_OFF ? 0x8 << shift : 0);
-	wifi_write(led->func, 1, WIFI_LED_CFG, value, &error);
-	if (error)
-		goto release;
-	after = wifi_read(led->func, 1, WIFI_LED_CFG, &error);
-	if (!error && after != value)
-		error = -EIO;
-release:
+	error = wifi_led_write(led, brightness);
 	sdio_release_host(led->func);
 unlock:
 	mutex_unlock(&owner->lock);
 	return error;
+}
+
+/*
+ * Replay only explicitly configured outputs after the radio is initialized.
+ * Caller holds the owner mutex and SDIO host; LED callbacks cannot race us.
+ */
+static int wifi_led_restore(struct h432b_wifi_sample *owner)
+{
+	unsigned int i;
+	int error;
+
+	if (!owner->leds)
+		return 0;
+	for (i = 0; i < 2; i++) {
+		struct h432b_wifi_led *led = &owner->leds[i];
+
+		if (!led->configured)
+			continue;
+		error = wifi_led_write(led, led->requested);
+		if (error)
+			return error;
+	}
+	return 0;
 }
 
 static void wifi_led_unregister(struct h432b_wifi_sample *owner)
@@ -59,8 +89,10 @@ static void wifi_led_unregister(struct h432b_wifi_sample *owner)
 		return;
 	for (i = 0; i < 2; i++)
 		led_classdev_unregister(&owner->leds[i].cdev);
+	mutex_lock(&owner->lock);
 	kfree(owner->leds);
 	owner->leds = NULL;
+	mutex_unlock(&owner->lock);
 }
 
 static void wifi_led_register(struct sdio_func *func,
@@ -86,7 +118,9 @@ static void wifi_led_register(struct sdio_func *func,
 		if (error)
 			goto failed;
 	}
+	mutex_lock(&owner->lock);
 	owner->leds = leds;
+	mutex_unlock(&owner->lock);
 	return;
 failed:
 	while (i--)

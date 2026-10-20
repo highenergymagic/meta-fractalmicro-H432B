@@ -46,6 +46,7 @@ struct h432b_wifi_sample {
 static void wifi_net_irq_notify(struct h432b_wifi_net *net);
 static int wifi_runtime_restart(struct h432b_wifi_net *net);
 static int wifi_runtime_shutdown(struct sdio_func *func);
+static int wifi_led_restore(struct h432b_wifi_sample *owner);
 
 static void h432b_wifi_irq(struct sdio_func *func)
 {

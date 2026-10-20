@@ -95,6 +95,9 @@ static int sdio_set_block_size(struct sdio_func *func, unsigned int size) {
  if (!error) func->cur_blksize = size;
  return error;
 }
+static int wifi_led_restore(struct owner *owner) {
+ assert(owner->lock && enabled && !irq); return io();
+}
 static void h432b_wifi_irq(struct sdio_func *func) { (void)func; }
 static int sdio_claim_irq(struct sdio_func *func, void (*handler)(struct sdio_func *)) {
  (void)func; assert(handler == h432b_wifi_irq); irq = 1; return io();
@@ -118,7 +121,7 @@ int main(void) {
  struct owner owner = {0};
  struct h432b_wifi_net net;
  struct net_device dev = { &net };
- for (fail_at = 0; fail_at <= 5; fail_at++) {
+ for (fail_at = 0; fail_at <= 6; fail_at++) {
   memset(&net, 0, sizeof(net)); memset(&owner, 0, sizeof(owner));
   net.owner = &owner; net.func = &func; net.stopping = true;
   func.cur_blksize = 64; calls = enabled = irq = queued = 0;

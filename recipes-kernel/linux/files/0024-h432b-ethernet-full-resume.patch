@@ -39,7 +39,7 @@ Other boards and wake-enabled configurations retain the existing path.
 +	int ret;
 +
 +	pm_runtime_enable(dev);
-@@ -2659,4 +2671,24 @@
+@@ -2659,4 +2671,23 @@
 -	if (to == 0)
 -		return -EIO;
 -
@@ -58,8 +58,7 @@ Other boards and wake-enabled configurations retain the existing path.
 +		rtnl_lock();
 +		netif_device_attach(ndev);
 +		ret = dev_open(ndev, NULL);
-+		if (ret)
-+			netif_device_detach(ndev);
++		/* Leave a failed open attached but down so userspace can retry. */
 +		rtnl_unlock();
 +		pdata->h432b_reopen = false;
 +		if (ret)

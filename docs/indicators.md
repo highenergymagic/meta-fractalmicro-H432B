@@ -29,9 +29,11 @@ in the kernel log. A successful sysfs write or cached brightness value alone
 is not an optical confirmation.
 
 The LED core requests off during suspend and restores requested brightness
-on resume. The interface rejects hardware access while the network is down
-or faulted. Registration does not establish a new initial hardware state;
-set an explicit brightness when taking software ownership.
+on resume. While the network is down, faulted or powered off, requests are
+cached without SDIO access and replayed when the interface starts. Real
+register-access failures still propagate to the caller. Registration does
+not establish a new initial hardware state; set an explicit brightness
+when taking software ownership.
 
 ## Implementation
 
@@ -44,4 +46,6 @@ with the factory Wi-Fi driver and the GPL Realtek source used by the
 
 Register-access qualification does not establish visible colour, position,
 brightness, or suspend/resume behaviour. Those require separate hardware
-checks. Bluetooth, GPS and power indicator control remains unqualified.
+checks. Offline-request caching and replay have native register/error-path
+test coverage but are not yet hardware-qualified. Bluetooth, GPS and power
+indicator control remains unqualified.

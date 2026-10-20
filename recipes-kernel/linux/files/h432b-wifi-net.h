@@ -82,10 +82,10 @@ static bool wifi_net_recoverable(int error)
 static void wifi_net_fault(struct h432b_wifi_net *net, int error)
 {
 	dev_warn_ratelimited(&net->func->dev,
-		"command stream fault: %d (command=%u, events=%u, irq=%#x, consumed=%u)\n",
-		error, net->owner->command.next_command,
-		net->owner->command.events, net->owner->command.irq_status,
-		net->owner->command.consumed);
+			     "command stream fault: %d (command=%u, events=%u, irq=%#x, consumed=%u)\n",
+			     error, net->owner->command.next_command,
+			     net->owner->command.events, net->owner->command.irq_status,
+			     net->owner->command.consumed);
 	WRITE_ONCE(net->faulted, true);
 	net->last_error = error;
 	wifi_net_link_down(net, WLAN_REASON_UNSPECIFIED, true);
@@ -476,6 +476,9 @@ static int wifi_net_start(struct net_device *dev)
 		net->enabled_func = true;
 	}
 	error = sdio_set_block_size(net->func, 512);
+	if (error)
+		goto release;
+	error = wifi_led_restore(net->owner);
 	if (error)
 		goto release;
 	error = sdio_claim_irq(net->func, h432b_wifi_irq);

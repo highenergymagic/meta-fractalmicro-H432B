@@ -14,32 +14,34 @@ upstream suspend path and is not used for this protocol.
 
 The loader clears known requests and verifies the clear before selecting a
 boot path. A failed clear stays in USB maintenance. A fastboot request skips
-NAND initialization and enters the maintenance loop. It does not enable
-fastboot flash or erase.
+normal slot boot and enters the maintenance loop. Available operations
+depend on the installed loader; the [modern loader](modern-uboot.md#fastboot-interface)
+supports validated inactive-slot image updates.
 
 Linux uses the upstream syscon-reboot-mode driver. The userspace interface is
 `systemctl reboot --reboot-argument=bootloader` (or `fastboot`), not an
 arbitrary userspace register writer. The nonzero normal value matters because
 the pinned Linux notifier does not invoke its writer for zero magic.
 
-The shared definitions live in `linux-h432b-platform.inc` and
-`u-boot-h432b-boot-mode.inc`. There is no separate legacy reboot-test kernel
-or loader target.
+The Linux binding lives in `linux-h432b-platform.inc`. Modern and legacy
+loaders consume the shared `files/reboot/bootmode.h` protocol definitions.
+There is no separate legacy reboot-test kernel or loader target.
 
 ## Boot chains
 
-The normal deployment uses `u-boot-h432b-ab-chain`: a factory-compatible
-carrier containing the persistent A/B selector. It consumes the one-shot
+The normal deployment uses `u-boot-h432b-modern-nand`: a factory-compatible
+U-Boot 2026.10 carrier with the persistent A/B selector. It consumes the one-shot
 request before normal slot selection. Without a maintenance request, it
 selects an eligible kernel and matching systembase using redundant UBI boot
 state. Invalid or exhausted state also leads to USB maintenance.
 
+`u-boot-h432b-ab-chain` is the legacy two-stage A/B migration carrier.
 The optional `u-boot-h432b-maintenance-chain` is the legacy fixed-B carrier.
 It ignores A/B selection and requires a verified `kernel_b` with matching
 `systembase_b`. Neither carrier provisions storage. See the
 [boot contract](boot-contract.md) for artifact roles and update ordering.
 
-Both retain the factory first-stage loader and EBOOT. Normal autoboot does
+These carriers retain the factory first-stage loader and EBOOT. Normal autoboot does
 not offer a timed fastboot window: USB enumeration alone is not command
 readiness.
 
