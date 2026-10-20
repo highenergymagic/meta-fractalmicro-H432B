@@ -66,3 +66,5 @@ do_configure:append() {
     fi
     grep -qx "CONFIG_RTL8712S=${H432B_WIFI_DRIVER_MODE}" ${B}/.config || bbfatal "Wrong final RTL8712S mode"
 }
+
+require h432b-cpufreq.inc

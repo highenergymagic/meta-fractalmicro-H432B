@@ -1,0 +1,50 @@
+From: Fractal Microsystems <bsp@fractalmicro.org>
+Subject: [PATCH] cpufreq: add fixed-supply fixed-bus S5PV210 configuration
+
+Provide a mutually exclusive divider-only CPUFreq driver. ARM clock rates
+must be recalculated after direct divider transitions, as for the existing
+S5PV210 driver; the MSYS bus rate remains fixed.
+
+Upstream-Status: Inappropriate [BSP fixed-supply qualification path]
+Signed-off-by: Fractal Microsystems <bsp@fractalmicro.org>
+---
+diff --git a/drivers/cpufreq/Kconfig.arm b/drivers/cpufreq/Kconfig.arm
+--- a/drivers/cpufreq/Kconfig.arm
++++ b/drivers/cpufreq/Kconfig.arm
+@@ -178,9 +178,21 @@
+ 
+ 	  If in doubt, say N.
+ 
++config ARM_S5PV210_FIXED_CPUFREQ
++	bool "Samsung S5PV210 fixed-supply frequency scaling"
++	depends on CPU_S5PV210
++	help
++	  Scale ARM between 800 and 400 MHz while keeping the existing
++	  supply voltage, APLL and 200 MHz MSYS bus unchanged. Firmware
++	  must supply a valid 800 MHz operating point. This excludes the
++	  full voltage/DRAM-scaling driver.
++
++	  If in doubt, say N.
++
+ config ARM_S5PV210_CPUFREQ
+ 	bool "Samsung S5PV210 and S5PC110"
++	depends on !ARM_S5PV210_FIXED_CPUFREQ
+ 	depends on CPU_S5PV210 || COMPILE_TEST
+ 	default CPU_S5PV210
+ 	help
+ 	  This adds the CPUFreq driver for Samsung S5PV210 and
+diff --git a/drivers/cpufreq/Makefile b/drivers/cpufreq/Makefile
+--- a/drivers/cpufreq/Makefile
++++ b/drivers/cpufreq/Makefile
+@@ -1,3 +1,4 @@
+ # SPDX-License-Identifier: GPL-2.0
++obj-$(CONFIG_ARM_S5PV210_FIXED_CPUFREQ) += s5pv210-fixed-cpufreq.o
+ # CPUfreq core
+ obj-$(CONFIG_CPU_FREQ)			+= cpufreq.o freq_table.o
+diff --git a/drivers/clk/samsung/clk-s5pv210.c b/drivers/clk/samsung/clk-s5pv210.c
+--- a/drivers/clk/samsung/clk-s5pv210.c
++++ b/drivers/clk/samsung/clk-s5pv210.c
+@@ -481,1 +481,2 @@
+-	DIV(DOUT_APLL, "dout_apll", "mout_msys", CLK_DIV0, 0, 3),
++	DIV_F(DOUT_APLL, "dout_apll", "mout_msys", CLK_DIV0, 0, 3,
++	      CLK_GET_RATE_NOCACHE, 0),

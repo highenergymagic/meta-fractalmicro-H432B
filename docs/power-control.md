@@ -120,7 +120,7 @@ pointer, not a register value; there is no address scan or voltage change.
 The normal runtime and `linux-h432b-power-test` share the bus description.
 The diagnostic image uses the installed slot-B root with read-only storage.
 
-CPU frequency is 800 MHz. Factory menu clock profiles do not establish a
+The default CPU frequency is 800 MHz. Factory menu clock profiles do not establish a
 qualified Linux DVFS sequence. A voltage-aware implementation must coordinate
 regulators, PLLs, dividers and DRAM refresh. Readback of programmed slots is
 not measurement of the active voltage.
@@ -140,12 +140,77 @@ candidate sleep-power work, not measured savings or a qualified consumer map.
 Establish each output's board consumers and restore ordering before enabling
 regulator suspend control. Do not substitute the MAX8998 register map.
 
-CPUFreq and CPUIdle frameworks are disabled in the qualified runtime config.
-The ARM idle fallback nevertheless executes WFI; this is not a busy-loop idle.
-Deeper idle-state support and voltage-aware frequency scaling are separate
-integration tasks. The pinned S5PV210 CPUFreq implementation requires real
+CPUIdle remains disabled; the ARM idle fallback executes WFI rather than
+busy-looping. Deeper idle states and voltage-aware frequency scaling are
+separate integration tasks. The upstream S5PV210 CPUFreq implementation requires real
 `vddarm`/`vddint` regulators and updates DRAM refresh with clock transitions;
 enabling a governor alone does not supply that hardware contract.
+
+### Clock-transition prerequisites
+
+The observed board configuration is not the reference driver's uniform mobile
+DRAM configuration. DMC0 `MEMCONTROL` is `0x00202100` (LPDDR type field), while
+DMC1 is `0x00202412` (DDR2 type field). The pinned CPUFreq driver checks the
+type of DMC0 only, but can alter refresh counters for both controllers.
+Passing that check alone does not qualify its transitions on H432B.
+
+The observed boot state has APLL at 800 MHz, `CLK_DIV0=0x14131330` and the
+main-system bus at 200 MHz. The reference 400 MHz divider settings preserve
+that bus rate. Its 200 MHz entry and accompanying bus-rate comment disagree
+under the pinned clock-provider model; 100 MHz changes bus clocks, and 1 GHz
+requires a PLL transition. None of these operating-point changes has been
+qualified by the upstream driver's presence alone. The fixed-bus driver
+isolates 800/400 MHz from voltage and memory-bus changes.
+
+The pinned kernel has no MAX8698 regulator implementation. An older Samsung
+[MAX8698 driver](https://github.com/CyanogenMod/android_kernel_samsung_smdk4412/blob/7f0b2fbac08158a192322fcb6183593071387a71/drivers/regulator/max8698.c)
+provides a GPL-licensed register/selector reference, not a drop-in driver for
+the current regulator and GPIO APIs. Its probe changes DVS slots and GPIO
+levels; those defaults must not be imported without adapting them to the
+board's established boot state.
+
+`h432b-clock-inventory` is an optional, explicitly invoked diagnostic target.
+Running `h432b-clock-inventory --read` reads only the fixed clock, DMC and
+selector-GPIO words and verifies the board compatible first. It neither
+requests a frequency nor writes a register. Pair its output with
+`h432b-power-inventory --dvs`; register values alone are not measured voltages.
+
+### Fixed-supply CPU frequency control
+
+The runtime builds `s5pv210-fixed`, a CPUFreq driver exposing 400 and 800 MHz.
+It changes the ARM and HCLK_MSYS dividers together, retaining a 200 MHz
+main-system bus. APLL, PMIC settings and DRAM refresh registers are untouched.
+It requires the firmware's 800 MHz configuration and checks the clock source,
+divider and ARM memory-controller settings before allowing transitions.
+
+The default governor is `performance`: installing the driver does not enable
+automatic downclocking. `userspace` and `ondemand` are available for
+qualification. Read and select frequencies through the standard interface:
+
+```sh
+policy=/sys/devices/system/cpu/cpufreq/policy0
+cat "$policy/scaling_available_frequencies"
+echo userspace > "$policy/scaling_governor"
+echo 400000 > "$policy/scaling_setspeed"
+cat "$policy/cpuinfo_cur_freq"
+echo performance > "$policy/scaling_governor"
+```
+
+The driver restores 800 MHz before suspend, reboot or shutdown, regardless of
+the userspace maximum-frequency limit. Resume validates the restored clock
+configuration before allowing governor requests again. Polling is bounded;
+transition failures attempt rollback and disable further changes.
+
+Hardware checks cover 202 frequency transitions, test-data integrity,
+speech and braille at 400 MHz, and deep suspend/resume with the userspace
+maximum capped at 400 MHz. Automatic scaling with a 50 ms sampling interval
+returns to 800 MHz under load and spends most of a quiet interval at 400 MHz.
+These checks do not establish long-duration stability or battery-life gains.
+
+A short battery-only comparison did not resolve an idle-power reduction
+against the surrounding fixed-frequency measurements. Idle already uses WFI,
+and the supply voltage remains unchanged. The default remains `performance`.
+Do not enable lower voltages or additional frequency points using this driver.
 
 ### Measuring consumption
 

@@ -119,7 +119,11 @@ class SuspendRuntime(unittest.TestCase):
     def test_runtime_merge_is_last(self):
         recipe = (ROOT / "recipes-kernel/linux/linux-h432b-runtime_6.12.111.bb").read_text()
         includes = [line for line in recipe.splitlines() if line.startswith("require ")]
-        self.assertEqual(includes[-1], "require h432b-suspend.inc")
+        self.assertEqual(includes[-2:], ["require h432b-suspend.inc",
+                                        "require h432b-cpufreq.inc"])
+        frequency_config = (FILES / "h432b-cpufreq.config").read_text()
+        self.assertNotIn("CONFIG_PM", frequency_config)
+        self.assertNotIn("CONFIG_SUSPEND", frequency_config)
         self.assertIn("${UNPACKDIR}/h432b-runtime.config", recipe)
         include = (ROOT / "recipes-kernel/linux/h432b-suspend.inc").read_text()
         self.assertIn("u2-resume-test.config", include)
